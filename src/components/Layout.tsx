@@ -9,7 +9,7 @@ interface LayoutProps {
   onNavigate: (p: Page) => void
   onRoleChange: (r: Role) => void
   onLogout: () => void
-  onSelectStaff?: (id: string) => void
+  onSelectStaff?: (id: string | null) => void
   onSelectPayslip?: (id: string) => void
   children: React.ReactNode
 }
@@ -698,7 +698,12 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                   return (
                     <button
                       key={item.page}
-                      onClick={() => onNavigate(item.page)}
+                      onClick={() => {
+                        if (item.page === 'hr-add-staff') {
+                          onSelectStaff?.(null)
+                        }
+                        onNavigate(item.page)
+                      }}
                       title={collapsed ? item.label : undefined}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 mx-1 text-sm font-medium transition-all duration-150 rounded-lg ${
                         active

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { logAction } from '../../lib/auditLog'
-import { appRoleToDb } from '../../lib/roleMap'
+import { appRoleToDb, dbRoleToApp } from '../../lib/roleMap'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import type { Page, StaffStatus, Role } from '../../types'
 import SalaryStructure from '../../pages/superadmin/SalaryStructure'
@@ -9,6 +9,7 @@ import SalaryStructure from '../../pages/superadmin/SalaryStructure'
 interface Props {
   staffId: string | null
   onNavigate: (p: Page) => void
+  onSelectStaff?: (id: string | null) => void
 }
 
 type ProfileTab = 'overview' | 'payroll' | 'documents' | 'history'
@@ -21,7 +22,7 @@ const statusColors: Record<StaffStatus, string> = {
 
 const fmt = (n: number) => `₦${n.toLocaleString()}`
 
-export default function StaffProfile({ staffId, onNavigate }: Props) {
+export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Props) {
   const [staff, setStaff] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showGrantAccessModal, setShowGrantAccessModal] = useState(false)
@@ -39,6 +40,18 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
   const [grantAccessError, setGrantAccessError] = useState('')
   const [grantAccessSuccess, setGrantAccessSuccess] = useState(false)
   const [tempPassword, setTempPassword] = useState('')
+
+  // Staff self-edit modal states
+  const [showSelfEditModal, setShowSelfEditModal] = useState(false)
+  const [selfEditForm, setSelfEditForm] = useState({
+    phone: '',
+    address: '',
+    nextOfKin: '',
+    nextOfKinPhone: '',
+  })
+  const [selfEditSaving, setSelfEditSaving] = useState(false)
+  const [selfEditError, setSelfEditError] = useState('')
+  const [selfEditSuccess, setSelfEditSuccess] = useState(false)
 
   const s = staff
 
@@ -105,20 +118,20 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
 
   useEffect(() => {
     const fetchActivity = async () => {
-      // Guard: only run if staffId is a valid UUID (not undefined/null/empty)
-      if (!staffId || typeof staffId !== 'string' || staffId === 'undefined' || staffId === 'null') {
-        return
-      }
+      // Guard: need a valid UUID AND the staff record to be loaded (so profile_id is available)
+      if (!staffId || typeof staffId !== 'string' || staffId === 'undefined' || staffId === 'null') return
+      if (!s) return // wait until staff is loaded before querying
 
       setActivityLoading(true)
       setActivityError('')
       try {
-        // Build OR clause conditionally - only include actor_id filter if profile_id exists
+        // Include id so the key={a.id} in the JSX works
         let query = supabase
           .from('audit_log')
-          .select('entity, entity_id, action, actor_name, details, created_at')
+          .select('id, entity, entity_id, action, actor_name, details, created_at')
 
-        if (s?.profile_id) {
+        if (s.profile_id) {
+          // Show entries where this staff is the subject (entity_id) OR the actor (actor_id)
           query = query.or(`entity_id.eq.${staffId},actor_id.eq.${s.profile_id}`)
         } else {
           query = query.eq('entity_id', staffId)
@@ -126,7 +139,10 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
 
         const result = await query.order('created_at', { ascending: false })
 
-        if (result.error) throw result.error
+        if (result.error) {
+          console.error('[StaffProfile Activity] Supabase error:', result.error)
+          throw result.error
+        }
         setActivity(result.data || [])
       } catch (err) {
         console.log('[StaffProfile Activity] FULL error object:', err)
@@ -137,7 +153,7 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
     }
 
     fetchActivity()
-  }, [staffId, s?.profile_id])
+  }, [staffId, s])
 
   useEffect(() => {
     const fetchCurrentUserRole = async () => {
@@ -152,7 +168,7 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
           .single()
 
         if (profile) {
-          setCurrentUserRole(profile.role as Role)
+          setCurrentUserRole(dbRoleToApp(profile.role))
         }
       } catch (err) {
         console.error('Error fetching current user role:', err)
@@ -161,6 +177,75 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
 
     fetchCurrentUserRole()
   }, [])
+
+  const handleEditProfile = () => {
+    if (currentUserRole === 'staff') {
+      setSelfEditForm({
+        phone: s?.phone || '',
+        address: s?.address || '',
+        nextOfKin: s?.next_of_kin || '',
+        nextOfKinPhone: s?.next_of_kin_phone || '',
+      })
+      setSelfEditError('')
+      setSelfEditSuccess(false)
+      setShowSelfEditModal(true)
+    } else {
+      if (s?.id) {
+        onSelectStaff?.(s.id)
+      }
+      onNavigate('hr-add-staff')
+    }
+  }
+
+  const handleSaveSelfEdit = async () => {
+    if (!s?.id) return
+    setSelfEditSaving(true)
+    setSelfEditError('')
+    setSelfEditSuccess(false)
+    try {
+      // UPDATE only the 4 self-editable fields — no profiles join on return
+      const { error } = await supabase
+        .from('staff')
+        .update({
+          phone: selfEditForm.phone || null,
+          address: selfEditForm.address || null,
+          next_of_kin: selfEditForm.nextOfKin || null,
+          next_of_kin_phone: selfEditForm.nextOfKinPhone || null,
+        })
+        .eq('id', s.id)
+
+      if (error) {
+        console.error('[StaffProfile self-edit] Supabase error:', error)
+        throw new Error(`${error.message} (code: ${error.code})`)
+      }
+
+      // Optimistically update local state rather than re-fetching with a join
+      setStaff((prev: any) => prev ? {
+        ...prev,
+        phone: selfEditForm.phone || null,
+        address: selfEditForm.address || null,
+        next_of_kin: selfEditForm.nextOfKin || null,
+        next_of_kin_phone: selfEditForm.nextOfKinPhone || null,
+      } : prev)
+
+      await logAction({
+        action: 'UPDATE',
+        entity: 'Staff',
+        entityId: s.id,
+        details: `${s.full_name} updated self profile details`,
+      })
+
+      setSelfEditSuccess(true)
+      setTimeout(() => {
+        setShowSelfEditModal(false)
+        setSelfEditSuccess(false)
+      }, 1200)
+    } catch (err) {
+      setSelfEditError(err instanceof Error ? err.message : 'Failed to update profile')
+    } finally {
+      setSelfEditSaving(false)
+    }
+  }
 
   const tabs: { id: ProfileTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
@@ -291,7 +376,7 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
       await logAction({
         action: 'DELETE',
         entity: 'StaffDocument',
-        entityId: staffId,
+        entityId: staffId || s?.id || '',
         details: `Deleted document "${doc.file_name}" for ${s?.full_name}`,
       })
     } catch (err) {
@@ -454,7 +539,7 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
                   </button>
                 )}
                 <button
-                  onClick={() => onNavigate('hr-add-staff')}
+                  onClick={handleEditProfile}
                   className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Edit Profile
@@ -574,7 +659,7 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
 
       {/* Payroll Info */}
       {tab === 'payroll' && (
-        <SalaryStructure staffId={staffId} />
+        <SalaryStructure staffId={staffId || s?.id || null} />
       )}
 
       {/* Documents */}
@@ -780,7 +865,7 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
                   <div className="text-sm text-slate-700 font-mono">{s.email}</div>
                 </div>
 
-                {currentUserRole === 'super_admin' && (
+                {currentUserRole === 'superadmin' && (
                   <div className="mb-4">
                     <label className="text-xs text-slate-500 font-medium mb-2 block">Role</label>
                     <select
@@ -827,6 +912,120 @@ export default function StaffProfile({ staffId, onNavigate }: Props) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Staff Self-Edit Modal */}
+      {showSelfEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg p-6 max-w-lg w-full mx-4 anim-fade-up">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="font-display font-semibold text-slate-800 text-lg">Edit Personal Information</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Update your personal contact and next of kin details</p>
+              </div>
+              <button
+                onClick={() => setShowSelfEditModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+              <svg className="w-4 h-4 text-amber-600 flex-none mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <div>
+                <strong>Notice:</strong> Job title, department, salary, and employment status are managed exclusively by HR and cannot be modified here.
+              </div>
+            </div>
+
+            {selfEditError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-xs mb-4">
+                {selfEditError}
+              </div>
+            )}
+
+            {selfEditSuccess && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-3 rounded-lg text-xs mb-4 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Profile details updated successfully!
+              </div>
+            )}
+
+            <div className="space-y-4 text-left mb-6">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Phone Number</label>
+                <input
+                  type="text"
+                  value={selfEditForm.phone}
+                  onChange={e => setSelfEditForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="+234 800 000 0000"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Home Address</label>
+                <input
+                  type="text"
+                  value={selfEditForm.address}
+                  onChange={e => setSelfEditForm(prev => ({ ...prev, address: e.target.value }))}
+                  placeholder="e.g. 14 Example Street, Ikeja, Lagos"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Next of Kin Details</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Next of Kin Full Name</label>
+                    <input
+                      type="text"
+                      value={selfEditForm.nextOfKin}
+                      onChange={e => setSelfEditForm(prev => ({ ...prev, nextOfKin: e.target.value }))}
+                      placeholder="Full name"
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Next of Kin Phone</label>
+                    <input
+                      type="text"
+                      value={selfEditForm.nextOfKinPhone}
+                      onChange={e => setSelfEditForm(prev => ({ ...prev, nextOfKinPhone: e.target.value }))}
+                      placeholder="+234 800 000 0000"
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setShowSelfEditModal(false)}
+                disabled={selfEditSaving}
+                className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSelfEdit}
+                disabled={selfEditSaving}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {selfEditSaving ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

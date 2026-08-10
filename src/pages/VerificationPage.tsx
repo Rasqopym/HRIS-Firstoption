@@ -45,10 +45,11 @@ export default function VerificationPage() {
           return
         }
 
-        // Query staff table with verification code + profiles photo + departments (matching StaffProfile.tsx pattern)
+        // Query the staff_verification_public view — pre-flattened, no profiles join needed.
+        // The view merges profiles.photo_url + staff.photo_url server-side and is safe for anon.
         const { data, error } = await supabase
-          .from('staff')
-          .select('*, departments(name), profiles(photo_url)')
+          .from('staff_verification_public')
+          .select('*')
           .eq('id_verification_code', code)
           .single()
 
@@ -58,29 +59,7 @@ export default function VerificationPage() {
           return
         }
 
-        // Department name resolution (matching StaffProfile.tsx and PayslipV2.tsx)
-        const deptObj = (data as any)?.departments
-        let deptName = deptObj?.name || (Array.isArray(deptObj) ? deptObj[0]?.name : null)
-        
-        if (!deptName && data.department_id) {
-          const { data: deptData } = await supabase
-            .from('departments')
-            .select('name')
-            .eq('id', data.department_id)
-            .single()
-          if (deptData?.name) {
-            deptName = deptData.name
-          }
-        }
-        
-        if (!deptName) {
-          deptName = 'Unassigned'
-        }
-
-        // Photo URL resolution (prioritize profiles.photo_url over staff.photo_url)
-        const profilePhoto = Array.isArray(data.profiles) ? (data.profiles as any)[0]?.photo_url : (data.profiles as any)?.photo_url
-        const finalPhoto = profilePhoto || data.photo_url || ''
-
+        // View already provides department_name and photo_url directly — no join resolution needed.
         // Check if card is expired
         const expiresAt = data.id_card_expires_at ? new Date(data.id_card_expires_at) : null
         const isExpired = expiresAt ? expiresAt < new Date() : false
@@ -88,8 +67,8 @@ export default function VerificationPage() {
         setStaff({
           full_name: data.full_name,
           job_title: data.job_title,
-          department_name: deptName,
-          photo_url: finalPhoto,
+          department_name: data.department_name || 'Unassigned',
+          photo_url: data.photo_url || '',
           status: data.status,
           staff_code: data.staff_code,
           id_card_expires_at: data.id_card_expires_at,
@@ -168,7 +147,7 @@ export default function VerificationPage() {
           ) : (
             <span className="flex items-center justify-center gap-2">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
-              <span>Valid Firstoption Staff</span>
+              <span>Valid {companyName} Staff</span>
             </span>
           )}
         </div>

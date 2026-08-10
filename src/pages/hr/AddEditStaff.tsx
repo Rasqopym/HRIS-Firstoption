@@ -135,27 +135,32 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
 
       if (isEditMode && staffId) {
         // UPDATE existing staff
+        const updatePayload = {
+          full_name: fullName,
+          email: personal.email,
+          phone: personal.phone,
+          dob: personal.dob || null,
+          gender: personal.gender,
+          address: personal.address || null,
+          state: personal.state || null,
+          next_of_kin: personal.nextOfKin || null,
+          next_of_kin_phone: personal.nextOfKinPhone || null,
+          department_id: employment.department,
+          job_title: employment.jobTitle,
+          date_employed: employment.employmentDate || null,
+          employment_type: employment.employmentType,
+          gross_salary: financial.grossSalary ? Number(financial.grossSalary) : null,
+          bank_name: financial.bankName || null,
+          account_number: financial.accountNumber || null,
+          account_name: financial.accountName || null,
+        }
+
+        console.log('[AddEditStaff UPDATE] Payload being sent:', updatePayload)
+        console.log('[AddEditStaff UPDATE] department_id value:', employment.department)
+
         const result = await supabase
           .from('staff')
-          .update({
-            full_name: fullName,
-            email: personal.email,
-            phone: personal.phone,
-            dob: personal.dob || null,
-            gender: personal.gender,
-            address: personal.address || null,
-            state: personal.state || null,
-            next_of_kin: personal.nextOfKin || null,
-            next_of_kin_phone: personal.nextOfKinPhone || null,
-            department_id: employment.department,
-            job_title: employment.jobTitle,
-            date_employed: employment.employmentDate || null,
-            employment_type: employment.employmentType,
-            gross_salary: financial.grossSalary ? Number(financial.grossSalary) : null,
-            bank_name: financial.bankName || null,
-            account_number: financial.accountNumber || null,
-            account_name: financial.accountName || null,
-          })
+          .update(updatePayload)
           .eq('id', staffId)
           .select('id, staff_code')
           .single()

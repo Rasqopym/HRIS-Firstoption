@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 import type { Page } from '../../types'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 
-interface Props { onNavigate: (p: Page) => void }
+interface Props { onNavigate: (p: Page) => void; onSelectStaff?: (id: string | null) => void }
 
 interface StaffMember {
   id: string
@@ -17,7 +17,7 @@ interface StaffMember {
   id_card_expires_at: string | null
 }
 
-export default function HRDashboard({ onNavigate }: Props) {
+export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -202,7 +202,7 @@ export default function HRDashboard({ onNavigate }: Props) {
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                 <h3 className="font-display font-semibold text-slate-800 text-base">Recently Added Staff</h3>
               </div>
-              <button onClick={() => onNavigate('hr-add-staff')} className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline">Add Staff</button>
+              <button onClick={() => { onSelectStaff?.(null); onNavigate('hr-add-staff') }} className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline">Add Staff</button>
             </div>
             <div className="space-y-3">
               {recent.map(s => (
