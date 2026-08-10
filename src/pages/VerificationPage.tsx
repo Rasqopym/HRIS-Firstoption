@@ -45,20 +45,10 @@ export default function VerificationPage() {
           return
         }
 
-        // Query staff table with verification code + profiles photo + departments
+        // Query staff table with verification code + profiles photo + departments (matching StaffProfile.tsx pattern)
         const { data, error } = await supabase
           .from('staff')
-          .select(`
-            full_name,
-            job_title,
-            department_id,
-            departments (name),
-            photo_url,
-            profiles (photo_url),
-            status,
-            staff_code,
-            id_card_expires_at
-          `)
+          .select('*, departments(name), profiles(photo_url)')
           .eq('id_verification_code', code)
           .single()
 
@@ -68,22 +58,24 @@ export default function VerificationPage() {
           return
         }
 
-        // Department name resolution
-        let deptName = ''
-        if (data.departments) {
-          deptName = Array.isArray(data.departments) ? (data.departments as any)[0]?.name : (data.departments as any)?.name
-        }
-        if (!deptName || deptName === 'Unknown') {
-          if (data.department_id) {
-            const { data: deptData } = await supabase
-              .from('departments')
-              .select('name')
-              .eq('id', data.department_id)
-              .single()
-            if (deptData?.name) deptName = deptData.name
+        // Department name resolution (matching StaffProfile.tsx and PayslipV2.tsx)
+        const deptObj = (data as any)?.departments
+        let deptName = deptObj?.name || (Array.isArray(deptObj) ? deptObj[0]?.name : null)
+        
+        if (!deptName && data.department_id) {
+          const { data: deptData } = await supabase
+            .from('departments')
+            .select('name')
+            .eq('id', data.department_id)
+            .single()
+          if (deptData?.name) {
+            deptName = deptData.name
           }
         }
-        if (!deptName) deptName = 'General'
+        
+        if (!deptName) {
+          deptName = 'Unassigned'
+        }
 
         // Photo URL resolution (prioritize profiles.photo_url over staff.photo_url)
         const profilePhoto = Array.isArray(data.profiles) ? (data.profiles as any)[0]?.photo_url : (data.profiles as any)?.photo_url
