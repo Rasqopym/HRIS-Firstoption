@@ -1,5 +1,6 @@
 {
-  "description": "This web application streamlines document management by allowing users to upload, organize, and share files efficiently, enhancing collaboration and productivity.",
+  "title": "HRIS Firstoption",
+  "description": "This web application streamlines HR management, payroll, staff records, and leave management.",
   "robots": {
     "index": false
   },
