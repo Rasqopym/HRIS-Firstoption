@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 
 interface StaffVerification {
   full_name: string
@@ -14,12 +15,25 @@ interface StaffVerification {
 export default function VerificationPage() {
   const [loading, setLoading] = useState(true)
   const [staff, setStaff] = useState<StaffVerification | null>(null)
+  const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+  const [companyName, setCompanyName] = useState<string>('Firstoption')
   const [expired, setExpired] = useState(false)
   const [invalid, setInvalid] = useState(false)
 
   useEffect(() => {
     const verifyCode = async () => {
       try {
+        // Fetch company logo & settings
+        const { data: settings } = await supabase
+          .from('company_settings')
+          .select('name, logo_url')
+          .single()
+
+        if (settings) {
+          if (settings.name) setCompanyName(settings.name)
+          if (settings.logo_url) setCompanyLogo(settings.logo_url)
+        }
+
         // Extract verification code from URL path
         const path = window.location.pathname
         const match = path.match(/^\/verify\/(.+)$/)
@@ -31,12 +45,7 @@ export default function VerificationPage() {
           return
         }
 
-        // Query staff table with the verification code
-        // NOTE: This requires an RLS policy on the staff table to allow anonymous (public) read access
-        // to these specific safe fields for verification purposes. The policy should allow:
-        // - SELECT on staff table for anon role
-        // - Only these columns: full_name, job_title, department_id, photo_url, status, staff_code, id_card_expires_at
-        // - Filter: id_verification_code matches the provided code
+        // Query staff table with verification code + profiles photo + departments
         const { data, error } = await supabase
           .from('staff')
           .select(`
@@ -45,6 +54,7 @@ export default function VerificationPage() {
             department_id,
             departments (name),
             photo_url,
+            profiles (photo_url),
             status,
             staff_code,
             id_card_expires_at
@@ -58,6 +68,27 @@ export default function VerificationPage() {
           return
         }
 
+        // Department name resolution
+        let deptName = ''
+        if (data.departments) {
+          deptName = Array.isArray(data.departments) ? (data.departments as any)[0]?.name : (data.departments as any)?.name
+        }
+        if (!deptName || deptName === 'Unknown') {
+          if (data.department_id) {
+            const { data: deptData } = await supabase
+              .from('departments')
+              .select('name')
+              .eq('id', data.department_id)
+              .single()
+            if (deptData?.name) deptName = deptData.name
+          }
+        }
+        if (!deptName) deptName = 'General'
+
+        // Photo URL resolution (prioritize profiles.photo_url over staff.photo_url)
+        const profilePhoto = Array.isArray(data.profiles) ? (data.profiles as any)[0]?.photo_url : (data.profiles as any)?.photo_url
+        const finalPhoto = profilePhoto || data.photo_url || ''
+
         // Check if card is expired
         const expiresAt = data.id_card_expires_at ? new Date(data.id_card_expires_at) : null
         const isExpired = expiresAt ? expiresAt < new Date() : false
@@ -65,8 +96,8 @@ export default function VerificationPage() {
         setStaff({
           full_name: data.full_name,
           job_title: data.job_title,
-          department_name: (data.departments as any)?.name || 'Unknown',
-          photo_url: data.photo_url || '',
+          department_name: deptName,
+          photo_url: finalPhoto,
           status: data.status,
           staff_code: data.staff_code,
           id_card_expires_at: data.id_card_expires_at,
@@ -105,7 +136,7 @@ export default function VerificationPage() {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-slate-800 mb-2">Invalid Credential</h1>
-          <p className="text-slate-500 text-sm">Not a valid Firstoption staff credential</p>
+          <p className="text-slate-500 text-sm">Not a valid staff credential</p>
         </div>
       </div>
     )
@@ -114,15 +145,19 @@ export default function VerificationPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg p-6 max-w-sm w-full">
-        {/* Header */}
+        {/* Header with Real Logo */}
         <div className="text-center mb-6">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <span className="text-white font-display font-bold text-sm">FO</span>
-            </div>
-            <div>
-              <div className="font-display font-semibold text-slate-800 text-sm">Firstoption</div>
-              <div className="text-blue-600 text-xs">Staff Verification</div>
+          <div className="flex items-center justify-center gap-3 mb-2">
+            {companyLogo ? (
+              <img src={companyLogo} alt={companyName} className="w-10 h-10 object-contain rounded-lg" />
+            ) : (
+              <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center">
+                <span className="text-white font-display font-bold text-sm">FO</span>
+              </div>
+            )}
+            <div className="text-left">
+              <div className="font-display font-bold text-slate-800 text-base leading-tight">{companyName}</div>
+              <div className="text-blue-600 text-xs font-medium">Staff Verification</div>
             </div>
           </div>
         </div>
@@ -135,12 +170,12 @@ export default function VerificationPage() {
         }`}>
           {expired ? (
             <span className="flex items-center justify-center gap-2">
-              <span>⚠</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
               <span>Card Expired</span>
             </span>
           ) : (
             <span className="flex items-center justify-center gap-2">
-              <span>✓</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
               <span>Valid Firstoption Staff</span>
             </span>
           )}
@@ -148,11 +183,20 @@ export default function VerificationPage() {
 
         {/* Staff Photo */}
         <div className="flex justify-center mb-4">
-          <img
-            src={staff.photo_url || `https://i.pravatar.cc/150?u=${staff.staff_code}`}
-            alt={staff.full_name}
-            className="w-24 h-24 rounded-full object-cover border-4 border-slate-100"
-          />
+          {staff.photo_url ? (
+            <img
+              src={staff.photo_url}
+              alt={staff.full_name}
+              className="w-24 h-24 rounded-full object-cover border-4 border-slate-100 shadow-sm"
+            />
+          ) : (
+            <div
+              className="w-24 h-24 rounded-full flex items-center justify-center text-white text-2xl font-bold border-4 border-slate-100 shadow-sm"
+              style={{ backgroundColor: getAvatarColor(staff.full_name) }}
+            >
+              {getInitials(staff.full_name)}
+            </div>
+          )}
         </div>
 
         {/* Staff Details */}
@@ -165,7 +209,7 @@ export default function VerificationPage() {
           <div className="bg-slate-50 rounded-lg p-3 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Department</span>
-              <span className="font-medium text-slate-800">{staff.department_name}</span>
+              <span className="font-semibold text-slate-800">{staff.department_name}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Staff ID</span>
@@ -192,3 +236,4 @@ export default function VerificationPage() {
     </div>
   )
 }
+
