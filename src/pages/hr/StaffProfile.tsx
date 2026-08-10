@@ -490,29 +490,29 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
   }
 
   return (
-    <div className="p-6 anim-fade-up">
+    <div className="p-4 sm:p-6 anim-fade-up">
       {/* Back button */}
       <button
         onClick={() => onNavigate('hr-directory')}
-        className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-5 transition-colors"
+        className="flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-xs sm:text-sm font-medium mb-4 transition-colors"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
         Back to Directory
       </button>
 
       {/* Profile header */}
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 mb-5">
-        <div className="flex items-start gap-5">
-          <div className="relative flex-none">
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5">
+          <div className="relative flex-none mx-auto sm:mx-0">
             {(s.photo_url || s.profiles?.photo_url) ? (
               <img
                 src={s.photo_url || s.profiles?.photo_url}
                 alt={s.full_name}
-                className="w-20 h-20 rounded-xl object-cover ring-4 ring-slate-100"
+                className="w-20 h-20 sm:w-20 sm:h-20 rounded-xl object-cover ring-4 ring-slate-100 shadow-xs"
               />
             ) : (
               <div
-                className="w-20 h-20 rounded-xl flex-none flex items-center justify-center text-white text-xl font-bold ring-4 ring-slate-100"
+                className="w-20 h-20 sm:w-20 sm:h-20 rounded-xl flex-none flex items-center justify-center text-white text-xl font-bold ring-4 ring-slate-100 shadow-xs"
                 style={{ backgroundColor: getAvatarColor(s.full_name) }}
               >
                 {getInitials(s.full_name)}
@@ -520,13 +520,13 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
             )}
             <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${s.status === 'active' ? 'bg-emerald-400' : s.status === 'suspended' ? 'bg-red-400' : 'bg-slate-300'}`} />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between flex-wrap gap-3">
+          <div className="flex-1 min-w-0 w-full text-center sm:text-left">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-3">
               <div>
-                <h2 className="font-display font-bold text-slate-800 text-2xl">{s.full_name}</h2>
-                <p className="text-slate-500 text-sm mt-0.5">{s.job_title} · {s.departments?.name || 'Unassigned'}</p>
+                <h2 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">{s.full_name}</h2>
+                <p className="text-slate-500 text-xs sm:text-sm mt-0.5">{s.job_title} · {s.departments?.name || 'Unassigned'}</p>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap w-full sm:w-auto">
                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[s.status as StaffStatus]}`}>
                   {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
                 </span>
@@ -535,7 +535,7 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
                     onClick={() => setShowGrantAccessModal(true)}
                     className="px-3 py-1.5 rounded-lg border border-blue-200 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    Grant System Access
+                    Grant Access
                   </button>
                 )}
                 <button
@@ -548,21 +548,21 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
                   onClick={() => onNavigate('hr-id-cards')}
                   className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
                 >
-                  Generate ID Card
+                  Generate ID
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mt-5 text-left border-t border-slate-50 sm:border-0 pt-3 sm:pt-0">
               {[
                 { label: 'Staff ID', value: s.staff_code || '—', mono: true },
                 { label: 'Joined', value: s.date_employed?.split('T')[0] || '—' },
-                { label: 'Email', value: s.email || '—' },
+                { label: 'Email', value: s.email || '—', truncate: true },
                 { label: 'Phone', value: s.phone || '—' },
               ].map(f => (
-                <div key={f.label}>
+                <div key={f.label} className="min-w-0">
                   <div className="text-xs text-slate-400 mb-0.5">{f.label}</div>
-                  <div className={`text-sm text-slate-700 ${f.mono ? 'font-mono-data' : ''}`}>{f.value}</div>
+                  <div className={`text-xs sm:text-sm text-slate-700 ${f.mono ? 'font-mono-data' : ''} ${f.truncate ? 'truncate' : ''}`} title={f.value}>{f.value}</div>
                 </div>
               ))}
             </div>
@@ -571,12 +571,12 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg mb-5 w-fit">
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg mb-5 overflow-x-auto w-full sm:w-fit no-scrollbar">
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${tab === t.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`px-3.5 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${tab === t.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
           >
             {t.label}
           </button>

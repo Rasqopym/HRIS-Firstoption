@@ -831,10 +831,10 @@ export default function IDCardGenerator() {
   }
 
   return (
-    <div className="p-6 anim-fade-up">
-      <div className="mb-6">
-        <h2 className="font-display font-semibold text-slate-800 text-xl">ID Card Generator</h2>
-        <p className="text-sm text-slate-500">Design, preview, and export staff identity cards (CR80 format)</p>
+    <div className="p-4 sm:p-6 anim-fade-up">
+      <div className="mb-4 sm:mb-6">
+        <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">ID Card Generator</h2>
+        <p className="text-xs sm:text-sm text-slate-500">Design, preview, and export staff identity cards (CR80 format)</p>
       </div>
 
       <style>{`
@@ -857,14 +857,14 @@ export default function IDCardGenerator() {
         }
       `}</style>
 
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 mb-5">
-        <div className="flex flex-wrap items-center gap-4">
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-3 sm:p-4 mb-5">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
             {(['single', 'bulk'] as ViewMode[]).map(m => (
               <button
                 key={m}
                 onClick={() => setViewMode(m)}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all capitalize ${viewMode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all capitalize ${viewMode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 {m === 'single' ? 'Single Preview' : 'Bulk Generate'}
               </button>
@@ -876,14 +876,14 @@ export default function IDCardGenerator() {
               <select
                 value={selectedId}
                 onChange={e => setSelectedId(e.target.value)}
-                className="px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+                className="w-full sm:w-auto px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
               >
                 {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.staff_code})</option>)}
               </select>
 
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
                 {(['landscape', 'portrait'] as Orientation[]).map(o => (
-                  <button key={o} onClick={() => setOrientation(o)} className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-all ${orientation === o ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
+                  <button key={o} onClick={() => setOrientation(o)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${orientation === o ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
                     {o}
                   </button>
                 ))}
@@ -891,7 +891,7 @@ export default function IDCardGenerator() {
 
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
                 {(['front', 'back'] as CardSide[]).map(s => (
-                  <button key={s} onClick={() => setSide(s)} className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-all ${side === s ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
+                  <button key={s} onClick={() => setSide(s)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${side === s ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
                     {s}
                   </button>
                 ))}
@@ -899,10 +899,10 @@ export default function IDCardGenerator() {
             </>
           )}
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="sm:ml-auto flex items-center gap-2">
             <button
               onClick={handleDownload}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium transition-colors"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -916,12 +916,14 @@ export default function IDCardGenerator() {
       </div>
 
       {viewMode === 'single' && (
-        <div className="flex flex-col items-center gap-6">
-          <div ref={cardRef} className="bg-slate-200/60 rounded-2xl p-10 flex items-center justify-center printable-card" style={{ minWidth: 420 }}>
-            {orientation === 'landscape'
-              ? <IDCardLandscape s={selectedStaff} side={side} companySettings={companySettings} />
-              : <IDCardPortrait s={selectedStaff} side={side} companySettings={companySettings} />
-            }
+        <div className="flex flex-col items-center gap-4 sm:gap-6 w-full">
+          <div className="w-full overflow-x-auto py-2 flex justify-center no-scrollbar">
+            <div ref={cardRef} className="bg-slate-200/60 rounded-2xl p-4 sm:p-10 flex items-center justify-center printable-card flex-none">
+              {orientation === 'landscape'
+                ? <IDCardLandscape s={selectedStaff} side={side} companySettings={companySettings} />
+                : <IDCardPortrait s={selectedStaff} side={side} companySettings={companySettings} />
+              }
+            </div>
           </div>
           <div className="text-xs text-slate-400 text-center">
             CR80 standard · {orientation === 'landscape' ? '85.6 × 54mm' : '54 × 85.6mm'} · 300 DPI export

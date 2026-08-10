@@ -103,27 +103,27 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
   const deptName = s.departments?.name || 'Unassigned'
 
   return (
-    <div className="p-6 anim-fade-up">
+    <div className="p-4 sm:p-6 anim-fade-up">
       {/* Welcome banner */}
-      <div className="rounded-2xl overflow-hidden mb-6 shadow-md border border-slate-800/50" style={{ background: 'linear-gradient(135deg, #0a1f3c 0%, #1e3a5f 60%, #1d4ed8 100%)' }}>
-        <div className="px-6 py-6 flex items-center gap-5">
+      <div className="rounded-2xl overflow-hidden mb-5 sm:mb-6 shadow-md border border-slate-800/50" style={{ background: 'linear-gradient(135deg, #0a1f3c 0%, #1e3a5f 60%, #1d4ed8 100%)' }}>
+        <div className="px-4 sm:px-6 py-5 sm:py-6 flex flex-col sm:flex-row items-center text-center sm:text-left gap-4 sm:gap-5">
           {(s.photo_url || s.profiles?.photo_url) ? (
-            <img src={s.photo_url || s.profiles?.photo_url} alt={s.full_name} className="w-16 h-16 rounded-xl object-cover ring-4 ring-white/20 shadow-sm flex-none" />
+            <img src={s.photo_url || s.profiles?.photo_url} alt={s.full_name} className="w-16 h-16 sm:w-16 sm:h-16 rounded-xl object-cover ring-4 ring-white/20 shadow-sm flex-none" />
           ) : (
             <div
-              className="w-16 h-16 rounded-xl flex-none flex items-center justify-center text-white text-xl font-bold ring-4 ring-white/20 shadow-sm"
+              className="w-16 h-16 sm:w-16 sm:h-16 rounded-xl flex-none flex items-center justify-center text-white text-xl font-bold ring-4 ring-white/20 shadow-sm"
               style={{ backgroundColor: getAvatarColor(s.full_name) }}
             >
               {getInitials(s.full_name)}
             </div>
           )}
-          <div className="flex-1">
-            <p className="text-blue-300 text-xs uppercase tracking-wider font-semibold">Staff Self-Service</p>
-            <h2 className="font-display font-bold text-white text-2xl tracking-tight">{s.full_name}</h2>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-blue-100 text-sm font-medium">{s.job_title || '—'}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-blue-300 text-[11px] sm:text-xs uppercase tracking-wider font-semibold">Staff Self-Service</p>
+            <h2 className="font-display font-bold text-white text-xl sm:text-2xl tracking-tight">{s.full_name}</h2>
+            <div className="flex items-center justify-center sm:justify-start gap-2 mt-1 flex-wrap">
+              <span className="text-blue-100 text-xs sm:text-sm font-medium">{s.job_title || '—'}</span>
               <span className="text-blue-400">·</span>
-              <span className="text-blue-200 text-sm">{deptName}</span>
+              <span className="text-blue-200 text-xs sm:text-sm">{deptName}</span>
               <span className="text-blue-400">·</span>
               <span className="text-blue-300/80 font-mono-data text-xs bg-white/10 px-2 py-0.5 rounded">{s.staff_code || '—'}</span>
             </div>
@@ -133,15 +133,15 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
             <div className="text-white font-mono-data text-sm font-semibold">{s.date_employed?.slice(0, 10) || '—'}</div>
           </div>
         </div>
-        <div className="px-6 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-white/10 pt-4 bg-black/10">
+        <div className="px-4 sm:px-6 pb-4 sm:pb-5 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 border-t border-white/10 pt-4 bg-black/10">
           {[
             { label: 'Monthly Net Pay', value: currentPayroll ? fmt(currentPayroll.net_pay) : '—', color: 'text-emerald-300' },
             { label: 'Gross Earnings', value: currentPayroll ? fmt(currentPayroll.gross_earnings) : '—', color: 'text-white' },
             { label: 'PAYE Tax Deduction', value: currentPayroll ? fmt(currentPayroll.paye_tax) : '—', color: 'text-blue-200' },
           ].map(c => (
-            <div key={c.label} className="bg-white/10 backdrop-blur-md rounded-xl px-4 py-3 border border-white/10">
+            <div key={c.label} className="bg-white/10 backdrop-blur-md rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 border border-white/10">
               <div className="text-blue-200 text-xs font-medium">{c.label}</div>
-              <div className={`font-display font-bold text-lg font-mono-data tracking-tight ${c.color}`}>{c.value}</div>
+              <div className={`font-display font-bold text-base sm:text-lg font-mono-data tracking-tight ${c.color}`}>{c.value}</div>
             </div>
           ))}
         </div>

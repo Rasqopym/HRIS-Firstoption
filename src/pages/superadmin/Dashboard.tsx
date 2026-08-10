@@ -139,30 +139,30 @@ export default function SADashboard({ onNavigate }: Props) {
   }
 
   return (
-    <div className="p-6 space-y-6 anim-fade-up">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 anim-fade-up">
       <div>
-        <h2 className="font-display font-semibold text-slate-800 text-xl">System Overview</h2>
-        <p className="text-slate-500 text-sm">{currentDate} · Last sync just now</p>
+        <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">System Overview</h2>
+        <p className="text-slate-500 text-xs sm:text-sm">{currentDate} · Last sync just now</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {[
           { label: 'Total Accounts', value: totalAccounts, sub: `${activeAccounts} active user profiles`, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>, color: 'text-blue-600', bg: 'bg-blue-50/80', border: 'border-blue-100' },
           { label: 'Monthly Payroll', value: monthlyPayroll > 0 ? fmt(monthlyPayroll) : '—', sub: periodLabel || 'No payroll processed', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>, color: monthlyPayroll > 0 ? 'text-emerald-600' : 'text-slate-400', bg: monthlyPayroll > 0 ? 'bg-emerald-50/80' : 'bg-slate-50', border: monthlyPayroll > 0 ? 'border-emerald-100' : 'border-slate-100' },
           { label: 'Active Accounts', value: activeAccounts, sub: `${suspendedAccounts} suspended accounts`, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>, color: 'text-indigo-600', bg: 'bg-indigo-50/80', border: 'border-indigo-100' },
           { label: 'Suspended', value: suspendedAccounts, sub: 'Require administrative review', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>, color: 'text-amber-600', bg: 'bg-amber-50/80', border: 'border-amber-100' },
         ].map(kpi => (
-          <div key={kpi.label} className={`bg-white rounded-xl border ${kpi.border} p-5 shadow-sm card-hover flex flex-col justify-between`}>
-            <div className="flex items-center justify-between mb-3">
+          <div key={kpi.label} className={`bg-white rounded-xl border ${kpi.border} p-4 sm:p-5 shadow-sm card-hover flex flex-col justify-between`}>
+            <div className="flex items-center justify-between mb-2 sm:mb-3">
               <span className="text-xs font-semibold text-slate-500 tracking-wide uppercase">{kpi.label}</span>
-              <div className={`w-9 h-9 rounded-lg ${kpi.bg} flex items-center justify-center ${kpi.color} shadow-xs`}>
+              <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg ${kpi.bg} flex items-center justify-center ${kpi.color} shadow-xs`}>
                 {kpi.icon}
               </div>
             </div>
             <div>
-              <div className="font-display font-bold text-slate-800 text-2xl tracking-tight">{kpi.value}</div>
-              <div className="text-xs text-slate-400 mt-1 font-medium">{kpi.sub}</div>
+              <div className="font-display font-bold text-slate-800 text-xl sm:text-2xl tracking-tight">{kpi.value}</div>
+              <div className="text-xs text-slate-400 mt-0.5 sm:mt-1 font-medium">{kpi.sub}</div>
             </div>
           </div>
         ))}

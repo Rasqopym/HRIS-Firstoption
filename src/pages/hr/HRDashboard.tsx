@@ -103,13 +103,13 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
   }
 
   return (
-    <div className="p-6 space-y-5 anim-fade-up">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 anim-fade-up">
       <div>
-        <h2 className="font-display font-semibold text-slate-800 text-xl">HR Operations Dashboard</h2>
-        <p className="text-slate-500 text-sm">{todayFormatted} · Live Headcount</p>
+        <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">HR Operations Dashboard</h2>
+        <p className="text-slate-500 text-xs sm:text-sm">{todayFormatted} · Live Headcount</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {[
           { 
             l: 'Total Staff', 
@@ -148,16 +148,16 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
             border: 'border-purple-100'
           },
         ].map(k => (
-          <div key={k.l} className={`bg-white rounded-xl border ${k.border} shadow-sm p-5 card-hover flex flex-col justify-between`}>
-            <div className="flex items-center justify-between mb-3">
+          <div key={k.l} className={`bg-white rounded-xl border ${k.border} shadow-sm p-4 sm:p-5 card-hover flex flex-col justify-between`}>
+            <div className="flex items-center justify-between mb-2 sm:mb-3">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{k.l}</span>
-              <div className={`w-10 h-10 rounded-lg ${k.bgClass} flex items-center justify-center ${k.iconClass}`}>
+              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg ${k.bgClass} flex items-center justify-center ${k.iconClass}`}>
                 {k.icon}
               </div>
             </div>
             <div>
-              <div className="font-display font-bold text-2xl text-slate-800 tracking-tight">{k.v}</div>
-              <div className="text-xs text-slate-400 mt-1">{k.sub}</div>
+              <div className="font-display font-bold text-xl sm:text-2xl text-slate-800 tracking-tight">{k.v}</div>
+              <div className="text-xs text-slate-400 mt-0.5 sm:mt-1">{k.sub}</div>
             </div>
           </div>
         ))}

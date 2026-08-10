@@ -240,33 +240,34 @@ export default function PayslipV2({ payslipId }: Props) {
   const today = new Date()
 
   return (
-    <div className="p-6 anim-fade-up">
-      <div className="flex items-center justify-between mb-5 no-print">
+    <div className="p-4 sm:p-6 anim-fade-up">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 no-print">
         <div>
-          <h2 className="font-display font-semibold text-slate-800 text-xl">Payslip — {period.period_label}</h2>
-          <p className="text-sm text-slate-500">Enhanced view with taxable income and PAYE breakdown</p>
+          <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">Payslip — {period.period_label}</h2>
+          <p className="text-xs sm:text-sm text-slate-500">Enhanced view with taxable income and PAYE breakdown</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
             onClick={handleDownloadPDF}
             disabled={downloading}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-60"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-medium disabled:opacity-60"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             {downloading ? 'Downloading...' : 'Download PDF'}
           </button>
           <button
             onClick={() => window.print()}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v-5a2 2 0 0 1-2-2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-            Print Payslip
+            Print
           </button>
         </div>
       </div>
 
       {/* Payslip document */}
-      <div className="payslip-print bg-white rounded-2xl border border-slate-200 shadow-sm max-w-3xl mx-auto overflow-hidden">
+      <div className="w-full overflow-x-auto pb-4 no-scrollbar">
+        <div className="payslip-print bg-white rounded-2xl border border-slate-200 shadow-sm max-w-3xl mx-auto overflow-hidden min-w-[340px]">
         {/* Header */}
         <div style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%)' }} className="px-8 py-6 text-white">
           <div className="flex items-start justify-between">
@@ -522,5 +523,6 @@ export default function PayslipV2({ payslipId }: Props) {
         </div>
       </div>
     </div>
-  )
+  </div>
+)
 }

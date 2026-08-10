@@ -90,18 +90,18 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
   }
 
   return (
-    <div className="p-6 anim-fade-up">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6 anim-fade-up">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
         <div>
-          <h2 className="font-display font-semibold text-slate-800 text-xl">Staff Directory</h2>
-          <p className="text-sm text-slate-500">{staff.length} total · {staff.filter(s => s.status === 'active').length} active</p>
+          <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">Staff Directory</h2>
+          <p className="text-xs sm:text-sm text-slate-500">{staff.length} total · {staff.filter(s => s.status === 'active').length} active</p>
         </div>
         <button
           onClick={() => {
             onSelectStaff(null)
             onNavigate('hr-add-staff')
           }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm w-full sm:w-auto"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add Staff
@@ -109,47 +109,51 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
       </div>
 
       {/* Filters bar */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="relative">
+      <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 mb-4">
+        <div className="relative flex-1 min-w-[200px]">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name, ID, role..."
-            className="pl-9 pr-4 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 w-64"
+            placeholder="Search name, ID, role..."
+            className="pl-9 pr-4 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 w-full"
           />
         </div>
-        <select
-          value={filterDept}
-          onChange={e => setFilterDept(e.target.value)}
-          className="px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none bg-white focus:border-blue-400"
-        >
-          <option value="all">All Departments</option>
-          {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-        </select>
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value as StaffStatus | 'all')}
-          className="px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none bg-white focus:border-blue-400"
-        >
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-          <option value="offboarded">Offboarded</option>
-        </select>
-        <div className="ml-auto flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-          <button
-            onClick={() => setView('table')}
-            className={`p-1.5 rounded-md transition-all ${view === 'table' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400'}`}
+        <div className="flex items-center gap-2">
+          <select
+            value={filterDept}
+            onChange={e => setFilterDept(e.target.value)}
+            className="flex-1 sm:flex-none px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-200 focus:outline-none bg-white focus:border-blue-400"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-          </button>
-          <button
-            onClick={() => setView('grid')}
-            className={`p-1.5 rounded-md transition-all ${view === 'grid' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400'}`}
+            <option value="all">All Departments</option>
+            {departments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+          </select>
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value as StaffStatus | 'all')}
+            className="flex-1 sm:flex-none px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-200 focus:outline-none bg-white focus:border-blue-400"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          </button>
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+            <option value="offboarded">Offboarded</option>
+          </select>
+          <div className="ml-auto flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+            <button
+              onClick={() => setView('table')}
+              className={`p-1.5 rounded-md transition-all ${view === 'table' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400'}`}
+              title="Table view"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <button
+              onClick={() => setView('grid')}
+              className={`p-1.5 rounded-md transition-all ${view === 'grid' ? 'bg-white shadow-sm text-slate-700' : 'text-slate-400'}`}
+              title="Grid view"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </button>
+          </div>
         </div>
       </div>
 
