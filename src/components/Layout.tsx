@@ -308,6 +308,7 @@ const roleBadgeColors: Record<Role, string> = {
 
 export default function Layout({ role, page, onNavigate, onRoleChange, onLogout, onSelectStaff, onSelectPayslip, children }: LayoutProps) {
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
@@ -621,9 +622,21 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
 
   return (
     <div className="flex h-screen bg-slate-50/80 overflow-hidden">
+      {/* Mobile sidebar backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
       <aside
-        className="flex flex-col flex-none overflow-y-auto transition-all duration-200"
+        className={`
+          flex flex-col flex-none overflow-y-auto transition-all duration-300
+          fixed md:relative z-50 md:z-auto h-full
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}
         style={{
           width: collapsed ? 60 : 240,
           background: 'linear-gradient(180deg, #0f2744 0%, #1e3a5f 100%)',
@@ -703,6 +716,7 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                           onSelectStaff?.(null)
                         }
                         onNavigate(item.page)
+                        setMobileOpen(false) // always close drawer on mobile after navigation
                       }}
                       title={collapsed ? item.label : undefined}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 mx-1 text-sm font-medium transition-all duration-150 rounded-lg ${
@@ -765,14 +779,25 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
       {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="flex-none flex items-center gap-3 bg-white border-b border-slate-200/80 px-6 shadow-sm" style={{ height: 60 }}>
+        <header className="flex-none flex items-center gap-2 md:gap-3 bg-white border-b border-slate-200/80 px-3 md:px-6 shadow-sm" style={{ height: 60 }}>
+          {/* Hamburger — mobile only */}
+          <button
+            className="md:hidden flex-none p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+
           {/* Breadcrumb/title */}
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <span className="font-medium text-slate-800">{pageTitles[page] || 'Page'}</span>
+          <div className="flex items-center gap-2 text-sm text-slate-500 min-w-0">
+            <span className="font-medium text-slate-800 truncate">{pageTitles[page] || 'Page'}</span>
           </div>
 
           {/* Search */}
-          <div className="flex-1 max-w-sm mx-4 relative">
+          <div className="flex-1 mx-2 md:mx-4 md:max-w-sm relative">
             {showSearch ? (
               <div className="relative anim-fade z-50">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -782,7 +807,7 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                   autoFocus
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search staff, payroll, documents..."
+                  placeholder="Search..."
                   className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
                 {searchQuery.trim().length >= 2 && (
@@ -826,8 +851,8 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                 className="flex items-center gap-2 text-slate-400 hover:text-slate-600 text-sm transition-colors"
               >
                 <IconSearch />
-                <span className="text-slate-400">Quick search...</span>
-                <span className="ml-2 text-xs border border-slate-200 rounded px-1 py-0.5 text-slate-300">⌘K</span>
+                <span className="hidden sm:inline text-slate-400">Quick search...</span>
+                <span className="hidden md:inline ml-2 text-xs border border-slate-200 rounded px-1 py-0.5 text-slate-300">⌘K</span>
               </button>
             )}
           </div>
@@ -921,7 +946,7 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
       {showNotifications && (
         <>
           <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setShowNotifications(false)} />
-          <div className="fixed right-0 top-0 h-full w-96 bg-white shadow-2xl z-50 flex flex-col anim-slide-right">
+          <div className="fixed right-0 top-0 h-full w-full sm:w-96 bg-white shadow-2xl z-50 flex flex-col anim-slide-right">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <h2 className="font-display font-semibold text-slate-800">Notifications</h2>
