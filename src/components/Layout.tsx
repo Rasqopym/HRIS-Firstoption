@@ -633,50 +633,72 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
       {/* Sidebar */}
       <aside
         className={`
-          flex flex-col flex-none overflow-y-auto transition-all duration-300
+          flex flex-col flex-none transition-all duration-300
           fixed md:relative z-50 md:z-auto h-full
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
         style={{
-          width: collapsed ? 60 : 240,
+          width: undefined, // Handled by responsive classes / inline style fallback
           background: 'linear-gradient(180deg, #0f2744 0%, #1e3a5f 100%)',
           minHeight: '100vh',
         }}
       >
-        {/* Logo */}
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10" style={{ minHeight: 60 }}>
-          <div className="flex-none w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <span className="text-white font-display font-bold text-sm">FO</span>
+        <div
+          className={`
+            flex flex-col h-full transition-all duration-300
+            w-[260px] ${collapsed ? 'md:w-[60px]' : 'md:w-[240px]'}
+          `}
+        >
+          {/* Logo / Header */}
+          <div
+            className={`flex items-center border-b border-white/10 py-4 ${
+              collapsed ? 'md:px-2 md:justify-center px-4 gap-3' : 'px-4 gap-3'
+            }`}
+            style={{ minHeight: 60 }}
+          >
+            <button
+              onClick={() => {
+                // On desktop, toggle collapse when clicking logo area if collapsed
+                if (collapsed) setCollapsed(false)
+              }}
+              className={`flex items-center gap-3 text-left focus:outline-none ${collapsed ? 'md:cursor-pointer' : ''}`}
+              title={collapsed ? 'Click to expand sidebar' : undefined}
+            >
+              <div className="flex-none w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-sm">
+                <span className="text-white font-display font-bold text-sm">FO</span>
+              </div>
+              {/* Show text if not collapsed on desktop, or ALWAYS on mobile */}
+              <div className={`${collapsed ? 'md:hidden' : 'block'}`}>
+                <div className="font-display font-semibold text-white text-sm leading-tight">Firstoption</div>
+                <div className="text-blue-300 text-xs">HRIS Platform</div>
+              </div>
+            </button>
+
+            {/* Desktop collapse toggle */}
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className={`hidden md:flex text-white/50 hover:text-white transition-colors p-1.5 rounded-md hover:bg-white/10 ${
+                collapsed ? 'ml-0 mt-1' : 'ml-auto'
+              }`}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                {collapsed ? <polyline points="9 18 15 12 9 6"/> : <polyline points="15 18 9 12 15 6"/>}
+              </svg>
+            </button>
+
+            {/* Mobile close drawer button */}
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="md:hidden ml-auto text-white/50 hover:text-white p-1.5 rounded-md hover:bg-white/10"
+              title="Close menu"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
           </div>
-          {!collapsed && (
-            <div>
-              <div className="font-display font-semibold text-white text-sm leading-tight">Firstoption</div>
-              <div className="text-blue-300 text-xs">HRIS Platform</div>
-            </div>
-          )}
-          {!collapsed && (
-            <button
-              onClick={() => setCollapsed(true)}
-              className="ml-auto text-white/40 hover:text-white/80 transition-colors"
-              title="Collapse sidebar"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="15 18 9 12 15 6"/>
-              </svg>
-            </button>
-          )}
-          {collapsed && (
-            <button
-              onClick={() => setCollapsed(false)}
-              className="text-white/40 hover:text-white/80 transition-colors ml-auto"
-              title="Expand sidebar"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-            </button>
-          )}
-        </div>
 
         {/* Navigation */}
         <nav className="flex-1 py-3 overflow-y-auto">
@@ -684,25 +706,27 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
             const isOpen = section.collapsible ? !!openSections[section.section || ''] : true
             return (
               <div key={si} className="mb-2">
-                {section.section && !collapsed && (
+                {section.section && (
                   section.collapsible ? (
                     <button
                       onClick={() => setOpenSections(prev => ({ ...prev, [section.section!]: !prev[section.section!] }))}
-                      className="w-full flex items-center justify-between px-4 pt-3 pb-1 text-xs font-medium tracking-widest uppercase text-blue-300/60 hover:text-blue-200/80 transition-colors"
+                      className={`w-full flex items-center justify-between px-4 pt-3 pb-1 text-xs font-medium tracking-widest uppercase text-blue-300/60 hover:text-blue-200/80 transition-colors ${
+                        collapsed ? 'hidden md:hidden' : ''
+                      } md:flex`}
                     >
                       <span className="flex items-center gap-2">
                         <span className="flex-none">{section.icon}</span>
-                        <span>{section.section}</span>
+                        <span className={`${collapsed ? 'md:hidden' : 'inline'}`}>{section.section}</span>
                       </span>
-                      <span className={`transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`}>
+                      <span className={`transition-transform duration-150 ${isOpen ? 'rotate-90' : ''} ${collapsed ? 'md:hidden' : 'inline'}`}>
                         <IconChevronRight />
                       </span>
                     </button>
                   ) : (
                     <div className={`px-4 pt-3 pb-1 text-xs font-medium tracking-widest uppercase ${
                       section.section === 'OTHER ROLES' ? 'text-white/30 border-t border-white/10 mt-2' : 'text-blue-300/60'
-                    }`}>
-                      {section.section}
+                    } ${collapsed ? 'hidden md:block' : 'block'}`}>
+                      <span className={`${collapsed ? 'md:hidden' : 'inline'}`}>{section.section}</span>
                     </div>
                   )
                 )}
@@ -729,7 +753,9 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                       <span className={`flex-none ${active ? 'text-blue-300' : 'text-blue-300/50'}`}>
                         {item.icon}
                       </span>
-                      {!collapsed && <span className={active ? 'font-semibold' : ''}>{item.label}</span>}
+                      <span className={`${active ? 'font-semibold' : ''} ${collapsed ? 'md:hidden' : 'inline'}`}>
+                        {item.label}
+                      </span>
                     </button>
                   )
                 })}
@@ -740,41 +766,27 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
 
         {/* User info at bottom */}
         <div className="border-t border-white/10 p-3">
-          {!collapsed ? (
-            <div className="flex items-center gap-2">
-              {currentUser?.photo ? (
-                <img src={currentUser.photo} alt={currentUser.name} className="w-8 h-8 rounded-full flex-none object-cover" />
-              ) : (
-                <div 
-                  className="w-8 h-8 rounded-full flex-none flex items-center justify-center text-white text-xs font-medium"
-                  style={{ backgroundColor: getAvatarColor(currentUser?.name || 'User') }}
-                >
-                  {getInitials(currentUser?.name || 'User')}
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-white text-xs font-medium truncate">{currentUser?.name || 'User'}</div>
-                <div className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-0.5 ${roleBadgeColors[role]}`}>
-                  {roleLabels[role]}
-                </div>
+          <div className="flex items-center gap-2">
+            {currentUser?.photo ? (
+              <img src={currentUser.photo} alt={currentUser.name} className="w-8 h-8 rounded-full flex-none object-cover" />
+            ) : (
+              <div 
+                className="w-8 h-8 rounded-full flex-none flex items-center justify-center text-white text-xs font-medium"
+                style={{ backgroundColor: getAvatarColor(currentUser?.name || 'User') }}
+              >
+                {getInitials(currentUser?.name || 'User')}
+              </div>
+            )}
+            <div className={`flex-1 min-w-0 ${collapsed ? 'md:hidden' : 'block'}`}>
+              <div className="text-white text-xs font-medium truncate">{currentUser?.name || 'User'}</div>
+              <div className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-0.5 ${roleBadgeColors[role]}`}>
+                {roleLabels[role]}
               </div>
             </div>
-          ) : (
-            <div className="flex justify-center">
-              {currentUser?.photo ? (
-                <img src={currentUser.photo} alt={currentUser.name} className="w-8 h-8 rounded-full object-cover" />
-              ) : (
-                <div 
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium"
-                  style={{ backgroundColor: getAvatarColor(currentUser?.name || 'User') }}
-                >
-                  {getInitials(currentUser?.name || 'User')}
-                </div>
-              )}
-            </div>
-          )}
+          </div>
         </div>
-      </aside>
+      </div>
+    </aside>
 
       {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
