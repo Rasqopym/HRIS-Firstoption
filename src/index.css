@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+@import 'tailwindcss';
+
+:root {
+  --sidebar-width: 240px;
+  --topbar-height: 60px;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background-color: #f8fafc;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: 'Outfit', sans-serif;
+}
+
+.font-display { font-family: 'Outfit', sans-serif; }
+.font-mono-data { font-family: 'JetBrains Mono', monospace; font-size: 0.8125rem; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+@keyframes slideInRight {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes fadeInUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { transform: scale(0.97); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.anim-slide-right { animation: slideInRight 0.18s ease-out; }
+.anim-fade-up { animation: fadeInUp 0.2s ease-out; }
+.anim-fade { animation: fadeIn 0.15s ease-out; }
+.anim-scale-in { animation: scaleIn 0.15s ease-out; }
+
+.id-card-front {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 60%, #1d4ed8 100%);
+}
+.id-card-back {
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+}
+
+.payslip-print {
+  background: white;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  .payslip-print { padding: 0; }
+}
+
+tr.table-row-hover {
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+tr.table-row-hover:hover td {
+  background-color: #f1f5f9;
+}
+
+/* Premium card hover & container effects */
+.card-hover {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-hover:hover {
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+  transform: translateY(-2px);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.subtle-ring {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+/* Inputs focus styling */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+}
+
