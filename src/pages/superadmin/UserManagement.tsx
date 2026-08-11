@@ -209,6 +209,10 @@ export default function UserManagement() {
     setTempPassword('')
 
     try {
+      let createdUserId = ''
+      let generatedTempPw = ''
+
+      // Attempt Edge Function first
       const { data, error } = await supabase.functions.invoke('create-user', {
         body: {
           email: form.email,
@@ -217,22 +221,41 @@ export default function UserManagement() {
         },
       })
 
-      if (error) throw new Error(error.message)
-      if (!data?.success) throw new Error(data?.error || 'Failed to create user')
+      if (!error && data?.success) {
+        createdUserId = data.user_id
+        generatedTempPw = data.temp_password
+      } else {
+        // Fallback to database RPC function create_system_user
+        const fallbackPw = `Pass#${Math.random().toString(36).slice(-8)}`
+        const { data: rpcData, error: rpcError } = await supabase.rpc('create_system_user', {
+          p_email: form.email,
+          p_password: fallbackPw,
+          p_full_name: form.name,
+          p_role: appRoleToDb(form.role),
+          p_phone: form.phone || null
+        })
 
-      setTempPassword(data.temp_password)
+        if (rpcError || !rpcData?.success) {
+          throw new Error(rpcError?.message || rpcData?.error || error?.message || 'Failed to create user')
+        }
+
+        createdUserId = rpcData.user_id
+        generatedTempPw = fallbackPw
+      }
+
+      setTempPassword(generatedTempPw)
 
       // Log the action
       await logAction({
         action: 'CREATE',
         entity: 'User',
-        entityId: data.user_id,
+        entityId: createdUserId,
         details: `Created ${form.role} account for ${form.name}`,
       })
 
       // Add the new user to the local list with real data
       const newUser: StaffMember = {
-        id: data.user_id,
+        id: createdUserId,
         staffId: `FO-${Date.now().toString().slice(-6).toUpperCase()}`,
         staffTableId: undefined,
         name: form.name,
