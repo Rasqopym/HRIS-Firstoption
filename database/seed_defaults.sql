@@ -60,7 +60,7 @@ VALUES
   ('Basic Salary',         'allowance', 'flat_amount'),
   ('Housing Allowance',    'allowance', 'percentage_of_gross'),
   ('Transport Allowance',  'allowance', 'percentage_of_gross'),
-  ('Meal Allowance',       'allowance', 'flat_amount'),
+  ('Lunch Allowance',      'allowance', 'per_day'),
   ('Utility Allowance',    'allowance', 'flat_amount'),
   ('Leave Allowance',      'allowance', 'flat_amount'),
   ('Overtime Pay',         'allowance', 'per_hour'),
