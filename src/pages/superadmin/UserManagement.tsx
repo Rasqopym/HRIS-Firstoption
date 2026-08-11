@@ -65,7 +65,10 @@ export default function UserManagement() {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const { data: profiles, error } = await supabase
+        let profilesData: any[] = []
+        
+        // Attempt full relational query first
+        const { data, error } = await supabase
           .from('profiles')
           .select(`
             id,
@@ -82,22 +85,30 @@ export default function UserManagement() {
               full_name,
               job_title,
               department_id,
-              date_employed,
-              departments (name),
               status
             )
           `)
         
-        if (error) throw error
+        if (!error && data) {
+          profilesData = data
+        } else {
+          // Fallback to simple profiles fetch if relational query fails
+          const { data: simpleProfiles, error: simpleError } = await supabase
+            .from('profiles')
+            .select('*')
+          
+          if (simpleError) throw simpleError
+          profilesData = simpleProfiles || []
+        }
 
-        const staffMembers: StaffMember[] = (profiles || []).map(p => ({
+        const staffMembers: StaffMember[] = profilesData.map(p => ({
           id: p.id,
           staffId: p.staff?.[0]?.staff_code || `FO-${p.id.slice(0, 6).toUpperCase()}`,
           staffTableId: p.staff?.[0]?.id,
           name: p.full_name || '—',
           email: p.email || '—',
           role: dbRoleToApp(p.role),
-          department: p.staff?.[0]?.departments?.name || '—',
+          department: '—',
           jobTitle: p.staff?.[0]?.job_title || '',
           employmentDate: p.staff?.[0]?.date_employed || p.created_at?.slice(0, 10) || '—',
           status: (p.staff?.[0]?.status || p.status) as StaffStatus,
@@ -114,6 +125,7 @@ export default function UserManagement() {
         }))
 
         setUsers(staffMembers)
+        setError('')
       } catch (err) {
         setError('Failed to load users. Please refresh the page.')
         console.error('Error fetching users:', err)
@@ -186,7 +198,6 @@ export default function UserManagement() {
             entity: 'User',
             entityId: id,
             details: `${action === 'activate' ? 'Activated' : 'Suspended'} account for ${user.name}`,
-            severity: 'medium',
           })
         }
       }
@@ -225,21 +236,46 @@ export default function UserManagement() {
         createdUserId = data.user_id
         generatedTempPw = data.temp_password
       } else {
-        // Fallback to database RPC function create_system_user
+        // Fallback: Use standard Auth SignUp + Profile creation
         const fallbackPw = `Pass#${Math.random().toString(36).slice(-8)}`
-        const { data: rpcData, error: rpcError } = await supabase.rpc('create_system_user', {
-          p_email: form.email,
-          p_password: fallbackPw,
-          p_full_name: form.name,
-          p_role: appRoleToDb(form.role),
-          p_phone: form.phone || null
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: form.email,
+          password: fallbackPw,
+          options: {
+            data: {
+              full_name: form.name,
+              role: appRoleToDb(form.role),
+            }
+          }
         })
 
-        if (rpcError || !rpcData?.success) {
-          throw new Error(rpcError?.message || rpcData?.error || error?.message || 'Failed to create user')
+        if (authError || !authData.user) {
+          // If auth.signUp blocked, fallback to RPC
+          const { data: rpcData, error: rpcError } = await supabase.rpc('create_system_user', {
+            p_email: form.email,
+            p_password: fallbackPw,
+            p_full_name: form.name,
+            p_role: appRoleToDb(form.role),
+            p_phone: form.phone || null
+          })
+
+          if (rpcError || !rpcData?.success) {
+            throw new Error(rpcError?.message || rpcData?.error || authError?.message || 'Failed to create user')
+          }
+          createdUserId = rpcData.user_id
+        } else {
+          createdUserId = authData.user.id
+          
+          // Ensure profile has correct role and full_name
+          await supabase.from('profiles').upsert({
+            id: authData.user.id,
+            full_name: form.name,
+            email: form.email,
+            role: appRoleToDb(form.role),
+            status: 'active'
+          })
         }
 
-        createdUserId = rpcData.user_id
         generatedTempPw = fallbackPw
       }
 
