@@ -772,7 +772,7 @@ export default function IDCardGenerator() {
 
         const { data: settingsData } = await supabase
           .from('company_settings')
-          .select('name, email, address, phone, website, rc_number, logo_url')
+          .select('name, email, address, phone, website, rc_number, logo_url, primary_color, accent_color')
           .single()
 
         if (settingsData) {
@@ -784,6 +784,8 @@ export default function IDCardGenerator() {
             website: settingsData.website || '',
             rc_number: settingsData.rc_number || '',
             logo_url: settingsData.logo_url || null,
+            primary_color: settingsData.primary_color || '#1e3a5f',
+            accent_color: settingsData.accent_color || '#2563eb',
           })
         }
       } catch (err) {
