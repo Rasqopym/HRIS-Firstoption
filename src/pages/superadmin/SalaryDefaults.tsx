@@ -138,36 +138,40 @@ export default function SalaryDefaults() {
       const { error: templateError } = await supabase
         .from('salary_templates')
         .update({
-          name: activeTemplate.name,
-          job_grade: activeTemplate.jobGrade,
-          department: activeTemplate.department,
+          name: activeTemplate.name || 'Untitled Template',
+          job_grade: activeTemplate.jobGrade || 'General',
+          department: activeTemplate.department || 'All',
         })
         .eq('id', activeTemplateId)
 
-      if (templateError) throw templateError
+      if (templateError) {
+        console.error('Error updating template info:', templateError)
+        throw templateError
+      }
 
-      // Update all components
-      const componentUpdates = activeTemplate.components.map(comp =>
-        supabase
+      // Update each component record
+      for (const comp of activeTemplate.components) {
+        const { error: compError } = await supabase
           .from('salary_template_components')
           .update({
             is_active: comp.active,
             is_taxable: comp.taxable,
             rate_type: appRateTypeToDb(comp.rateType),
-            rate: comp.rate,
+            rate: comp.rate || 0,
           })
           .eq('id', comp.id)
-      )
 
-      const results = await Promise.all(componentUpdates)
-      const firstError = results.find(r => r.error)
-      if (firstError) throw firstError.error
+        if (compError) {
+          console.error(`Error updating component ${comp.name} (${comp.id}):`, compError)
+          throw compError
+        }
+      }
 
       setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      setTimeout(() => setSaved(false), 2500)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to save template'
-      setError(errorMsg)
+      setError(`Save error: ${errorMsg}`)
       console.error('Error saving template:', err)
     } finally {
       setSaving(false)

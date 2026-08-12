@@ -62,16 +62,20 @@ interface CompanySettings {
   website: string
   rc_number: string
   logo_url: string | null
+  primary_color?: string
+  accent_color?: string
 }
-
 
 function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: CardSide; companySettings: CompanySettings | null }) {
   const firstName = s.full_name.split(' ').slice(0, -1).join(' ') || s.full_name
   const lastName = s.full_name.split(' ').slice(-1)[0] || ''
   const verificationUrl = `${window.location.origin}/verify/${s.id_verification_code}`
-  const expiryFormatted = s.id_card_expires_at
-    ? new Date(s.id_card_expires_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase()
-    : 'N/A'
+  const primaryColor = companySettings?.primary_color || '#1e3a5f'
+  const accentColor = companySettings?.accent_color || '#2563eb'
+
+  // Default expiry to 2 years from today if null
+  const expiryDate = s.id_card_expires_at || new Date(new Date().setFullYear(new Date().getFullYear() + 2)).toISOString()
+  const expiryFormatted = new Date(expiryDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase()
 
   if (side === 'back') {
     return (
@@ -93,8 +97,8 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
         <div style={{
           width: '35%',
           height: '100%',
-          background: '#1e1b4b',
-          borderRight: '4px solid #2563eb',
+          background: primaryColor,
+          borderRight: `4px solid ${accentColor}`,
           position: 'relative',
           zIndex: 10,
           display: 'flex',
@@ -103,7 +107,7 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           justifyContent: 'center',
           padding: '20px'
         }}>
-          <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px', overflow: 'hidden' }}>
+          <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px', overflow: 'hidden' }}>
             {companySettings?.logo_url ? (
               <img src={companySettings.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
             ) : (
@@ -130,47 +134,47 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '10px', color: '#1e1b4b', lineHeight: 1.3, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '10px', color: primaryColor, lineHeight: 1.3, fontFamily: 'sans-serif' }}>
                 This ID card is the property of <span style={{ fontWeight: 700 }}>{companySettings?.name || 'Firstoption Support Services'}</span>.
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '10px', color: '#1e1b4b', lineHeight: 1.3, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '10px', color: primaryColor, lineHeight: 1.3, fontFamily: 'sans-serif' }}>
                 It is issued for official use only and must be worn at all times within the company premises.
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '10px', color: '#1e1b4b', lineHeight: 1.3, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '10px', color: primaryColor, lineHeight: 1.3, fontFamily: 'sans-serif' }}>
                 If found, please return to <span style={{ fontWeight: 700 }}>{companySettings?.name || 'Firstoption Support Services'}</span>.
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '10px', color: '#1e1b4b', lineHeight: 1.3, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '10px', color: primaryColor, lineHeight: 1.3, fontFamily: 'sans-serif' }}>
                 This card is non-transferable and remains the property of the company.
               </div>
             </div>
@@ -178,10 +182,10 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
 
           <div style={{ marginTop: '8px' }}>
             <div style={{ width: '100px', borderBottom: '1px solid #94a3b8', marginTop: '8px' }}></div>
-            <div style={{ fontSize: '10px', fontWeight: 700, color: '#1e1b4b', marginTop: '4px', fontFamily: 'sans-serif' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: primaryColor, marginTop: '4px', fontFamily: 'sans-serif' }}>
               Authorised Signatory
             </div>
-            <div style={{ fontSize: '9px', color: '#2563eb', marginTop: '1px', fontFamily: 'sans-serif' }}>
+            <div style={{ fontSize: '9px', color: accentColor, marginTop: '1px', fontFamily: 'sans-serif' }}>
               {companySettings?.name || 'Firstoption Support Services'}
             </div>
           </div>
@@ -214,8 +218,8 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
       <div style={{
         width: '35%',
         height: '100%',
-        background: '#1e1b4b',
-        borderRight: '4px solid #2563eb',
+        background: primaryColor,
+        borderRight: `4px solid ${accentColor}`,
         position: 'relative',
         zIndex: 10
       }}>
@@ -226,7 +230,7 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           width: '28px',
           height: '28px',
           borderRadius: '6px',
-          background: '#2563eb',
+          background: accentColor,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center'
@@ -246,7 +250,7 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           width: '90px',
           height: '90px',
           borderRadius: '50%',
-          border: '4px solid #2563eb',
+          border: `4px solid ${accentColor}`,
           overflow: 'hidden'
         }}>
           {s.photo_url ? (
@@ -273,34 +277,34 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
         zIndex: 10
       }}>
         <div style={{ marginBottom: '12px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e1b4b', lineHeight: 1, fontFamily: 'sans-serif' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: primaryColor, lineHeight: 1, fontFamily: 'sans-serif' }}>
             {companySettings?.name?.toUpperCase() || 'FIRSTOPTION'}
           </div>
-          <div style={{ fontSize: '10px', color: '#2563eb', marginTop: '2px', fontFamily: 'monospace' }}>
+          <div style={{ fontSize: '10px', color: accentColor, marginTop: '2px', fontFamily: 'monospace' }}>
             ID: {s.staff_code}
           </div>
         </div>
 
         <div style={{ marginBottom: '8px' }}>
-          <div style={{ fontSize: '20px', fontWeight: 800, color: '#2563eb', lineHeight: 1, fontFamily: 'sans-serif' }}>
+          <div style={{ fontSize: '20px', fontWeight: 800, color: accentColor, lineHeight: 1, fontFamily: 'sans-serif' }}>
             {lastName}
           </div>
-          <div style={{ fontSize: '16px', fontWeight: 800, color: '#1e1b4b', lineHeight: 1, marginTop: '2px', fontFamily: 'sans-serif' }}>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: primaryColor, lineHeight: 1, marginTop: '2px', fontFamily: 'sans-serif' }}>
             {firstName}
           </div>
         </div>
 
         <div style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#2563eb', fontFamily: 'sans-serif' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: accentColor, fontFamily: 'sans-serif' }}>
             {s.job_title}
           </div>
-          <span style={{ display: 'block', width: '30px', height: '2px', background: '#2563eb', margin: '2px 0 0' }}></span>
+          <span style={{ display: 'block', width: '30px', height: '2px', background: accentColor, margin: '2px 0 0' }}></span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{
             width: '70px',
-            border: '2px solid #1e1b4b',
+            border: `2px solid ${primaryColor}`,
             padding: '4px',
             background: 'white',
             flexShrink: 0
@@ -309,8 +313,8 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           </div>
 
           <div style={{ fontSize: '11px', fontFamily: 'sans-serif' }}>
-            <span style={{ color: '#2563eb' }}>Expires:</span>
-            <span style={{ color: '#1e1b4b', marginLeft: '4px' }}>{expiryFormatted}</span>
+            <span style={{ color: accentColor }}>Expires:</span>
+            <span style={{ color: primaryColor, marginLeft: '4px' }}>{expiryFormatted}</span>
           </div>
         </div>
       </div>
@@ -322,9 +326,12 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
   const firstName = s.full_name.split(' ').slice(0, -1).join(' ') || s.full_name
   const lastName = s.full_name.split(' ').slice(-1)[0] || ''
   const verificationUrl = `${window.location.origin}/verify/${s.id_verification_code}`
-  const expiryFormatted = s.id_card_expires_at
-    ? new Date(s.id_card_expires_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase()
-    : 'N/A'
+  const primaryColor = companySettings?.primary_color || '#1e3a5f'
+  const accentColor = companySettings?.accent_color || '#2563eb'
+
+  // Default expiry to 2 years from today if null
+  const expiryDate = s.id_card_expires_at || new Date(new Date().setFullYear(new Date().getFullYear() + 2)).toISOString()
+  const expiryFormatted = new Date(expiryDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase()
 
   if (side === 'back') {
     return (
@@ -348,8 +355,8 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
           left: 0,
           right: 0,
           height: '105px',
-          background: '#1e1b4b',
-          borderBottom: '3px solid #2563eb',
+          background: primaryColor,
+          borderBottom: `3px solid ${accentColor}`,
           borderTopLeftRadius: '16px',
           borderTopRightRadius: '16px',
           padding: '24px 20px 0',
@@ -357,7 +364,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
           zIndex: 10
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '6px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '6px', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
               {companySettings?.logo_url ? (
                 <img src={companySettings.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
               ) : (
@@ -391,47 +398,47 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '12px', color: '#1e1b4b', lineHeight: 1.4, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '12px', color: primaryColor, lineHeight: 1.4, fontFamily: 'sans-serif' }}>
                 This ID card is the property of <span style={{ fontWeight: 700 }}>{companySettings?.name || 'Firstoption Support Services'}</span>.
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '12px', color: '#1e1b4b', lineHeight: 1.4, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '12px', color: primaryColor, lineHeight: 1.4, fontFamily: 'sans-serif' }}>
                 It is issued for official use only and must be worn at all times within the company premises.
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '12px', color: '#1e1b4b', lineHeight: 1.4, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '12px', color: primaryColor, lineHeight: 1.4, fontFamily: 'sans-serif' }}>
                 If found, please return to <span style={{ fontWeight: 700 }}>{companySettings?.name || 'Firstoption Support Services'}</span>.
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                 </svg>
               </div>
-              <div style={{ fontSize: '12px', color: '#1e1b4b', lineHeight: 1.4, fontFamily: 'sans-serif' }}>
+              <div style={{ fontSize: '12px', color: primaryColor, lineHeight: 1.4, fontFamily: 'sans-serif' }}>
                 This card is non-transferable and remains the property of the company.
               </div>
             </div>
@@ -439,10 +446,10 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
 
           <div style={{ marginTop: '24px', marginBottom: '16px' }}>
             <div style={{ width: '140px', borderBottom: '1px solid #94a3b8', marginTop: '20px' }}></div>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e1b4b', marginTop: '6px', fontFamily: 'sans-serif' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: primaryColor, marginTop: '6px', fontFamily: 'sans-serif' }}>
               Authorised Signatory
             </div>
-            <div style={{ fontSize: '11px', color: '#2563eb', marginTop: '2px', fontFamily: 'sans-serif' }}>
+            <div style={{ fontSize: '11px', color: accentColor, marginTop: '2px', fontFamily: 'sans-serif' }}>
               {companySettings?.name || 'Firstoption Support Services'}
             </div>
           </div>
@@ -454,8 +461,8 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
           left: 0,
           right: 0,
           height: '125px',
-          background: '#1e1b4b',
-          borderTop: '3px solid #2563eb',
+          background: primaryColor,
+          borderTop: `3px solid ${accentColor}`,
           borderBottomLeftRadius: '16px',
           borderBottomRightRadius: '16px',
           padding: '16px 20px',
@@ -465,7 +472,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1e1b4b" strokeWidth="2">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={primaryColor} strokeWidth="2">
                   <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                   <polyline points="22,6 12,13 2,6"/>
                 </svg>
@@ -477,7 +484,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1e1b4b" strokeWidth="2">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={primaryColor} strokeWidth="2">
                   <circle cx="12" cy="12" r="10"/>
                   <line x1="2" y1="12" x2="22" y2="12"/>
                   <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
@@ -490,7 +497,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1e1b4b" strokeWidth="2">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={primaryColor} strokeWidth="2">
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                   <circle cx="12" cy="10" r="3"/>
                 </svg>
@@ -531,8 +538,8 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         left: 0,
         right: 0,
         height: '110px',
-        background: '#1e1b4b',
-        borderBottom: '4px solid #2563eb',
+        background: primaryColor,
+        borderBottom: `4px solid ${accentColor}`,
         padding: '30px 16px',
         display: 'flex',
         justifyContent: 'space-between',
@@ -549,7 +556,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
           gap: '8px'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+            <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
               {companySettings?.logo_url ? (
                 <img src={companySettings.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
               ) : (
@@ -589,7 +596,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         width: '100px',
         height: '100px',
         borderRadius: '50%',
-        border: '4px solid #2563eb',
+        border: `4px solid ${accentColor}`,
         overflow: 'hidden',
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         zIndex: 15
@@ -607,7 +614,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
       </div>
 
       <div style={{
-        marginTop: '210px',
+        marginTop: '195px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -616,12 +623,10 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         zIndex: 10
       }}>
         <div style={{
-          fontSize: '22px',
+          fontSize: '20px',
           fontWeight: 800,
-          color: '#2563eb',
+          color: accentColor,
           lineHeight: 1,
-          textAlign: 'center',
-          width: '100%',
           fontFamily: 'sans-serif'
         }}>
           {lastName}
@@ -630,7 +635,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         <div style={{
           fontSize: '17px',
           fontWeight: 800,
-          color: '#1e1b4b',
+          color: primaryColor,
           lineHeight: 1,
           marginTop: '3px',
           textAlign: 'center',
@@ -641,25 +646,27 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         </div>
 
         <div style={{ marginTop: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#2563eb', fontFamily: 'sans-serif' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: accentColor, fontFamily: 'sans-serif' }}>
             {s.job_title}
           </div>
-          <span style={{ display: 'block', width: '40px', height: '2px', background: '#2563eb', margin: '2px auto 0' }}></span>
+          <span style={{ display: 'block', width: '40px', height: '2px', background: accentColor, margin: '2px auto 0' }}></span>
         </div>
 
         <div style={{
           marginTop: '14px',
           width: '92px',
-          border: '2px solid #1e1b4b',
+          border: `2px solid ${primaryColor}`,
           padding: '4px',
-          background: 'white'
+          background: 'white',
+          display: 'flex',
+          justifyContent: 'center'
         }}>
           <QRCodeSVG value={verificationUrl} size={80} />
         </div>
 
         <div style={{
           width: '92px',
-          background: '#1e1b4b',
+          background: primaryColor,
           color: 'white',
           fontSize: '9px',
           padding: '3px 0',
@@ -670,8 +677,8 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         </div>
 
         <div style={{ marginTop: '10px', fontSize: '11px', textAlign: 'center' }}>
-          <span style={{ color: '#2563eb' }}>Expires:</span>
-          <span style={{ color: '#1e1b4b', marginLeft: '4px' }}>{expiryFormatted}</span>
+          <span style={{ color: accentColor }}>Expires:</span>
+          <span style={{ color: primaryColor, marginLeft: '4px' }}>{expiryFormatted}</span>
         </div>
       </div>
 
@@ -681,7 +688,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         left: '16px',
         width: 'calc(100% - 32px)',
         height: '32px',
-        background: '#1e1b4b',
+        background: primaryColor,
         borderRadius: '16px',
         display: 'flex',
         alignItems: 'center',
@@ -711,12 +718,16 @@ export default function IDCardGenerator() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { data: staffData, error: staffError } = await supabase
+        let staffData: any[] = []
+        
+        // Attempt relational query first
+        const { data, error: staffError } = await supabase
           .from('staff')
           .select(`
             id,
             full_name,
             job_title,
+            department,
             department_id,
             departments (name),
             photo_url,
@@ -724,21 +735,31 @@ export default function IDCardGenerator() {
             staff_code,
             id_verification_code,
             id_card_issued_at,
-            id_card_expires_at
+            id_card_expires_at,
+            status
           `)
-          .eq('status', 'active')
           .order('full_name', { ascending: true })
 
-        if (staffError) throw staffError
+        if (!staffError && data) {
+          staffData = data.filter(s => s.status === 'active' || !s.status)
+        } else {
+          // Fallback query without joins
+          const { data: simpleData } = await supabase
+            .from('staff')
+            .select('*')
+            .order('full_name', { ascending: true })
 
-        const formattedStaff = (staffData || []).map((s: any) => ({
+          staffData = (simpleData || []).filter(s => s.status === 'active' || !s.status)
+        }
+
+        const formattedStaff = staffData.map((s: any) => ({
           id: s.id,
           full_name: s.full_name,
-          job_title: s.job_title,
-          department_name: (s.departments as any)?.name || 'Unknown',
+          job_title: s.job_title || 'Staff',
+          department_name: (s.departments as any)?.name || s.department || 'General',
           photo_url: s.photo_url || (s.profiles as any)?.photo_url,
-          staff_code: s.staff_code,
-          id_verification_code: s.id_verification_code,
+          staff_code: s.staff_code || 'FO-0001',
+          id_verification_code: s.id_verification_code || 'VERIFY123',
           id_card_issued_at: s.id_card_issued_at,
           id_card_expires_at: s.id_card_expires_at,
         }))
@@ -881,6 +902,26 @@ export default function IDCardGenerator() {
                 {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.staff_code})</option>)}
               </select>
 
+              <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+                <span className="text-xs font-medium text-slate-500 whitespace-nowrap">Card Expiry:</span>
+                <input
+                  type="date"
+                  value={selectedStaff?.id_card_expires_at ? selectedStaff.id_card_expires_at.split('T')[0] : new Date(new Date().setFullYear(new Date().getFullYear() + 2)).toISOString().split('T')[0]}
+                  onChange={async e => {
+                    const dateStr = e.target.value
+                    if (!dateStr || !selectedStaff) return
+                    const isoDate = new Date(dateStr).toISOString()
+                    setStaffList(prev => prev.map(s => s.id === selectedStaff.id ? { ...s, id_card_expires_at: isoDate } : s))
+                    try {
+                      await supabase.from('staff').update({ id_card_expires_at: isoDate }).eq('id', selectedStaff.id)
+                    } catch (err) {
+                      console.error('Error updating expiry:', err)
+                    }
+                  }}
+                  className="text-xs border-0 focus:outline-none bg-transparent text-slate-700 font-medium cursor-pointer"
+                />
+              </div>
+
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
                 {(['landscape', 'portrait'] as Orientation[]).map(o => (
                   <button key={o} onClick={() => setOrientation(o)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${orientation === o ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
@@ -953,8 +994,8 @@ export default function IDCardGenerator() {
                   className={`cursor-pointer rounded-xl border-2 transition-all overflow-hidden ${bulkSelected.includes(s.id) ? 'border-blue-500 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}
                 >
                   <div className="id-card-front printable-card relative" style={{ aspectRatio: '85.6/54', background: 'white', overflow: 'hidden' }}>
-                    <div style={{ background: '#1e1b4b', padding: '4px 6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <div style={{ width: '16px', height: '16px', borderRadius: '3px', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                    <div style={{ background: companySettings?.primary_color || '#1e3a5f', padding: '4px 6px', display: 'flex', itemsAlign: 'center', gap: '4px' }}>
+                      <div style={{ width: '16px', height: '16px', borderRadius: '3px', background: companySettings?.accent_color || '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                         {companySettings?.logo_url ? (
                           <img src={companySettings.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
                         ) : (
@@ -965,7 +1006,7 @@ export default function IDCardGenerator() {
                     </div>
 
                     <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: '2px solid #2563eb', overflow: 'hidden' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: `2px solid ${companySettings?.accent_color || '#2563eb'}`, overflow: 'hidden' }}>
                         {s.photo_url ? (
                           <img
                             src={s.photo_url}
@@ -979,19 +1020,19 @@ export default function IDCardGenerator() {
                       </div>
 
                       <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: '10px', fontWeight: 800, color: '#2563eb', lineHeight: 1, fontFamily: 'sans-serif' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 800, color: companySettings?.accent_color || '#2563eb', lineHeight: 1, fontFamily: 'sans-serif' }}>
                           {lastName}
                         </div>
-                        <div style={{ fontSize: '8px', fontWeight: 800, color: '#1e1b4b', lineHeight: 1, marginTop: '1px', fontFamily: 'sans-serif' }}>
+                        <div style={{ fontSize: '8px', fontWeight: 800, color: companySettings?.primary_color || '#1e3a5f', lineHeight: 1, marginTop: '1px', fontFamily: 'sans-serif' }}>
                           {firstName}
                         </div>
                       </div>
 
-                      <div style={{ fontSize: '7px', fontWeight: 700, textTransform: 'uppercase', color: '#2563eb', fontFamily: 'sans-serif' }}>
+                      <div style={{ fontSize: '7px', fontWeight: 700, textTransform: 'uppercase', color: companySettings?.accent_color || '#2563eb', fontFamily: 'sans-serif' }}>
                         {s.job_title}
                       </div>
 
-                      <div style={{ width: '32px', height: '32px', border: '1px solid #1e1b4b', padding: '2px', background: 'white' }}>
+                      <div style={{ width: '32px', height: '32px', border: `1px solid ${companySettings?.primary_color || '#1e3a5f'}`, padding: '2px', background: 'white' }}>
                         <QRCodeSVG value={verificationUrl} size={28} />
                       </div>
                     </div>

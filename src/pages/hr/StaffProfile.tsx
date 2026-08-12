@@ -59,28 +59,47 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
     const fetchStaff = async () => {
       setLoading(true)
       try {
-        let data, error
+        let data = null
 
         if (staffId) {
           const result = await supabase
             .from('staff')
             .select('*, departments(name), profiles(id, photo_url)')
             .eq('id', staffId)
-            .single()
-          data = result.data
-          error = result.error
+            .maybeSingle()
+          
+          if (result.data) {
+            data = result.data
+          } else {
+            // Fallback to simple query without joins
+            const simpleResult = await supabase
+              .from('staff')
+              .select('*')
+              .eq('id', staffId)
+              .maybeSingle()
+            data = simpleResult.data
+          }
         } else {
           const result = await supabase
             .from('staff')
             .select('*, departments(name), profiles(id, photo_url)')
             .order('full_name', { ascending: true })
             .limit(1)
-            .single()
-          data = result.data
-          error = result.error
+            .maybeSingle()
+          
+          if (result.data) {
+            data = result.data
+          } else {
+            const simpleResult = await supabase
+              .from('staff')
+              .select('*')
+              .order('full_name', { ascending: true })
+              .limit(1)
+              .maybeSingle()
+            data = simpleResult.data
+          }
         }
 
-        if (error) throw error
         setStaff(data)
       } catch (err) {
         console.error('Error fetching staff:', err)
@@ -396,6 +415,9 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
       const roleToUse = currentUserRole === 'hr' ? 'staff' : selectedRole
       const dbRole = appRoleToDb(roleToUse)
 
+      let userId = ''
+      let generatedTempPw = ''
+
       const { data, error } = await supabase.functions.invoke('create-user', {
         body: {
           email: s.email,
@@ -405,22 +427,60 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
         },
       })
 
-      if (error) throw error
+      if (!error && (data as any)?.success) {
+        userId = (data as any).user_id
+        generatedTempPw = (data as any).temp_password || ''
+      } else {
+        const fallbackPw = `Pass#${Math.random().toString(36).slice(-8)}`
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: s.email,
+          password: fallbackPw,
+          options: {
+            data: {
+              full_name: s.full_name,
+              role: dbRole,
+            }
+          }
+        })
 
-      const result = data as { success: boolean; temp_password?: string; warning?: string }
-      if (!result.success) {
-        throw new Error('Failed to create user')
+        if (authError || !authData.user) {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('create_system_user', {
+            p_email: s.email,
+            p_password: fallbackPw,
+            p_full_name: s.full_name,
+            p_role: dbRole,
+            p_phone: s.phone || null
+          })
+
+          if (rpcError || !rpcData?.success) {
+            throw new Error(rpcError?.message || rpcData?.error || authError?.message || 'Failed to grant system access')
+          }
+          userId = rpcData.user_id
+        } else {
+          userId = authData.user.id
+          await supabase.from('profiles').upsert({
+            id: authData.user.id,
+            full_name: s.full_name,
+            email: s.email,
+            role: dbRole,
+            status: 'active'
+          })
+        }
+
+        // Link profile_id on staff record
+        await supabase.from('staff').update({ profile_id: userId }).eq('id', s.id)
+        generatedTempPw = fallbackPw
       }
 
-      setTempPassword(result.temp_password || '')
+      setTempPassword(generatedTempPw)
       setGrantAccessSuccess(true)
 
       // Re-fetch staff to update profile_id
       const { data: updatedStaff } = await supabase
         .from('staff')
-        .select('*, departments(name), profiles(id, photo_url)')
-        .eq('id', staffId)
-        .single()
+        .select('*')
+        .eq('id', s.id)
+        .maybeSingle()
 
       if (updatedStaff) {
         setStaff(updatedStaff)
@@ -524,7 +584,7 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
             <div className="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-3">
               <div>
                 <h2 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">{s.full_name}</h2>
-                <p className="text-slate-500 text-xs sm:text-sm mt-0.5">{s.job_title} · {s.departments?.name || 'Unassigned'}</p>
+                <p className="text-slate-500 text-xs sm:text-sm mt-0.5">{s.job_title} · {s.departments?.name || s.department || 'Unassigned'}</p>
               </div>
               <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap w-full sm:w-auto">
                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[s.status as StaffStatus]}`}>
@@ -608,7 +668,7 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
             <dl className="space-y-3">
               {[
                 { label: 'Staff ID', value: s.staff_code || '—', mono: true },
-                { label: 'Department', value: s.departments?.name || 'Unassigned' },
+                { label: 'Department', value: s.departments?.name || s.department || 'Unassigned' },
                 { label: 'Job Title', value: s.job_title || '—' },
                 { label: 'Employment Date', value: s.date_employed?.split('T')[0] || '—' },
                 { label: 'Last Login', value: s.profiles?.id ? 'Has system access' : 'No system access' },

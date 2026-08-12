@@ -130,6 +130,9 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
 
     try {
       const fullName = `${personal.firstName} ${personal.lastName}`
+      const deptObj = departments.find(d => d.id === employment.department)
+      const deptName = deptObj ? deptObj.name : (employment.department || 'Accounting & Finance')
+      const deptId = deptObj ? deptObj.id : (employment.department?.length === 36 ? employment.department : null)
 
       let data, error
 
@@ -145,7 +148,8 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
           state: personal.state || null,
           next_of_kin: personal.nextOfKin || null,
           next_of_kin_phone: personal.nextOfKinPhone || null,
-          department_id: employment.department,
+          department_id: deptId,
+          department: deptName,
           job_title: employment.jobTitle,
           date_employed: employment.employmentDate || null,
           employment_type: employment.employmentType,
@@ -156,7 +160,6 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
         }
 
         console.log('[AddEditStaff UPDATE] Payload being sent:', updatePayload)
-        console.log('[AddEditStaff UPDATE] department_id value:', employment.department)
 
         const result = await supabase
           .from('staff')
@@ -191,7 +194,8 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
             state: personal.state || null,
             next_of_kin: personal.nextOfKin || null,
             next_of_kin_phone: personal.nextOfKinPhone || null,
-            department_id: employment.department,
+            department_id: deptId,
+            department: deptName,
             job_title: employment.jobTitle,
             date_employed: employment.employmentDate || null,
             employment_type: employment.employmentType,

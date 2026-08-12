@@ -166,19 +166,27 @@ export default function SalaryStructure({ staffId }: Props) {
             }
           }
 
-          // Map components to SalaryComponent shape
-          const mappedComponents: SalaryComponent[] = (compData || []).map(c => ({
-            id: c.id,
-            name: c.salary_components?.name || 'Unknown',
-            category: c.salary_components?.category === 'allowance' ? 'earning' : 'deduction',
-            active: c.is_active,
-            taxable: c.is_taxable,
-            rateType: dbRateTypeToApp(c.rate_type),
-            rate: c.rate || 0,
-            attendanceBased: false,
-            attendanceSource: undefined,
-            description: undefined,
-          }))
+          // Map and deduplicate components by name
+          const uniqueComponentsMap = new Map<string, SalaryComponent>()
+          ;(compData || []).forEach(c => {
+            const name = c.salary_components?.name || 'Unknown'
+            if (!uniqueComponentsMap.has(name)) {
+              uniqueComponentsMap.set(name, {
+                id: c.id,
+                name,
+                category: c.salary_components?.category === 'allowance' ? 'earning' : 'deduction',
+                active: c.is_active,
+                taxable: c.is_taxable,
+                rateType: dbRateTypeToApp(c.rate_type),
+                rate: c.rate || 0,
+                attendanceBased: c.rate_type === 'per_hour' || c.rate_type === 'per_day',
+                attendanceSource: undefined,
+                description: undefined,
+              })
+            }
+          })
+
+          const mappedComponents: SalaryComponent[] = Array.from(uniqueComponentsMap.values())
 
           setComponents(mappedComponents)
         } catch (err) {
