@@ -120,6 +120,11 @@ export default function Profile() {
         .update({ photo_url: publicUrl })
         .eq('id', user.id)
 
+      await supabase
+        .from('staff')
+        .update({ photo_url: publicUrl })
+        .eq('profile_id', user.id)
+
       console.log('[Photo Upload Debug] FULL update result:', updateResult)
       console.log('[Photo Upload Debug] Update affected rows:', updateResult.count)
 

@@ -8,7 +8,7 @@ interface AuditFlag {
   comment: string
   status: 'open' | 'resolved'
   resolved_at: string | null
-  resolved_by_name: string | null
+  resolved_by: string | null
   created_at: string
   audit_log: {
     actor_name: string
@@ -30,19 +30,46 @@ export default function FlagsComments() {
     const fetchFlags = async () => {
       try {
         setLoading(true)
-        const { data, error } = await supabase
-          .from('audit_flags')
-          .select(`
-            id, audit_log_id, flagged_by_name, comment, status, resolved_at, resolved_by_name, created_at,
-            audit_log (actor_name, actor_role, action, entity, details, created_at)
-          `)
-          .order('audit_flags.created_at', { ascending: false })
+        setError('')
 
-        if (error) throw error
-        setFlags(data || [])
-      } catch (err) {
+        const { data: flagsData, error: flagsError } = await supabase
+          .from('audit_flags')
+          .select('id, audit_log_id, flagged_by_name, comment, status, resolved_at, resolved_by, created_at')
+          .order('created_at', { ascending: false })
+
+        if (flagsError) throw flagsError
+
+        if (!flagsData || flagsData.length === 0) {
+          setFlags([])
+          setLoading(false)
+          return
+        }
+
+        const logIds = Array.from(new Set(flagsData.map(f => f.audit_log_id).filter(Boolean)))
+        let logsMap = new Map()
+
+        if (logIds.length > 0) {
+          const { data: logsData } = await supabase
+            .from('audit_log')
+            .select('id, actor_name, actor_role, action, entity, details, created_at')
+            .in('id', logIds)
+
+          logsMap = new Map((logsData || []).map(l => [l.id, l]))
+        }
+
+        const mappedFlags: AuditFlag[] = flagsData.map(f => {
+          const log = logsMap.get(f.audit_log_id)
+          return {
+            ...f,
+            audit_log: log ? [log] : []
+          }
+        })
+
+        setFlags(mappedFlags)
+        setError('')
+      } catch (err: any) {
         console.error('Error fetching flags:', err)
-        setError('Failed to load flags')
+        setError('Failed to load flags: ' + (err.message || err.details || 'Unknown error'))
       } finally {
         setLoading(false)
       }
@@ -54,33 +81,42 @@ export default function FlagsComments() {
   const handleResolve = async (id: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      let resolverName = 'Admin'
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .single()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (profile?.full_name) resolverName = profile.full_name
+      }
+
+      const updatePayload: any = {
+        status: 'resolved',
+        resolved_at: new Date().toISOString()
+      }
+
+      if (user?.id) {
+        updatePayload.resolved_by = user.id
+      }
 
       const { error } = await supabase
         .from('audit_flags')
-        .update({
-          status: 'resolved',
-          resolved_at: new Date().toISOString(),
-          resolved_by_name: profile?.full_name || 'Unknown'
-        })
+        .update(updatePayload)
         .eq('id', id)
 
       if (error) throw error
 
       setFlags(prev => prev.map(f => 
         f.id === id 
-          ? { ...f, status: 'resolved', resolved_at: new Date().toISOString(), resolved_by_name: profile?.full_name || 'Unknown' }
+          ? { ...f, status: 'resolved', resolved_at: new Date().toISOString(), resolved_by: resolverName }
           : f
       ))
-    } catch (err) {
+      setError('')
+    } catch (err: any) {
       console.error('Error resolving flag:', err)
-      setError('Failed to resolve flag')
+      setError('Failed to resolve flag: ' + (err.message || 'Error'))
     }
   }
 
@@ -182,8 +218,8 @@ export default function FlagsComments() {
                     </span>
                   </td>
                   <td className="py-3.5 px-4 text-xs text-slate-500">
-                    {flag.resolved_by_name ? (
-                      <div>{flag.resolved_by_name}</div>
+                    {flag.resolved_by ? (
+                      <div>{flag.resolved_by}</div>
                     ) : (
                       <span className="text-slate-400">—</span>
                     )}

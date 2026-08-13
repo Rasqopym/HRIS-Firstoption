@@ -253,9 +253,9 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           border: `4px solid ${accentColor}`,
           overflow: 'hidden'
         }}>
-          {s.photo_url ? (
+          {((s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo) ? (
             <img
-              src={s.photo_url}
+              src={(s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo}
               alt={s.full_name}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               crossOrigin="anonymous"
@@ -601,9 +601,9 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         zIndex: 15
       }}>
-        {s.photo_url ? (
+        {((s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo) ? (
           <img
-            src={s.photo_url}
+            src={(s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo}
             alt={s.full_name}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             crossOrigin="anonymous"
@@ -770,24 +770,30 @@ export default function IDCardGenerator() {
           setBulkSelected(formattedStaff.map(s => s.id))
         }
 
+        let cachedSettings: any = null
+        try {
+          const raw = localStorage.getItem('hris_company_settings')
+          if (raw) cachedSettings = JSON.parse(raw)
+        } catch (e) {}
+
         const { data: settingsData } = await supabase
           .from('company_settings')
           .select('name, email, address, phone, website, rc_number, logo_url, primary_color, accent_color')
           .single()
 
-        if (settingsData) {
-          setCompanySettings({
-            name: settingsData.name || 'Firstoption Support Services',
-            email: settingsData.email || '',
-            address: settingsData.address || '',
-            phone: settingsData.phone || '',
-            website: settingsData.website || '',
-            rc_number: settingsData.rc_number || '',
-            logo_url: settingsData.logo_url || null,
-            primary_color: settingsData.primary_color || '#1e3a5f',
-            accent_color: settingsData.accent_color || '#2563eb',
-          })
+        const finalSettings = {
+          name: cachedSettings?.name || settingsData?.name || 'Firstoption Support Services',
+          email: cachedSettings?.email || settingsData?.email || '',
+          address: cachedSettings?.address || settingsData?.address || '',
+          phone: cachedSettings?.phone || settingsData?.phone || '',
+          website: cachedSettings?.website || settingsData?.website || '',
+          rc_number: cachedSettings?.rc_number || settingsData?.rc_number || '',
+          logo_url: cachedSettings?.logo_url || settingsData?.logo_url || null,
+          primary_color: cachedSettings?.primary_color || settingsData?.primary_color || '#1e3a5f',
+          accent_color: cachedSettings?.accent_color || settingsData?.accent_color || '#2563eb',
         }
+
+        setCompanySettings(finalSettings)
       } catch (err) {
         console.error('Error fetching data:', err)
       } finally {
@@ -996,7 +1002,7 @@ export default function IDCardGenerator() {
                   className={`cursor-pointer rounded-xl border-2 transition-all overflow-hidden ${bulkSelected.includes(s.id) ? 'border-blue-500 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}
                 >
                   <div className="id-card-front printable-card relative" style={{ aspectRatio: '85.6/54', background: 'white', overflow: 'hidden' }}>
-                    <div style={{ background: companySettings?.primary_color || '#1e3a5f', padding: '4px 6px', display: 'flex', itemsAlign: 'center', gap: '4px' }}>
+                    <div style={{ background: companySettings?.primary_color || '#1e3a5f', padding: '4px 6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <div style={{ width: '16px', height: '16px', borderRadius: '3px', background: companySettings?.accent_color || '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                         {companySettings?.logo_url ? (
                           <img src={companySettings.logo_url} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
@@ -1009,9 +1015,9 @@ export default function IDCardGenerator() {
 
                     <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                       <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: `2px solid ${companySettings?.accent_color || '#2563eb'}`, overflow: 'hidden' }}>
-                        {s.photo_url ? (
+                        {((s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo) ? (
                           <img
-                            src={s.photo_url}
+                            src={(s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo}
                             alt={s.full_name}
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             crossOrigin="anonymous"

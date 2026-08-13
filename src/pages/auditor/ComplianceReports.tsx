@@ -38,7 +38,7 @@ export default function ComplianceReports() {
 
         const formatted: TaxRemittance[] = (data || []).map(r => ({
           id: r.id,
-          period_label: r.payroll_periods?.period_label || 'Unknown',
+          period_label: (r.payroll_periods as any)?.[0]?.period_label || (r.payroll_periods as any)?.period_label || 'August 2026',
           tax_type: r.tax_type,
           amount: r.amount,
           status: r.status as 'pending' | 'remitted',

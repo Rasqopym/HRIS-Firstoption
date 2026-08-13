@@ -138,7 +138,9 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
       .from('payroll_periods')
       .select('id')
       .eq('period_label', periodLabel)
-      .single()
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
 
     if (existingPeriod) {
       return existingPeriod.id
@@ -156,7 +158,18 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
       .select('id')
       .single()
 
-    if (error) throw error
+    if (error) {
+      const { data: retryPeriod } = await supabase
+        .from('payroll_periods')
+        .select('id')
+        .eq('period_label', periodLabel)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      if (retryPeriod) return retryPeriod.id
+      throw error
+    }
     return newPeriod.id
   }
 
@@ -196,10 +209,14 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
       const periodId = await getOrCreatePayrollPeriod(selectedMonth, selectedYear)
 
       // Fetch existing payslips for this period
-      const { data: existingPayslips } = await supabase
+      const { data: existingPayslips, error: fetchPayslipsError } = await supabase
         .from('payslips')
-        .select('*, staff_id, period_id, status')
+        .select('id, staff_id, period_id, gross_earnings, taxable_income, paye_tax, total_deductions, net_pay, status')
         .eq('period_id', periodId)
+
+      if (fetchPayslipsError) {
+        console.error('Error fetching existing payslips:', fetchPayslipsError)
+      }
 
       const existingPayslipsMap = new Map(
         (existingPayslips || []).map((p: any) => [p.staff_id, p])
@@ -217,13 +234,21 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
             .select('*, salary_components(name, category)')
             .eq('payslip_id', existingPayslip.id)
 
-          const mappedItems: ComputedLineItem[] = (lineItems || []).map((item: any) => ({
-            id: item.id,
-            label: item.salary_components?.name || 'Unknown',
-            amount: item.amount,
-            type: item.salary_components?.category === 'deduction' ? 'deduction' : 'fixed',
-            taxable: item.was_taxable,
-          }))
+          const seenLabels = new Set<string>()
+          const mappedItems: ComputedLineItem[] = []
+          for (const item of lineItems || []) {
+            const label = item.salary_components?.name || 'Unknown'
+            if (!seenLabels.has(label)) {
+              seenLabels.add(label)
+              mappedItems.push({
+                id: item.id,
+                label: label,
+                amount: item.amount,
+                type: item.salary_components?.category === 'deduction' ? 'deduction' : 'fixed',
+                taxable: item.was_taxable,
+              })
+            }
+          }
 
           payrollRows.push({
             staffId: s.staff_code,
@@ -340,35 +365,60 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
         manualValues[staffId]
       )
 
-      // Upsert payslip
-      const { data: payslip, error: payslipError } = await supabase
+      // Check if payslip already exists for staff_id & period_id
+      const { data: existingPayslip } = await supabase
         .from('payslips')
-        .upsert({
-          staff_id: staffMember.id,
-          period_id: periodId,
-          gross_earnings: engineResult.grossEarnings,
-          taxable_income: engineResult.taxableIncome,
-          paye_tax: engineResult.paye,
-          total_deductions: engineResult.totalDeductions,
-          net_pay: engineResult.netPay,
-          status: 'processed'
-        }, {
-          onConflict: 'staff_id,period_id'
-        })
         .select('id')
-        .single()
+        .eq('staff_id', staffMember.id)
+        .eq('period_id', periodId)
+        .maybeSingle()
 
-      if (payslipError) throw payslipError
+      let payslipId: string
+
+      if (existingPayslip) {
+        const { error: updateError } = await supabase
+          .from('payslips')
+          .update({
+            gross_earnings: engineResult.grossEarnings,
+            taxable_income: engineResult.taxableIncome,
+            paye_tax: engineResult.paye,
+            total_deductions: engineResult.totalDeductions,
+            net_pay: engineResult.netPay,
+            status: 'processed'
+          })
+          .eq('id', existingPayslip.id)
+
+        if (updateError) throw updateError
+        payslipId = existingPayslip.id
+      } else {
+        const { data: newPayslip, error: insertError } = await supabase
+          .from('payslips')
+          .insert({
+            staff_id: staffMember.id,
+            period_id: periodId,
+            gross_earnings: engineResult.grossEarnings,
+            taxable_income: engineResult.taxableIncome,
+            paye_tax: engineResult.paye,
+            total_deductions: engineResult.totalDeductions,
+            net_pay: engineResult.netPay,
+            status: 'processed'
+          })
+          .select('id')
+          .single()
+
+        if (insertError) throw insertError
+        payslipId = newPayslip.id
+      }
 
       // Delete existing line items
       await supabase
         .from('payslip_line_items')
         .delete()
-        .eq('payslip_id', payslip.id)
+        .eq('payslip_id', payslipId)
 
       // Insert fresh line items
       const lineItemsToInsert = engineResult.lineItems.map((item: any) => ({
-        payslip_id: payslip.id,
+        payslip_id: payslipId,
         component_id: item.componentId,
         quantity: item.quantity || null,
         rate_applied: item.rate,
@@ -385,7 +435,7 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
       // Update local state
       setRows(prev => prev.map(r => 
         r.staffId === staffId 
-          ? { ...mapEngineResultToRow(engineResult, staffMember), status: 'processed', payslipId: payslip.id }
+          ? { ...mapEngineResultToRow(engineResult, staffMember), status: 'processed', payslipId }
           : r
       ))
 
@@ -398,8 +448,9 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
       })
 
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : JSON.stringify(error)
       console.error('Failed to run payroll:', error)
-      alert('Failed to save payroll. Please try again.')
+      alert(`Failed to save payroll: ${errMsg}`)
     } finally {
       setRunning(null)
     }
@@ -587,10 +638,19 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
                   {running === row.staffId ? 'Running...' : 'Run'}
                 </button>
               )}
+              {row.status === 'processed' && (
+                <button
+                  onClick={e => { e.stopPropagation(); handleRun(row.staffId) }}
+                  disabled={running === row.staffId}
+                  className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-medium transition-colors disabled:opacity-60 ml-2"
+                >
+                  {running === row.staffId ? 'Recalculating...' : 'Recalculate'}
+                </button>
+              )}
               {(row.status === 'processed' || row.status === 'paid') && row.payslipId && onNavigate && onSelectPayslip && (
                 <button
                   onClick={e => { e.stopPropagation(); onSelectPayslip(row.payslipId!); onNavigate('ac-payslip') }}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-xs font-medium transition-colors"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-xs font-medium transition-colors ml-2"
                 >
                   View Payslip
                 </button>

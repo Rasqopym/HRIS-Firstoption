@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type { Role, Page, HRISNotification } from '../types'
 import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
+import { useCompanySettings } from '../hooks/useCompanySettings'
 
 interface LayoutProps {
   role: Role
@@ -307,6 +308,7 @@ const roleBadgeColors: Record<Role, string> = {
 }
 
 export default function Layout({ role, page, onNavigate, onRoleChange, onLogout, onSelectStaff, onSelectPayslip, children }: LayoutProps) {
+  const { settings: companySettings } = useCompanySettings()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
@@ -664,13 +666,23 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
               className={`flex items-center gap-3 text-left focus:outline-none ${collapsed ? 'md:cursor-pointer' : ''}`}
               title={collapsed ? 'Click to expand sidebar' : undefined}
             >
-              <div className="flex-none w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-sm">
-                <span className="text-white font-display font-bold text-sm">FO</span>
+              <div className="flex-none w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-sm overflow-hidden">
+                {companySettings.logo_url ? (
+                  <img src={companySettings.logo_url} alt={companySettings.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-white font-display font-bold text-xs uppercase">
+                    {companySettings.name ? companySettings.name.slice(0, 2) : 'FO'}
+                  </span>
+                )}
               </div>
               {/* Show text if not collapsed on desktop, or ALWAYS on mobile */}
-              <div className={`${collapsed ? 'md:hidden' : 'block'}`}>
-                <div className="font-display font-semibold text-white text-sm leading-tight">Firstoption</div>
-                <div className="text-blue-300 text-xs">HRIS Platform</div>
+              <div className={`${collapsed ? 'md:hidden' : 'block'} min-w-0`}>
+                <div className="font-display font-semibold text-white text-sm leading-tight truncate">
+                  {companySettings.name || 'Firstoption'}
+                </div>
+                <div className="text-blue-300 text-xs truncate">
+                  {companySettings.subtitle || 'HRIS Platform'}
+                </div>
               </div>
             </button>
 

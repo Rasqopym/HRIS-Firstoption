@@ -42,7 +42,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
         if (deptError) throw deptError
 
         // Map staff data to StaffMember shape
-        const mappedStaff: StaffMember[] = staffData?.map(s => ({
+        const mappedStaff: any[] = staffData?.map(s => ({
           id: s.id,
           staffId: s.staff_code,
           name: s.full_name,

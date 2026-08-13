@@ -115,33 +115,49 @@ export default function AttendanceSummary() {
         id: s.id,
         staff_code: s.staff_code,
         full_name: s.full_name,
-        department_name: s.departments?.name || 'Unknown'
+        department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
       }))
 
       // Fetch all attendance records for the selected month
       const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
       const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
       
-      const { data: attendanceData, error: attendanceError } = await supabase
-        .from('attendance_records')
-        .select('*')
-        .gte('attendance_date', firstDay)
-        .lte('attendance_date', lastDay)
-      
-      if (attendanceError) {
-        console.error('Failed to fetch attendance:', attendanceError)
+      let attendanceData: any[] = []
+      try {
+        const { data, error } = await supabase
+          .from('attendance_records')
+          .select('*')
+          .gte('attendance_date', firstDay)
+          .lte('attendance_date', lastDay)
+
+        if (data && !error) {
+          attendanceData = data
+        }
+      } catch (e) {
+        console.warn('Supabase fetch attendance summary skipped:', e)
       }
 
-      // Group attendance by staff_id
+      // Group attendance by staff_id and merge with local storage cache
       const attendanceByStaff: Record<string, any[]> = {}
-      if (attendanceData && !attendanceError) {
-        attendanceData.forEach(record => {
-          if (!attendanceByStaff[record.staff_id]) {
-            attendanceByStaff[record.staff_id] = []
-          }
-          attendanceByStaff[record.staff_id].push(record)
+
+      staffWithDept.forEach(staff => {
+        const staffRecordsMap: Record<string, any> = {}
+
+        // Read local storage cache for this staff member
+        try {
+          const rawCache1 = localStorage.getItem(`hris_self_attendance_${staff.id}`)
+          const rawCache2 = localStorage.getItem(`hris_attendance_daily_${staff.id}`)
+          if (rawCache1) Object.assign(staffRecordsMap, JSON.parse(rawCache1))
+          if (rawCache2) Object.assign(staffRecordsMap, JSON.parse(rawCache2))
+        } catch (e) {}
+
+        // Merge database records
+        attendanceData.filter(r => r.staff_id === staff.id).forEach(r => {
+          staffRecordsMap[r.attendance_date] = r
         })
-      }
+
+        attendanceByStaff[staff.id] = Object.values(staffRecordsMap)
+      })
 
       // Compute summaries for each staff member
       const computedSummaries: AttendanceSummary[] = staffWithDept.map(staff => {

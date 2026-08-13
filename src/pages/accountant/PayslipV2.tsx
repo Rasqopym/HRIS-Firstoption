@@ -21,7 +21,9 @@ const RATE_UNIT_MAP: Record<string, string> = {
   'manual_monthly': '',
 }
 
-export default function PayslipV2({ payslipId }: Props) {
+export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialPayslipId)
+  const [allPayslips, setAllPayslips] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [payslip, setPayslip] = useState<any>(null)
@@ -32,6 +34,74 @@ export default function PayslipV2({ payslipId }: Props) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [downloading, setDownloading] = useState(false)
   const [companySettings, setCompanySettings] = useState<{ name: string; address: string; logo_url: string | null } | null>(null)
+
+  // Sync initial payslip ID when prop changes
+  useEffect(() => {
+    if (initialPayslipId) {
+      setSelectedId(initialPayslipId)
+    }
+  }, [initialPayslipId])
+
+  // Fetch list of all payslips for dropdown selector
+  useEffect(() => {
+    const fetchAllPayslipsList = async () => {
+      try {
+        const { data: payslipsData, error: payslipsErr } = await supabase
+          .from('payslips')
+          .select('id, status, net_pay, staff_id, period_id, created_at')
+          .order('created_at', { ascending: false })
+
+        if (payslipsErr) {
+          console.error('Error fetching payslips:', payslipsErr)
+          return
+        }
+
+        if (payslipsData && payslipsData.length > 0) {
+          // Fetch staff and period labels
+          const staffIds = Array.from(new Set(payslipsData.map(p => p.staff_id)))
+          const periodIds = Array.from(new Set(payslipsData.map(p => p.period_id)))
+
+          const { data: staffList } = await supabase
+            .from('staff')
+            .select('id, full_name, staff_code')
+            .in('id', staffIds)
+
+          const { data: periodList } = await supabase
+            .from('payroll_periods')
+            .select('id, period_label')
+            .in('id', periodIds)
+
+          const staffMap = new Map((staffList || []).map(s => [s.id, s]))
+          const periodMap = new Map((periodList || []).map(p => [p.id, p]))
+
+          const formattedList = payslipsData.map(p => ({
+            ...p,
+            staff: staffMap.get(p.staff_id),
+            period: periodMap.get(p.period_id)
+          }))
+
+          // Deduplicate by staff_id (keeping the latest payslip per staff member)
+          const seenStaff = new Set<string>()
+          const uniquePayslips: any[] = []
+          for (const p of formattedList) {
+            if (!seenStaff.has(p.staff_id)) {
+              seenStaff.add(p.staff_id)
+              uniquePayslips.push(p)
+            }
+          }
+
+          setAllPayslips(uniquePayslips)
+
+          if (!initialPayslipId && uniquePayslips.length > 0) {
+            setSelectedId(uniquePayslips[0].id)
+          }
+        }
+      } catch (err) {
+        console.error('Error in fetchAllPayslipsList:', err)
+      }
+    }
+    fetchAllPayslipsList()
+  }, [initialPayslipId])
 
   const toggleRow = (label: string) =>
     setExpandedRows(prev => {
@@ -46,25 +116,21 @@ export default function PayslipV2({ payslipId }: Props) {
 
     setDownloading(true)
     try {
-      // Capture to canvas using html2canvas-pro (supports oklch/color-mix)
       const canvas = await html2canvas(element, {
-        scale: 2, // higher resolution
+        scale: 2,
         useCORS: true,
         logging: false
       })
       
-      // Use actual canvas dimensions
       const imgWidth = canvas.width
       const imgHeight = canvas.height
       
-      // Create PDF with page size matching canvas dimensions exactly
       const pdf = new jsPDF({
         orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
         unit: 'px',
         format: [imgWidth, imgHeight]
       })
       
-      // Add image using the same dimensions as the canvas
       const dataUrl = canvas.toDataURL('image/png')
       pdf.addImage(dataUrl, 'PNG', 0, 0, imgWidth, imgHeight)
       
@@ -79,54 +145,66 @@ export default function PayslipV2({ payslipId }: Props) {
 
   useEffect(() => {
     const fetchPayslip = async () => {
-      if (!payslipId) {
-        setError('No payslip ID provided')
-        setLoading(false)
-        return
+      let activeId = selectedId
+
+      // If no ID specified, fetch the latest payslip ID
+      if (!activeId) {
+        const { data: latest } = await supabase
+          .from('payslips')
+          .select('id')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (latest) {
+          activeId = latest.id
+          setSelectedId(latest.id)
+        } else {
+          setError('No payslips available yet. Please run payroll under Payroll Run first.')
+          setLoading(false)
+          return
+        }
       }
 
       try {
         setLoading(true)
         setError(null)
 
-        // Fetch payslip with joins
+        // 1. Fetch payslip row
         const { data: payslipData, error: payslipError } = await supabase
           .from('payslips')
-          .select(`
-            *,
-            staff:staff_id (
-              id,
-              staff_code,
-              full_name,
-              job_title,
-              photo_url,
-              bank_name,
-              account_number,
-              departments (name),
-              profiles (photo_url)
-            ),
-            period:period_id (
-              id,
-              period_label,
-              start_date,
-              end_date
-            )
-          `)
-          .eq('id', payslipId)
+          .select('*')
+          .eq('id', activeId)
           .maybeSingle()
 
         if (payslipError) throw payslipError
         if (!payslipData) {
-          setError('Payslip not found')
+          setError('Payslip not found in database.')
           setLoading(false)
           return
         }
 
-        setPayslip(payslipData)
-        setStaff(payslipData.staff)
-        setPeriod(payslipData.period)
+        // 2. Fetch staff info
+        const { data: staffData } = await supabase
+          .from('staff')
+          .select('id, staff_code, full_name, job_title, photo_url, bank_name, account_number, department, departments (name)')
+          .eq('id', payslipData.staff_id)
+          .maybeSingle()
 
-        // Fetch line items
+        // 3. Fetch period info
+        const { data: periodData } = await supabase
+          .from('payroll_periods')
+          .select('id, period_label, start_date, end_date')
+          .eq('id', payslipData.period_id)
+          .maybeSingle()
+
+        const resolvedDepartment = (staffData as any)?.departments?.name || staffData?.department || 'Accounting & Finance'
+
+        setPayslip(payslipData)
+        setStaff(staffData ? { ...staffData, department: resolvedDepartment } : { full_name: 'Employee', staff_code: 'FO-001', job_title: 'Staff', department: 'Accounting & Finance' })
+        setPeriod(periodData || { period_label: 'Current Period' })
+
+        // 4. Fetch line items
         const { data: itemsData, error: itemsError } = await supabase
           .from('payslip_line_items')
           .select(`
@@ -138,12 +216,12 @@ export default function PayslipV2({ payslipId }: Props) {
               default_rate_type
             )
           `)
-          .eq('payslip_id', payslipId)
+          .eq('payslip_id', activeId)
 
         if (itemsError) throw itemsError
         setLineItems(itemsData || [])
 
-        // Fetch tax bands for PAYE breakdown
+        // 5. Fetch tax bands for PAYE breakdown
         const { data: taxBandsData, error: taxBandsError } = await supabase
           .from('tax_bands')
           .select('*')
@@ -161,7 +239,7 @@ export default function PayslipV2({ payslipId }: Props) {
     }
 
     fetchPayslip()
-  }, [payslipId])
+  }, [selectedId])
 
   useEffect(() => {
     const fetchCompanySettings = async () => {
@@ -213,8 +291,16 @@ export default function PayslipV2({ payslipId }: Props) {
     )
   }
 
-  const earnings = lineItems.filter(i => i.salary_components?.category === 'allowance')
-  const deductions = lineItems.filter(i => i.salary_components?.category === 'deduction')
+  // Deduplicate line items by component name to eliminate duplicate display
+  const uniqueLineItems = Array.from(
+    new Map(lineItems.map(item => [item.salary_components?.name || item.id, item])).values()
+  )
+
+  const earnings = uniqueLineItems.filter(i => i.salary_components?.category === 'allowance')
+  const deductions = uniqueLineItems.filter(i => 
+    i.salary_components?.category === 'deduction' && 
+    !i.salary_components?.name?.toLowerCase().includes('paye')
+  )
   const totalEarnings = earnings.reduce((a, e) => a + e.amount, 0)
   const totalStatutory = deductions.reduce((a, d) => a + d.amount, 0)
   const totalDeductions = totalStatutory + payslip.paye_tax
@@ -242,9 +328,25 @@ export default function PayslipV2({ payslipId }: Props) {
   return (
     <div className="p-4 sm:p-6 anim-fade-up">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 no-print">
-        <div>
-          <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">Payslip — {period.period_label}</h2>
-          <p className="text-xs sm:text-sm text-slate-500">Enhanced view with taxable income and PAYE breakdown</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">Payslip — {period.period_label}</h2>
+            <p className="text-xs sm:text-sm text-slate-500">Enhanced view with taxable income and PAYE breakdown</p>
+          </div>
+
+          {allPayslips.length > 0 && (
+            <select
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm font-medium text-slate-700 bg-white shadow-sm hover:border-slate-300 focus:outline-none ml-2"
+            >
+              {allPayslips.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.staff?.full_name || 'Staff'} ({p.period?.period_label}) — ₦{Math.round(p.net_pay || 0).toLocaleString()}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
@@ -300,7 +402,7 @@ export default function PayslipV2({ payslipId }: Props) {
               <img src={staff.photo_url || staff.profiles?.photo_url} alt={staff.full_name} className="w-12 h-12 rounded-full object-cover" />
             ) : (
               <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-lg">
-                {staff.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                {staff.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
               </div>
             )}
             <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4">

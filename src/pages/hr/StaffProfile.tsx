@@ -20,7 +20,7 @@ const statusColors: Record<StaffStatus, string> = {
   offboarded: 'bg-slate-100 text-slate-500',
 }
 
-const fmt = (n: number) => `₦${n.toLocaleString()}`
+const fmt = (n?: number) => '₦' + Math.round(n || 0).toLocaleString('en-NG')
 
 export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Props) {
   const [staff, setStaff] = useState<any>(null)
@@ -213,6 +213,44 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
         onSelectStaff?.(s.id)
       }
       onNavigate('hr-add-staff')
+    }
+  }
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !s?.id) return
+
+    try {
+      const fileExt = file.name.split('.').pop()
+      const filePath = `${s.id}/avatar-${Date.now()}.${fileExt}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true })
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      // Update both staff table and profiles table
+      await supabase
+        .from('staff')
+        .update({ photo_url: publicUrl })
+        .eq('id', s.id)
+
+      if (s.profile_id) {
+        await supabase
+          .from('profiles')
+          .update({ photo_url: publicUrl })
+          .eq('id', s.profile_id)
+      }
+
+      setStaff((prev: any) => prev ? { ...prev, photo_url: publicUrl } : prev)
+    } catch (err: any) {
+      console.error('Error uploading photo:', err)
+      alert('Failed to upload photo: ' + (err.message || 'Error'))
     }
   }
 
@@ -563,7 +601,7 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
       {/* Profile header */}
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-5">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5">
-          <div className="relative flex-none mx-auto sm:mx-0">
+          <div className="relative flex-none mx-auto sm:mx-0 group">
             {(s.photo_url || s.profiles?.photo_url) ? (
               <img
                 src={s.photo_url || s.profiles?.photo_url}
@@ -578,6 +616,20 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
                 {getInitials(s.full_name)}
               </div>
             )}
+            <label
+              htmlFor="staff-profile-photo-input"
+              className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-opacity text-white text-[11px] font-semibold"
+            >
+              <span>📷</span>
+              <span>Change</span>
+            </label>
+            <input
+              id="staff-profile-photo-input"
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoUpload}
+              className="hidden"
+            />
             <span className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${s.status === 'active' ? 'bg-emerald-400' : s.status === 'suspended' ? 'bg-red-400' : 'bg-slate-300'}`} />
           </div>
           <div className="flex-1 min-w-0 w-full text-center sm:text-left">

@@ -110,32 +110,33 @@ export default function AuditTrail() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      let userName = 'Admin'
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .single()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (profile?.full_name) userName = profile.full_name
+      }
 
-      const { error } = await supabase
+      const { error: insertError } = await supabase
         .from('audit_flags')
         .insert({
           audit_log_id: flagModal.id,
-          flagged_by: user.id,
-          flagged_by_name: profile?.full_name || 'Unknown',
-          comment: flagNote,
+          flagged_by: user?.id || null,
+          flagged_by_name: userName,
+          comment: flagNote || 'Flagged for audit review',
           status: 'open'
         })
 
-      if (error) throw error
+      if (insertError) throw insertError
 
-      // Refresh to show new flag
-      setPage(0)
       setFlagModal(null)
       setFlagNote('')
-    } catch (err) {
-      setError('Failed to flag entry')
+    } catch (err: any) {
+      setError('Failed to flag entry: ' + (err.message || 'Error'))
       console.error('Error flagging entry:', err)
     } finally {
       setFlagging(false)

@@ -98,12 +98,23 @@ export async function calculatePayrollForStaff(
     throw new Error(`Failed to fetch salary components: ${componentsError.message}`)
   }
 
-  const activeComponents = (staffComponents || [])
+  const rawComponents = (staffComponents || [])
     .filter(sc => sc.salary_components)
     .map(sc => ({
       ...sc,
       salary_components: Array.isArray(sc.salary_components) ? sc.salary_components[0] : sc.salary_components
     })) as StaffSalaryComponent[]
+
+  // Deduplicate by component name
+  const seenComponentNames = new Set<string>()
+  const activeComponents: StaffSalaryComponent[] = []
+  for (const sc of rawComponents) {
+    const compName = sc.salary_components?.name?.trim().toLowerCase()
+    if (compName && !seenComponentNames.has(compName)) {
+      seenComponentNames.add(compName)
+      activeComponents.push(sc)
+    }
+  }
 
   // 3. Fetch attendance records for the period
   const { data: attendanceRecords, error: attendanceError } = await supabase
@@ -130,6 +141,44 @@ export async function calculatePayrollForStaff(
   }, 0)
 
   const daysOnSite = (attendanceRecords || []).filter(r => r.on_site === true).length
+
+  // 3b. Fetch approved leave requests for the period
+  let hasApprovedAnnualLeave = false
+  let unpaidLeaveDays = 0
+
+  try {
+    const { data: leaveRequests } = await supabase
+      .from('leave_requests')
+      .select('id, leave_type_id, start_date, end_date, status, leave_types(name, is_paid)')
+      .eq('staff_id', staffId)
+      .eq('status', 'approved')
+
+    const activeLeaves = (leaveRequests || []).filter((lr: any) => {
+      const sDate = lr.start_date
+      return sDate >= periodStart && sDate <= periodEnd
+    })
+
+    hasApprovedAnnualLeave = activeLeaves.some((lr: any) => {
+      const typeName = (lr.leave_types?.name || '').toLowerCase()
+      return typeName.includes('annual')
+    })
+
+    const unpaidLeaves = activeLeaves.filter((lr: any) => {
+      const typeName = (lr.leave_types?.name || '').toLowerCase()
+      const isPaid = lr.leave_types?.is_paid
+      return typeName.includes('unpaid') || isPaid === false
+    })
+
+    unpaidLeaves.forEach((ul: any) => {
+      const start = new Date(ul.start_date)
+      const end = new Date(ul.end_date)
+      const diffTime = Math.abs(end.getTime() - start.getTime())
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
+      unpaidLeaveDays += diffDays
+    })
+  } catch (e) {
+    console.warn('Error fetching leave requests for payroll:', e)
+  }
 
   // 4. Fetch tax reliefs (default to zero if none)
   const { data: taxReliefs } = await supabase
@@ -162,12 +211,18 @@ export async function calculatePayrollForStaff(
     sc => sc.salary_components.name.toLowerCase().includes('basic')
   )
   if (basicComponent) {
-    basicSalaryAmount = staff.gross_salary * (basicComponent.rate / 100)
+    const rateType = basicComponent.rate_type || basicComponent.salary_components.default_rate_type
+    if (rateType === 'flat_amount' || rateType === 'flat' || basicComponent.rate > 100) {
+      basicSalaryAmount = basicComponent.rate
+    } else {
+      basicSalaryAmount = staff.gross_salary * (basicComponent.rate / 100)
+    }
+
     lineItems.push({
       componentId: basicComponent.salary_components.id,
       componentName: basicComponent.salary_components.name,
       category: basicComponent.salary_components.category,
-      rateType: basicComponent.rate_type || basicComponent.salary_components.default_rate_type,
+      rateType: rateType,
       rate: basicComponent.rate,
       amount: basicSalaryAmount,
       isTaxable: basicComponent.is_taxable,
@@ -177,8 +232,9 @@ export async function calculatePayrollForStaff(
 
   // Second pass: calculate all other components
   for (const sc of activeComponents) {
-    // Skip basic salary as it was already calculated
-    if (sc.salary_components.name.toLowerCase().includes('basic')) {
+    // Skip basic salary (already calculated) and PAYE (calculated statutorily below)
+    const compNameLower = sc.salary_components.name.toLowerCase()
+    if (compNameLower.includes('basic') || compNameLower.includes('paye')) {
       continue
     }
 
@@ -188,45 +244,52 @@ export async function calculatePayrollForStaff(
     let quantity: number | undefined
     let needsManualInput = false
 
-    switch (rateType) {
-      case 'percentage_of_gross':
-        amount = staff.gross_salary * (sc.rate / 100)
-        break
+    // If Leave Allowance component and staff has NO approved annual leave this period, skip/zero out
+    if (compNameLower.includes('leave') && !compNameLower.includes('unpaid') && !hasApprovedAnnualLeave) {
+      amount = 0
+    } else {
+      switch (rateType) {
+        case 'percentage_of_gross':
+        case 'pct_gross':
+          amount = sc.rate > 100 ? sc.rate : staff.gross_salary * (sc.rate / 100)
+          break
 
-      case 'percentage_of_basic':
-        amount = basicSalaryAmount * (sc.rate / 100)
-        break
+        case 'percentage_of_basic':
+        case 'pct_basic':
+          amount = sc.rate > 100 ? sc.rate : basicSalaryAmount * (sc.rate / 100)
+          break
 
-      case 'flat_amount':
-        amount = sc.rate
-        break
+        case 'flat_amount':
+        case 'flat':
+          amount = sc.rate
+          break
 
-      case 'per_day':
-        if (component.name.toLowerCase().includes('lunch')) {
-          quantity = daysPresent
-          amount = sc.rate * daysPresent
-        } else if (component.name.toLowerCase().includes('site')) {
-          quantity = daysOnSite
-          amount = sc.rate * daysOnSite
-        } else {
-          // Default to days present for other per-day components
-          quantity = daysPresent
-          amount = sc.rate * daysPresent
-        }
-        break
+        case 'per_day':
+          if (component.name.toLowerCase().includes('lunch')) {
+            quantity = daysPresent
+            amount = sc.rate * daysPresent
+          } else if (component.name.toLowerCase().includes('site')) {
+            quantity = daysOnSite
+            amount = sc.rate * daysOnSite
+          } else {
+            quantity = daysPresent
+            amount = sc.rate * daysPresent
+          }
+          break
 
-      case 'per_hour':
-        quantity = approvedOvertimeHours
-        amount = sc.rate * approvedOvertimeHours
-        break
+        case 'per_hour':
+          quantity = approvedOvertimeHours
+          amount = sc.rate * approvedOvertimeHours
+          break
 
-      case 'manual_monthly':
-        amount = manualOverrides?.[component.id] || 0
-        needsManualInput = !manualOverrides || !(component.id in manualOverrides)
-        break
+        case 'manual_monthly':
+          amount = manualOverrides?.[component.id] || 0
+          needsManualInput = !manualOverrides || !(component.id in manualOverrides)
+          break
 
-      default:
-        amount = 0
+        default:
+          amount = 0
+      }
     }
 
     lineItems.push({
@@ -242,6 +305,23 @@ export async function calculatePayrollForStaff(
     })
   }
 
+  // Add automatic Unpaid Leave Salary Deduction item if unpaid leave days exist
+  if (unpaidLeaveDays > 0) {
+    const dailyRate = (staff.gross_salary || 165500) / 22
+    const unpaidDeductionAmount = Math.round(dailyRate * unpaidLeaveDays)
+    lineItems.push({
+      componentId: 'unpaid-leave-deduction',
+      componentName: `Unpaid Leave Deduction (${unpaidLeaveDays} day${unpaidLeaveDays > 1 ? 's' : ''})`,
+      category: 'deduction',
+      rateType: 'per_day',
+      rate: Math.round(dailyRate),
+      quantity: unpaidLeaveDays,
+      amount: unpaidDeductionAmount,
+      isTaxable: false,
+      needsManualInput: false,
+    })
+  }
+
   // 7. Separate earnings and deductions
   const earnings = lineItems.filter(li => li.category === 'allowance')
   const deductions = lineItems.filter(li => li.category === 'deduction')
@@ -251,29 +331,32 @@ export async function calculatePayrollForStaff(
     .filter(li => li.isTaxable)
     .reduce((sum, li) => sum + li.amount, 0)
 
-  // Calculate tax reliefs (monthly)
+  const annualTaxableGross = taxableEarnings * 12
+
+  // Nigerian Consolidated Relief Allowance (CRA): Higher of N200,000 or 1% of Gross + 20% of Gross
+  const craFixed = Math.max(200000, annualTaxableGross * 0.01)
+  const craPercent = annualTaxableGross * 0.20
+  const annualCRA = craFixed + craPercent
+
+  // Calculate additional tax reliefs (Rent & Life Assurance)
   const monthlyRentPaid = reliefs.annual_rent_paid / 12
   const monthlyLifeAssurance = reliefs.life_assurance_premium / 12
-
-  // Rent relief capped at 20% of gross income or ₦500,000/year, whichever is lower
   const maxAnnualRentRelief = Math.min(staff.gross_salary * 12 * 0.2, 500000)
   const monthlyRentRelief = Math.min(monthlyRentPaid, maxAnnualRentRelief / 12)
+  const annualOtherReliefs = (monthlyRentRelief + monthlyLifeAssurance) * 12
 
-  const totalTaxReliefs = monthlyRentRelief + monthlyLifeAssurance
-
-  // 8. Calculate taxable income
-  const taxableIncome = Math.max(0, taxableEarnings - totalTaxReliefs)
+  // 8. Calculate annual and monthly taxable income after CRA and reliefs
+  const annualTaxableIncome = Math.max(0, annualTaxableGross - annualCRA - annualOtherReliefs)
+  const monthlyTaxableIncome = Math.round(annualTaxableIncome / 12)
 
   // 9. Calculate PAYE using progressive tax bands
-  const annualTaxableIncome = taxableIncome * 12
   let annualTax = 0
-
   for (const band of (taxBands || []) as TaxBand[]) {
     if (annualTaxableIncome <= band.lower_bound) continue
 
     const taxableInBand = Math.min(
       annualTaxableIncome,
-      band.upper_bound || Infinity
+      band.upper_bound != null ? band.upper_bound : Infinity
     ) - band.lower_bound
 
     if (taxableInBand > 0) {
@@ -297,7 +380,7 @@ export async function calculatePayrollForStaff(
     staffName: staff.full_name,
     lineItems: lineItems.map(li => ({ ...li, amount: Math.round(li.amount) })),
     grossEarnings: Math.round(grossEarnings),
-    taxableIncome: Math.round(taxableIncome),
+    taxableIncome: monthlyTaxableIncome,
     totalDeductions,
     paye: monthlyPaye,
     netPay,

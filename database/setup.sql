@@ -669,9 +669,60 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 
 
 -- ────────────────────────────────────────────────────────────
+-- STORAGE BUCKETS & POLICIES SETUP
+-- Creates all 3 storage buckets required by HRIS:
+-- 1. staff-documents (Resume, Certificates, ID Copies, Offer Letters)
+-- 2. branding (Company Logo)
+-- 3. avatars (Staff Profile Photos)
+-- ────────────────────────────────────────────────────────────
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES 
+  ('staff-documents', 'staff-documents', true),
+  ('branding', 'branding', true),
+  ('avatars', 'avatars', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Storage Policies for 'staff-documents'
+DROP POLICY IF EXISTS "Public Read: staff-documents" ON storage.objects;
+CREATE POLICY "Public Read: staff-documents" ON storage.objects FOR SELECT USING (bucket_id = 'staff-documents');
+
+DROP POLICY IF EXISTS "Authenticated Upload: staff-documents" ON storage.objects;
+CREATE POLICY "Authenticated Upload: staff-documents" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'staff-documents');
+
+DROP POLICY IF EXISTS "Authenticated Update: staff-documents" ON storage.objects;
+CREATE POLICY "Authenticated Update: staff-documents" ON storage.objects FOR UPDATE USING (bucket_id = 'staff-documents');
+
+DROP POLICY IF EXISTS "Authenticated Delete: staff-documents" ON storage.objects;
+CREATE POLICY "Authenticated Delete: staff-documents" ON storage.objects FOR DELETE USING (bucket_id = 'staff-documents');
+
+-- Storage Policies for 'branding'
+DROP POLICY IF EXISTS "Public Read: branding" ON storage.objects;
+CREATE POLICY "Public Read: branding" ON storage.objects FOR SELECT USING (bucket_id = 'branding');
+
+DROP POLICY IF EXISTS "Authenticated Upload: branding" ON storage.objects;
+CREATE POLICY "Authenticated Upload: branding" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'branding');
+
+DROP POLICY IF EXISTS "Authenticated Update: branding" ON storage.objects;
+CREATE POLICY "Authenticated Update: branding" ON storage.objects FOR UPDATE USING (bucket_id = 'branding');
+
+DROP POLICY IF EXISTS "Authenticated Delete: branding" ON storage.objects;
+CREATE POLICY "Authenticated Delete: branding" ON storage.objects FOR DELETE USING (bucket_id = 'branding');
+
+-- Storage Policies for 'avatars'
+DROP POLICY IF EXISTS "Public Read: avatars" ON storage.objects;
+CREATE POLICY "Public Read: avatars" ON storage.objects FOR SELECT USING (bucket_id = 'avatars');
+
+DROP POLICY IF EXISTS "Authenticated Upload: avatars" ON storage.objects;
+CREATE POLICY "Authenticated Upload: avatars" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'avatars');
+
+DROP POLICY IF EXISTS "Authenticated Update: avatars" ON storage.objects;
+CREATE POLICY "Authenticated Update: avatars" ON storage.objects FOR UPDATE USING (bucket_id = 'avatars');
+
+DROP POLICY IF EXISTS "Authenticated Delete: avatars" ON storage.objects;
+CREATE POLICY "Authenticated Delete: avatars" ON storage.objects FOR DELETE USING (bucket_id = 'avatars');
+
+
+-- ────────────────────────────────────────────────────────────
 -- ✅ SETUP COMPLETE
--- Next step: Run seed_defaults.sql to add PAYE bands,
--- leave types, and salary components.
--- Then log in as Super Admin → System Settings → 
--- fill in company name and upload logo.
 -- ────────────────────────────────────────────────────────────

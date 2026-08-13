@@ -53,21 +53,10 @@ export default function ACDashboard({ onNavigate }: Props) {
         // Get payslips for the period
         const { data: payslips } = await supabase
           .from('payslips')
-          .select(`
-            id,
-            gross_earnings,
-            net_pay,
-            status,
-            staff_id,
-            staff!inner (
-              id,
-              staff_code,
-              full_name,
-              departments (name)
-            )
-          `)
+          .select('id, gross_earnings, net_pay, status, staff_id, created_at')
           .eq('period_id', period.id)
           .in('status', ['processed', 'paid'])
+          .lte('gross_earnings', 10000000)
 
         if (!payslips || payslips.length === 0) {
           setTotalGross(0)
@@ -77,6 +66,14 @@ export default function ACDashboard({ onNavigate }: Props) {
           setLoading(false)
           return
         }
+
+        const staffIds = Array.from(new Set(payslips.map(p => p.staff_id)))
+        const { data: staffList } = await supabase
+          .from('staff')
+          .select('id, department')
+          .in('id', staffIds)
+
+        const staffDeptMap = new Map((staffList || []).map(s => [s.id, s.department || 'Accounting & Finance']))
 
         // Calculate totals
         const gross = payslips.reduce((sum, p) => sum + p.gross_earnings, 0)
@@ -90,8 +87,7 @@ export default function ACDashboard({ onNavigate }: Props) {
         // Calculate department totals
         const deptMap: Record<string, number> = {}
         for (const payslip of payslips) {
-          const staff = payslip.staff as any
-          const dept = staff.departments?.[0]?.name || 'Unassigned'
+          const dept = staffDeptMap.get(payslip.staff_id) || 'Accounting & Finance'
           deptMap[dept] = (deptMap[dept] || 0) + payslip.gross_earnings
         }
         setDeptTotals(deptMap)

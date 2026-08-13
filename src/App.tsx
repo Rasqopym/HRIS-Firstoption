@@ -53,14 +53,51 @@ function defaultPage(role: Role): Page {
   }
 }
 
+function getSavedPage(r: Role): Page {
+  try {
+    const hash = window.location.hash.replace('#', '') as Page
+    if (hash) return hash
+    const saved = localStorage.getItem(`hris_active_page_${r}`) as Page
+    if (saved) return saved
+  } catch (e) {}
+  return defaultPage(r)
+}
+
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
   const [role, setRole] = useState<Role>('superadmin')
-  const [page, setPage] = useState<Page>('sa-dashboard')
-  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null)
-  const [selectedPayslipId, setSelectedPayslipId] = useState<string | null>(null)
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      const hash = window.location.hash.replace('#', '') as Page
+      if (hash) return hash
+    } catch (e) {}
+    return 'sa-dashboard'
+  })
+
+  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(() => {
+    try { return localStorage.getItem('hris_selected_staff_id') } catch (e) { return null }
+  })
+  const [selectedPayslipId, setSelectedPayslipId] = useState<string | null>(() => {
+    try { return localStorage.getItem('hris_selected_payslip_id') } catch (e) { return null }
+  })
   const [currentStaffId, setCurrentStaffId] = useState<string | null>(null)
+
+  const handleSelectStaff = (id: string | null) => {
+    setSelectedStaffId(id)
+    try {
+      if (id) localStorage.setItem('hris_selected_staff_id', id)
+      else localStorage.removeItem('hris_selected_staff_id')
+    } catch (e) {}
+  }
+
+  const handleSelectPayslip = (id: string | null) => {
+    setSelectedPayslipId(id)
+    try {
+      if (id) localStorage.setItem('hris_selected_payslip_id', id)
+      else localStorage.removeItem('hris_selected_payslip_id')
+    } catch (e) {}
+  }
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -76,7 +113,9 @@ export default function App() {
           if (profile) {
             const appRole = dbRoleToApp(profile.role)
             setRole(appRole)
-            setPage(defaultPage(appRole))
+            const targetPage = getSavedPage(appRole)
+            setPage(targetPage)
+            try { window.location.hash = targetPage } catch (e) {}
             setIsLoggedIn(true)
           }
         }
@@ -94,25 +133,45 @@ export default function App() {
         setIsLoggedIn(false)
         setRole('superadmin')
         setPage('sa-dashboard')
+        try { window.location.hash = '' } catch (e) {}
       }
     })
 
+    const handleHashChange = () => {
+      try {
+        const hash = window.location.hash.replace('#', '') as Page
+        if (hash) setPage(hash)
+      } catch (e) {}
+    }
+    window.addEventListener('hashchange', handleHashChange)
+
     return () => {
       authListener.subscription.unsubscribe()
+      window.removeEventListener('hashchange', handleHashChange)
     }
   }, [])
 
   const handleLogin = (r: Role) => {
     setRole(r)
-    setPage(defaultPage(r))
+    const targetPage = getSavedPage(r)
+    setPage(targetPage)
+    try {
+      window.location.hash = targetPage
+      localStorage.setItem(`hris_active_page_${r}`, targetPage)
+    } catch (e) {}
     setIsLoggedIn(true)
   }
 
   const handleRoleChange = (r: Role) => {
     setRole(r)
-    setPage(defaultPage(r))
-    setSelectedStaffId(null)
-    setSelectedPayslipId(null)
+    const targetPage = getSavedPage(r)
+    setPage(targetPage)
+    try {
+      window.location.hash = targetPage
+      localStorage.setItem(`hris_active_page_${r}`, targetPage)
+    } catch (e) {}
+    handleSelectStaff(null)
+    handleSelectPayslip(null)
   }
 
   const handleLogout = useCallback(async () => {
@@ -120,11 +179,18 @@ export default function App() {
     setIsLoggedIn(false)
     setRole('superadmin')
     setPage('sa-dashboard')
-    setSelectedStaffId(null)
-    setSelectedPayslipId(null)
+    try { window.location.hash = '' } catch (e) {}
+    handleSelectStaff(null)
+    handleSelectPayslip(null)
   }, [])
 
-  const navigate = (p: Page) => setPage(p)
+  const navigate = (p: Page) => {
+    setPage(p)
+    try {
+      window.location.hash = p
+      localStorage.setItem(`hris_active_page_${role}`, p)
+    } catch (e) {}
+  }
 
   // Resolve current staff ID when logged in as staff
   useEffect(() => {
@@ -291,8 +357,8 @@ export default function App() {
       onNavigate={navigate}
       onRoleChange={handleRoleChange}
       onLogout={handleLogout}
-      onSelectStaff={setSelectedStaffId}
-      onSelectPayslip={setSelectedPayslipId}
+      onSelectStaff={handleSelectStaff}
+      onSelectPayslip={handleSelectPayslip}
     >
       {renderPage()}
     </Layout>

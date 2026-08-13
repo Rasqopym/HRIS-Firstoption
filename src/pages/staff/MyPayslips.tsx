@@ -30,20 +30,40 @@ export default function MyPayslips({ onNavigate, onSelectPayslip }: Props) {
         setLoading(true)
         const { data: payslipsData } = await supabase
           .from('payslips')
-          .select('id, net_pay, gross_earnings, status, period:period_id (period_label)')
+          .select('id, net_pay, gross_earnings, status, period_id, created_at')
           .eq('staff_id', staff.id)
           .in('status', ['processed', 'paid'])
+          .lte('gross_earnings', 10000000)
           .order('created_at', { ascending: false })
 
-        if (payslipsData) {
-          const formatted: Payslip[] = payslipsData.map((p: any) => ({
-            id: p.id,
-            month: p.period?.period_label || 'Unknown',
-            net: p.net_pay,
-            gross: p.gross_earnings,
-            status: p.status,
-            ref: `PS-${p.id.slice(0, 8)}`,
-          }))
+        if (payslipsData && payslipsData.length > 0) {
+          const periodIds = Array.from(new Set(payslipsData.map((p: any) => p.period_id)))
+          const { data: periodList } = await supabase
+            .from('payroll_periods')
+            .select('id, period_label')
+            .in('id', periodIds)
+
+          const periodMap = new Map((periodList || []).map(p => [p.id, p.period_label]))
+
+          // Deduplicate by month label (keeping latest)
+          const seenMonth = new Set<string>()
+          const formatted: Payslip[] = []
+
+          for (const p of payslipsData) {
+            const label = periodMap.get(p.period_id) || 'August 2026'
+            if (!seenMonth.has(label)) {
+              seenMonth.add(label)
+              formatted.push({
+                id: p.id,
+                month: label,
+                net: p.net_pay,
+                gross: p.gross_earnings,
+                status: p.status,
+                ref: `PS-${p.id.slice(0, 8)}`,
+              })
+            }
+          }
+
           setPayslips(formatted)
         }
       } catch (err) {

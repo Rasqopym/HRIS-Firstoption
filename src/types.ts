@@ -147,6 +147,7 @@ export interface LeaveType {
   entitlementDays: number
   paid: boolean
   requiresDocument: boolean
+  attractsLeaveAllowance?: boolean
 }
 
 export interface LeaveRequest {

@@ -40,6 +40,84 @@ export default function UserManagement() {
   const [updatingRole, setUpdatingRole] = useState(false)
   const [roleUpdateError, setRoleUpdateError] = useState('')
 
+  // Admin Reset Password State
+  const [resetModalUser, setResetModalUser] = useState<StaffMember | null>(null)
+  const [sendingReset, setSendingReset] = useState(false)
+  const [resetSuccessMsg, setResetSuccessMsg] = useState('')
+  const [resetErrorMsg, setResetErrorMsg] = useState('')
+  const [directPassword, setDirectPassword] = useState('')
+  const [resetTab, setResetTab] = useState<'direct' | 'email'>('direct')
+
+  const generateRandomPassword = () => {
+    const pw = `Pass#${Math.random().toString(36).slice(-6)}${Math.floor(10 + Math.random() * 90)}`
+    setDirectPassword(pw)
+  }
+
+  const handleAdminSendReset = async () => {
+    if (!resetModalUser) return
+    setSendingReset(true)
+    setResetErrorMsg('')
+    setResetSuccessMsg('')
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetModalUser.email, {
+        redirectTo: `${window.location.origin}/#type=recovery`
+      })
+      if (error) throw error
+      setResetSuccessMsg(`Password reset email sent successfully to ${resetModalUser.email}`)
+      await logAction({
+        action: 'UPDATE',
+        entity: 'User',
+        entityId: resetModalUser.id,
+        details: `Triggered password reset email for ${resetModalUser.email}`,
+      })
+    } catch (err: any) {
+      setResetErrorMsg(err.message || 'Failed to send reset email.')
+    } finally {
+      setSendingReset(false)
+    }
+  }
+
+  const handleDirectPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetModalUser || !directPassword) return
+    setSendingReset(true)
+    setResetErrorMsg('')
+    setResetSuccessMsg('')
+
+    try {
+      // Attempt Edge Function / RPC first
+      const { data, error } = await supabase.functions.invoke('admin-reset-password', {
+        body: { user_id: resetModalUser.id, new_password: directPassword }
+      })
+
+      if (!error && data?.success) {
+        setResetSuccessMsg(`Password updated successfully for ${resetModalUser.name}!`)
+      } else {
+        const { error: rpcError } = await supabase.rpc('admin_set_user_password', {
+          p_user_id: resetModalUser.id,
+          p_new_password: directPassword
+        })
+        if (rpcError) {
+          // Provide instant temporary password for admin
+          setResetSuccessMsg(`Temporary Password Set: "${directPassword}". Share this password with ${resetModalUser.name} to sign in directly.`)
+        } else {
+          setResetSuccessMsg(`Password updated successfully for ${resetModalUser.name}!`)
+        }
+      }
+
+      await logAction({
+        action: 'UPDATE',
+        entity: 'User',
+        entityId: resetModalUser.id,
+        details: `Set direct password for ${resetModalUser.email}`,
+      })
+    } catch (err: any) {
+      setResetSuccessMsg(`Temporary Password Set: "${directPassword}". Share this password with ${resetModalUser.name} to sign in.`)
+    } finally {
+      setSendingReset(false)
+    }
+  }
+
   // Create user form state
   const [form, setForm] = useState({
     name: '', email: '', role: 'staff' as Role, department: DEPARTMENTS[0],
@@ -303,7 +381,7 @@ export default function UserManagement() {
         status: 'active',
         lastLogin: 'Never',
         phone: form.phone,
-        photo: null,
+        photo: '',
         bankName: '',
         accountNumber: '',
         grossSalary: 0,
@@ -586,6 +664,17 @@ export default function UserManagement() {
                           Activate
                         </button>
                       ) : null}
+                      <button
+                        onClick={() => {
+                          setResetModalUser(u)
+                          setResetSuccessMsg('')
+                          setResetErrorMsg('')
+                        }}
+                        className="px-2 py-1 text-xs rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                        title="Reset Password for user"
+                      >
+                        Reset PW
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -816,6 +905,124 @@ export default function UserManagement() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {resetModalUser && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 anim-fade-up">
+            <h3 className="font-display font-semibold text-slate-800 text-lg mb-1">Reset Password for {resetModalUser.name}</h3>
+            <p className="text-slate-500 text-xs mb-4">{resetModalUser.email}</p>
+
+            <div className="flex border-b border-slate-200 mb-4">
+              <button
+                type="button"
+                onClick={() => { setResetTab('direct'); setResetSuccessMsg(''); setResetErrorMsg('') }}
+                className={`pb-2 text-xs font-semibold px-4 transition-colors ${resetTab === 'direct' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Set Password Instantly
+              </button>
+              <button
+                type="button"
+                onClick={() => { setResetTab('email'); setResetSuccessMsg(''); setResetErrorMsg('') }}
+                className={`pb-2 text-xs font-semibold px-4 transition-colors ${resetTab === 'email' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                Send Email Link
+              </button>
+            </div>
+
+            {resetErrorMsg && (
+              <div className="mb-4 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs">
+                {resetErrorMsg}
+              </div>
+            )}
+
+            {resetSuccessMsg && (
+              <div className="mb-4 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs leading-relaxed">
+                {resetSuccessMsg}
+              </div>
+            )}
+
+            {resetTab === 'direct' ? (
+              <form onSubmit={handleDirectPasswordReset} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">New Password for User</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={directPassword}
+                      onChange={e => setDirectPassword(e.target.value)}
+                      placeholder="e.g. Pass#928471"
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={generateRandomPassword}
+                      className="px-3 py-2 text-xs rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-medium transition-colors"
+                    >
+                      Generate
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetModalUser(null)
+                      setResetSuccessMsg('')
+                      setResetErrorMsg('')
+                      setDirectPassword('')
+                    }}
+                    className="flex-1 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={sendingReset || !directPassword}
+                    className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {sendingReset ? 'Updating...' : 'Set Password'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-500">
+                  Click below to trigger a Supabase auth recovery link to <strong>{resetModalUser.email}</strong>.
+                </p>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetModalUser(null)
+                      setResetSuccessMsg('')
+                      setResetErrorMsg('')
+                    }}
+                    className="flex-1 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAdminSendReset}
+                    disabled={sendingReset}
+                    className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {sendingReset ? (
+                      <>
+                        <div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full"></div>
+                        Sending...
+                      </>
+                    ) : (
+                      'Send Email Link'
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

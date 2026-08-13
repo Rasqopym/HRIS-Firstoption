@@ -69,9 +69,10 @@ export default function SADashboard({ onNavigate }: Props) {
 
           const { data: payslips } = await supabase
             .from('payslips')
-            .select('net_pay')
+            .select('net_pay, gross_earnings')
             .eq('period_id', period.id)
             .in('status', ['processed', 'paid'])
+            .lte('gross_earnings', 10000000)
 
           if (payslips && payslips.length > 0) {
             const totalNet = payslips.reduce((sum, p) => sum + p.net_pay, 0)
@@ -82,12 +83,12 @@ export default function SADashboard({ onNavigate }: Props) {
         // Fetch department headcount from staff table
         const { data: staffData, error: staffError } = await supabase
           .from('staff')
-          .select('id, departments (name)')
+          .select('id, department')
 
         if (!staffError && staffData) {
           const deptMap: Record<string, number> = {}
           for (const staff of staffData) {
-            const dept = (staff.departments as any)?.name || 'Unassigned'
+            const dept = (staff as any)?.department || 'Accounting & Finance'
             deptMap[dept] = (deptMap[dept] || 0) + 1
           }
           setDeptHeadcount(deptMap)

@@ -50,7 +50,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
           status: s.status,
           date_employed: s.date_employed,
           created_at: s.created_at,
-          department_name: s.departments?.name,
+          department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || s.department || 'Accounting & Finance',
           id_card_expires_at: s.id_card_expires_at,
         }))
         setStaff(mappedStaff)

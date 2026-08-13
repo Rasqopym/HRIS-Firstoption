@@ -152,13 +152,31 @@ export default function LeaveManagement() {
       if (typesError) {
         console.error('Failed to fetch leave types:', typesError)
       } else if (typesData) {
-        const mappedTypes: LeaveType[] = typesData.map((t: any) => ({
-          id: t.id,
-          name: t.name,
-          entitlementDays: t.annual_entitlement_days,
-          paid: t.is_paid,
-          requiresDocument: t.requires_document,
-        }))
+        let cachedTypesConfig: Record<string, boolean> = {}
+        try {
+          const rawCache = localStorage.getItem('hris_leave_types_config')
+          if (rawCache) {
+            const parsed = JSON.parse(rawCache)
+            parsed.forEach((lt: any) => {
+              cachedTypesConfig[lt.name.toLowerCase()] = lt.attractsLeaveAllowance
+            })
+          }
+        } catch (e) {}
+
+        const mappedTypes: LeaveType[] = typesData.map((t: any) => {
+          const nameLower = t.name.toLowerCase()
+          const attracts = cachedTypesConfig[nameLower] !== undefined
+            ? cachedTypesConfig[nameLower]
+            : nameLower.includes('annual')
+          return {
+            id: t.id,
+            name: t.name,
+            entitlementDays: t.annual_entitlement_days,
+            paid: t.is_paid,
+            requiresDocument: t.requires_document,
+            attractsLeaveAllowance: attracts,
+          }
+        })
         setTypes(mappedTypes)
       }
 
@@ -376,7 +394,7 @@ export default function LeaveManagement() {
           <table className="w-full text-sm">
             <thead className="border-b border-slate-50">
               <tr>
-                {['Leave Type', 'Entitlement (days/yr)', 'Paid', 'Requires Document', ''].map(h => (
+                {['Leave Type', 'Entitlement (days/yr)', 'Paid', 'Attracts Bonus', 'Requires Document', ''].map(h => (
                   <th key={h} className="py-2.5 px-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -432,6 +450,26 @@ export default function LeaveManagement() {
                       className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${t.paid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                     >
                       {t.paid ? 'Paid' : 'Unpaid'}
+                    </button>
+                  </td>
+                  <td className="py-3 px-4">
+                    <button
+                      onClick={async () => {
+                        const newValue = !t.attractsLeaveAllowance
+                        const updated = types.map(x => x.id === t.id ? { ...x, attractsLeaveAllowance: newValue } : x)
+                        setTypes(updated)
+                        try {
+                          localStorage.setItem('hris_leave_types_config', JSON.stringify(updated))
+                        } catch (e) {}
+                        await logAction({
+                          action: 'UPDATE',
+                          entity: 'LeaveType',
+                          details: `Updated ${t.name} attracts leave allowance bonus to ${newValue ? 'Yes' : 'No'}`
+                        })
+                      }}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${t.attractsLeaveAllowance ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    >
+                      {t.attractsLeaveAllowance ? '✓ Bonus Pay' : 'No Bonus'}
                     </button>
                   </td>
                   <td className="py-3 px-4">

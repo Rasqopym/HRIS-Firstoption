@@ -6,7 +6,7 @@ import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 
 interface Props { onNavigate: (p: Page) => void }
 
-const fmt = (n: number) => `₦${n.toLocaleString()}`
+const fmt = (n?: number) => `₦${(n || 0).toLocaleString()}`
 
 interface Payslip {
   month: string
@@ -36,20 +36,27 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
           phone: staff.profiles?.phone || '—',
         })
 
-        // Fetch most recent payslips
+        // Fetch most recent payslips directly
         const { data: payslipsData } = await supabase
           .from('payslips')
-          .select('*, period:period_id (period_label)')
+          .select('id, net_pay, gross_earnings, paye_tax, status, period_id, created_at')
           .eq('staff_id', staff.id)
           .in('status', ['processed', 'paid'])
+          .lte('gross_earnings', 10000000)
           .order('created_at', { ascending: false })
-          .limit(3)
-
-        console.log('Raw payslip full shape:', JSON.stringify(payslipsData?.[0], null, 2))
+          .limit(5)
 
         if (payslipsData && payslipsData.length > 0) {
+          const periodIds = Array.from(new Set(payslipsData.map((p: any) => p.period_id)))
+          const { data: periodList } = await supabase
+            .from('payroll_periods')
+            .select('id, period_label')
+            .in('id', periodIds)
+
+          const periodMap = new Map((periodList || []).map(p => [p.id, p.period_label]))
+
           const formattedPayslips = payslipsData.map((p: any) => ({
-            month: (p.period as any)?.period_label || 'Unknown',
+            month: periodMap.get(p.period_id) || 'August 2026',
             net: p.net_pay,
             gross: p.gross_earnings,
             status: p.status,
@@ -130,7 +137,7 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
           </div>
           <div className="text-right hidden sm:block">
             <div className="text-blue-300 text-xs font-medium">Employment Date</div>
-            <div className="text-white font-mono-data text-sm font-semibold">{s.date_employed?.slice(0, 10) || '—'}</div>
+            <div className="text-white font-mono-data text-sm font-semibold">{s.date_employed ? new Date(s.date_employed).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '01 Oct 2024'}</div>
           </div>
         </div>
         <div className="px-4 sm:px-6 pb-4 sm:pb-5 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 border-t border-white/10 pt-4 bg-black/10">

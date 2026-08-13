@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Role } from '../types'
 import { supabase } from '../lib/supabase'
 import { dbRoleToApp } from '../lib/roleMap'
 import { logAction } from '../lib/auditLog'
+import { useCompanySettings } from '../hooks/useCompanySettings'
 
 interface LoginProps {
   onLogin: (role: Role) => void
 }
 
 export default function Login({ onLogin }: LoginProps) {
+  const { settings: companySettings } = useCompanySettings()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -16,6 +18,35 @@ export default function Login({ onLogin }: LoginProps) {
   const [error, setError] = useState('')
   const [forgotMode, setForgotMode] = useState(false)
   const [forgotSent, setForgotSent] = useState(false)
+
+  // Recovery & Reset Password State
+  const [resetPasswordMode, setResetPasswordMode] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [resetSuccess, setResetSuccess] = useState(false)
+
+  useEffect(() => {
+    // Detect password reset / recovery link from hash
+    const hash = window.location.hash || ''
+    if (hash.includes('otp_expired') || hash.includes('invalid') || hash.includes('access_denied')) {
+      setError('The password reset link has expired or is invalid. Please request a new reset link below.')
+      setForgotMode(true)
+    } else if (hash.includes('type=recovery') || hash.includes('access_token')) {
+      setResetPasswordMode(true)
+    }
+
+    // Listen for Supabase auth recovery events
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setResetPasswordMode(true)
+      }
+    })
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -76,14 +107,63 @@ export default function Login({ onLogin }: LoginProps) {
 
   const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(email)
-    if (error) {
-      setError(error.message)
-    } else {
-      setForgotSent(true)
+    setError('')
+    if (!email) {
+      setError('Please enter your work email address.')
+      return
     }
-    setLoading(false)
+    setLoading(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/#type=recovery`
+      })
+      if (error) throw error
+      setForgotSent(true)
+    } catch (err: any) {
+      setError(err.message || 'Failed to send reset email.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    if (!newPassword || !confirmPassword) {
+      setError('Please enter and confirm your new password.')
+      return
+    }
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+
+      setResetSuccess(true)
+      await logAction({
+        action: 'UPDATE',
+        entity: 'User',
+        details: 'Password updated via recovery link',
+      })
+      setTimeout(() => {
+        setResetPasswordMode(false)
+        setForgotMode(false)
+        setResetSuccess(false)
+        try { window.location.hash = '' } catch (e) {}
+      }, 3000)
+    } catch (err: any) {
+      setError(err.message || 'Failed to update password. The link may have expired.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -92,12 +172,18 @@ export default function Login({ onLogin }: LoginProps) {
       <div className="hidden lg:flex flex-col justify-between w-[480px] flex-none p-12" style={{ background: 'linear-gradient(160deg, #0a1f3c 0%, #1e3a5f 50%, #1e40af 100%)' }}>
         <div>
           <div className="flex items-center gap-3 mb-12">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-              <span className="text-white font-display font-bold text-base">FO</span>
+            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center overflow-hidden shadow-sm">
+              {companySettings.logo_url ? (
+                <img src={companySettings.logo_url} alt={companySettings.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white font-display font-bold text-base uppercase">
+                  {companySettings.name ? companySettings.name.slice(0, 2) : 'FO'}
+                </span>
+              )}
             </div>
             <div>
-              <div className="font-display font-semibold text-white text-lg">Firstoption</div>
-              <div className="text-blue-300 text-sm">HRIS Platform</div>
+              <div className="font-display font-semibold text-white text-lg">{companySettings.name || 'Firstoption'}</div>
+              <div className="text-blue-300 text-sm">{companySettings.subtitle || 'HRIS Platform'}</div>
             </div>
           </div>
 
@@ -167,13 +253,89 @@ export default function Login({ onLogin }: LoginProps) {
         <div className="w-full max-w-md">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
-              <span className="text-white font-display font-bold">FO</span>
+            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center overflow-hidden shadow-sm">
+              {companySettings.logo_url ? (
+                <img src={companySettings.logo_url} alt={companySettings.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white font-display font-bold uppercase">
+                  {companySettings.name ? companySettings.name.slice(0, 2) : 'FO'}
+                </span>
+              )}
             </div>
-            <span className="font-display font-semibold text-slate-800 text-lg">Firstoption HRIS</span>
+            <span className="font-display font-semibold text-slate-800 text-lg">
+              {companySettings.name || 'Firstoption'} {companySettings.subtitle || 'HRIS'}
+            </span>
           </div>
 
-          {!forgotMode ? (
+          {resetPasswordMode ? (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 anim-fade-up">
+              {resetSuccess ? (
+                <div className="text-center py-6">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <h3 className="font-display font-semibold text-slate-800 text-xl mb-2">Password Updated!</h3>
+                  <p className="text-slate-500 text-sm mb-6">Your password has been successfully updated. Redirecting to sign in...</p>
+                </div>
+              ) : (
+                <>
+                  <h2 className="font-display font-semibold text-slate-800 text-2xl mb-1">Create new password</h2>
+                  <p className="text-slate-500 text-sm mb-7">Enter your new account password below.</p>
+
+                  {error && (
+                    <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                      {error}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleResetPassword} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">New Password</label>
+                      <div className="relative">
+                        <input
+                          type={showNewPassword ? 'text' : 'password'}
+                          value={newPassword}
+                          onChange={e => setNewPassword(e.target.value)}
+                          placeholder="Minimum 6 characters"
+                          className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showNewPassword ? (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                          ) : (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Confirm New Password</label>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={e => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                    >
+                      {loading ? 'Updating password...' : 'Update Password'}
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+          ) : !forgotMode ? (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 anim-fade-up">
               <h2 className="font-display font-semibold text-slate-800 text-2xl mb-1">Welcome back</h2>
               <p className="text-slate-500 text-sm mb-7">Sign in to your HRIS account</p>
@@ -256,6 +418,12 @@ export default function Login({ onLogin }: LoginProps) {
                   </button>
                   <h2 className="font-display font-semibold text-slate-800 text-2xl mb-1">Reset password</h2>
                   <p className="text-slate-500 text-sm mb-7">Enter your work email and we will send a reset link.</p>
+
+                  {error && (
+                    <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                      {error}
+                    </div>
+                  )}
                   <form onSubmit={handleForgot} className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Work email</label>
@@ -292,7 +460,7 @@ export default function Login({ onLogin }: LoginProps) {
           )}
 
           <p className="text-center text-xs text-slate-400 mt-6 font-medium">
-            © 2026 Firstoption Support Services
+            {companySettings.footer_text ? companySettings.footer_text.replace(/\s*support\s*services/gi, '') : `© ${new Date().getFullYear()} ${companySettings.name || 'Firstoption'}`}
           </p>
         </div>
       </div>

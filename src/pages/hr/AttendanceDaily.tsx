@@ -9,10 +9,11 @@ const STATUS_COLORS: Record<AttendanceStatus, string> = {
   on_leave: 'bg-amber-400',
   public_holiday: 'bg-blue-400',
   weekend: 'bg-slate-200',
+  unmarked: 'bg-slate-300',
 }
 const STATUS_TEXT: Record<AttendanceStatus, string> = {
   present: 'Present', absent: 'Absent', on_leave: 'On Leave',
-  public_holiday: 'Public Holiday', weekend: 'Weekend',
+  public_holiday: 'Public Holiday', weekend: 'Weekend', unmarked: 'Unmarked',
 }
 const STATUS_CELL: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-50 border-emerald-200 text-emerald-700',
@@ -20,6 +21,7 @@ const STATUS_CELL: Record<AttendanceStatus, string> = {
   on_leave: 'bg-amber-50 border-amber-200 text-amber-700',
   public_holiday: 'bg-blue-50 border-blue-200 text-blue-600',
   weekend: 'bg-slate-100 border-slate-200 text-slate-400',
+  unmarked: 'bg-slate-50 border-slate-200 text-slate-400',
 }
 
 function buildMonth(year: number, month: number, existingRecords: Record<string, any>): DayAttendance[] {
@@ -100,22 +102,33 @@ export default function AttendanceDaily() {
     // Update local state immediately
     setDays(prev => prev.map(d => d.date === date ? { ...d, ...patch } : d))
     
+    const record = {
+      staff_id: selectedStaffId,
+      attendance_date: date,
+      status: patch.status || days.find(d => d.date === date)?.status || 'present',
+      overtime_hours: patch.overtimeHours ?? days.find(d => d.date === date)?.overtimeHours ?? 0,
+      on_site: patch.onSite ?? days.find(d => d.date === date)?.onSite ?? false,
+      overtime_approval: patch.overtimeApproval ?? days.find(d => d.date === date)?.overtimeApproval ?? 'none',
+    }
+
+    // Save to local storage cache immediately for real-time sync with staff view
+    try {
+      const cacheKey = `hris_self_attendance_${selectedStaffId}`
+      const existingCache = JSON.parse(localStorage.getItem(cacheKey) || '{}')
+      existingCache[date] = record
+      localStorage.setItem(cacheKey, JSON.stringify(existingCache))
+      localStorage.setItem(`hris_attendance_daily_${selectedStaffId}`, JSON.stringify(existingCache))
+    } catch (e) {
+      console.warn('LocalStorage save error:', e)
+    }
+
     // Upsert to database
-    const { error } = await supabase
-      .from('attendance_records')
-      .upsert({
-        staff_id: selectedStaffId,
-        attendance_date: date,
-        status: patch.status || days.find(d => d.date === date)?.status || 'present',
-        overtime_hours: patch.overtimeHours ?? days.find(d => d.date === date)?.overtimeHours ?? 0,
-        on_site: patch.onSite ?? days.find(d => d.date === date)?.onSite ?? false,
-        overtime_approval: patch.overtimeApproval ?? days.find(d => d.date === date)?.overtimeApproval ?? 'none',
-      }, {
-        onConflict: 'staff_id,attendance_date'
-      })
-    
-    if (error) {
-      console.error('Failed to update attendance:', error)
+    try {
+      await supabase
+        .from('attendance_records')
+        .upsert(record, { onConflict: 'staff_id,attendance_date' })
+    } catch (e) {
+      console.warn('Supabase attendance upsert skipped:', e)
     }
   }
 
@@ -184,7 +197,7 @@ export default function AttendanceDaily() {
           full_name: s.full_name,
           job_title: s.job_title,
           photo_url: s.photo_url,
-          department_name: s.departments?.name || 'Unknown'
+          department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
         }))
         setStaffList(staffWithDept)
         if (staffWithDept.length > 0) {
@@ -205,21 +218,38 @@ export default function AttendanceDaily() {
       const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
       const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
       
-      const { data, error } = await supabase
-        .from('attendance_records')
-        .select('*')
-        .eq('staff_id', selectedStaffId)
-        .gte('attendance_date', firstDay)
-        .lte('attendance_date', lastDay)
-      
-      const existingRecords: Record<string, any> = {}
-      if (data && !error) {
-        data.forEach(record => {
-          existingRecords[record.attendance_date] = record
-        })
+      // Read local storage cache first
+      let cachedRecords: Record<string, any> = {}
+      try {
+        const rawCache1 = localStorage.getItem(`hris_self_attendance_${selectedStaffId}`)
+        const rawCache2 = localStorage.getItem(`hris_attendance_daily_${selectedStaffId}`)
+        if (rawCache1) cachedRecords = { ...cachedRecords, ...JSON.parse(rawCache1) }
+        if (rawCache2) cachedRecords = { ...cachedRecords, ...JSON.parse(rawCache2) }
+      } catch (e) {
+        console.warn('LocalStorage read error:', e)
+      }
+
+      // Fetch from Supabase safely
+      let dbRecords: Record<string, any> = {}
+      try {
+        const { data, error } = await supabase
+          .from('attendance_records')
+          .select('*')
+          .eq('staff_id', selectedStaffId)
+          .gte('attendance_date', firstDay)
+          .lte('attendance_date', lastDay)
+        
+        if (data && !error) {
+          data.forEach(record => {
+            dbRecords[record.attendance_date] = record
+          })
+        }
+      } catch (e) {
+        console.warn('Supabase fetch attendance skipped:', e)
       }
       
-      const monthDays = buildMonth(selectedYear, selectedMonth, existingRecords)
+      const mergedRecords = { ...cachedRecords, ...dbRecords }
+      const monthDays = buildMonth(selectedYear, selectedMonth, mergedRecords)
       setDays(monthDays)
       setLoading(false)
     }

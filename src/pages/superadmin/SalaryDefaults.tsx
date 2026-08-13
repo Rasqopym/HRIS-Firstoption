@@ -78,13 +78,13 @@ export default function SalaryDefaults() {
         templateComponentsData?.forEach(tc => {
           const template = templatesMap.get(tc.template_id)
           if (template && tc.component_id) {
-            const category = tc.component_id.category === 'allowance' ? 'earning' : 'deduction'
+            const category = (tc.component_id as any)?.category === 'allowance' ? 'earning' : 'deduction'
             const rateType = dbRateTypeToApp(tc.rate_type)
             const attendanceBased = tc.rate_type === 'per_hour' || tc.rate_type === 'per_day'
             
             template.components.push({
               id: tc.id,
-              name: tc.component_id.name,
+              name: (tc.component_id as any)?.name || 'Component',
               active: tc.is_active,
               taxable: tc.is_taxable,
               rateType,
@@ -250,12 +250,12 @@ export default function SalaryDefaults() {
         department: fullTemplateData.department,
         components: newTemplateComponents?.map(tc => ({
           id: tc.id,
-          name: tc.component_id.name,
+          name: (tc.component_id as any)?.name || 'Component',
           active: tc.is_active,
           taxable: tc.is_taxable,
           rateType: dbRateTypeToApp(tc.rate_type),
           rate: tc.rate,
-          category: tc.component_id.category === 'allowance' ? 'earning' : 'deduction',
+          category: ((tc.component_id as any)?.category === 'allowance' ? 'earning' : 'deduction') as 'earning' | 'deduction',
           attendanceBased: tc.rate_type === 'per_hour' || tc.rate_type === 'per_day',
         })) ?? [],
       }
