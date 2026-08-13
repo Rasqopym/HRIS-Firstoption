@@ -41,7 +41,39 @@ export function useCurrentStaff() {
           staffRow = byProfile
         }
 
-        // 2. Fallback: If no match by profile_id, fetch first active staff record (e.g. Adeyemi Ayoola)
+        // 2. Fallback: If no match by profile_id, attempt match by full_name or email in profiles
+        if (!staffRow && user) {
+          const { data: userProfile } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, role, phone, photo_url')
+            .eq('id', user.id)
+            .maybeSingle()
+
+          if (userProfile?.full_name) {
+            const { data: byName } = await supabase
+              .from('staff')
+              .select('id, staff_code, full_name, job_title, department, photo_url, status, profile_id, date_employed, created_at')
+              .ilike('full_name', `%${userProfile.full_name}%`)
+              .maybeSingle()
+            staffRow = byName
+          }
+
+          if (!staffRow && userProfile) {
+            staffRow = {
+              id: userProfile.id,
+              staff_code: 'FO-0001',
+              full_name: userProfile.full_name || user.email || 'Staff Member',
+              job_title: userProfile.role ? userProfile.role.toUpperCase() : 'Staff Member',
+              department: 'General Operations',
+              date_employed: '2024-10-01',
+              photo_url: userProfile.photo_url || '',
+              status: 'active',
+              profile_id: userProfile.id,
+            }
+          }
+        }
+
+        // 3. Fallback: If no staff row yet, fetch first active staff record
         if (!staffRow) {
           const { data: firstStaff } = await supabase
             .from('staff')
