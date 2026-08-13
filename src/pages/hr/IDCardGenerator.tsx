@@ -253,12 +253,15 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           border: `4px solid ${accentColor}`,
           overflow: 'hidden'
         }}>
-          {((s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo) ? (
+          {((s as any).photo_url || (Array.isArray((s as any).profiles) ? (s as any).profiles[0]?.photo_url : (s as any).profiles?.photo_url) || (s as any).photo) ? (
             <img
-              src={(s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo}
+              src={(s as any).photo_url || (Array.isArray((s as any).profiles) ? (s as any).profiles[0]?.photo_url : (s as any).profiles?.photo_url) || (s as any).photo}
               alt={s.full_name}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              crossOrigin="anonymous"
+              onError={(e) => {
+                // If image fails to load, fallback gracefully
+                (e.target as HTMLElement).style.display = 'none'
+              }}
             />
           ) : (
             <PhotoPlaceholder name={s.full_name} size={90} />
@@ -601,12 +604,14 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         zIndex: 15
       }}>
-        {((s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo) ? (
+        {((s as any).photo_url || (Array.isArray((s as any).profiles) ? (s as any).profiles[0]?.photo_url : (s as any).profiles?.photo_url) || (s as any).photo) ? (
           <img
-            src={(s as any).photo_url || (s as any).profiles?.photo_url || (s as any).photo}
+            src={(s as any).photo_url || (Array.isArray((s as any).profiles) ? (s as any).profiles[0]?.photo_url : (s as any).profiles?.photo_url) || (s as any).photo}
             alt={s.full_name}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            crossOrigin="anonymous"
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none'
+            }}
           />
         ) : (
           <PhotoPlaceholder name={s.full_name} size={100} />
@@ -757,7 +762,7 @@ export default function IDCardGenerator() {
           full_name: s.full_name,
           job_title: s.job_title || 'Staff',
           department_name: (s.departments as any)?.name || s.department || 'General',
-          photo_url: s.photo_url || (s.profiles as any)?.photo_url,
+          photo_url: s.photo_url || (Array.isArray(s.profiles) ? s.profiles[0]?.photo_url : s.profiles?.photo_url) || null,
           staff_code: s.staff_code || 'FO-0001',
           id_verification_code: s.id_verification_code || 'VERIFY123',
           id_card_issued_at: s.id_card_issued_at,

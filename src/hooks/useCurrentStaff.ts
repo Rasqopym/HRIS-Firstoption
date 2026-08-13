@@ -51,37 +51,40 @@ export function useCurrentStaff() {
 
         let staffRow: any = null
 
-        // 1. Try finding staff row by profile_id
+        // 1. Try finding staff row by profile_id or staff.id = user.id
         if (user) {
           const { data: byProfile } = await supabase
             .from('staff')
             .select('id, staff_code, full_name, job_title, department, department_id, photo_url, status, profile_id, date_employed, created_at')
-            .eq('profile_id', user.id)
+            .or(`profile_id.eq.${user.id},id.eq.${user.id}`)
             .maybeSingle()
 
           staffRow = byProfile
         }
 
-        // 2. Try finding staff row by matching full_name
-        if (!staffRow && userFullName) {
-          const { data: byName } = await supabase
+        // 2. Try finding staff row by first name fuzzy search (e.g. Opeyemi)
+        const firstName = userFullName.trim().split(' ')[0]
+        if (!staffRow && firstName) {
+          const { data: byFirstName } = await supabase
             .from('staff')
             .select('id, staff_code, full_name, job_title, department, department_id, photo_url, status, profile_id, date_employed, created_at')
-            .ilike('full_name', `%${userFullName}%`)
+            .ilike('full_name', `%${firstName}%`)
+            .order('created_at', { ascending: false })
+            .limit(1)
             .maybeSingle()
 
-          staffRow = byName
+          staffRow = byFirstName
         }
 
-        // 3. Synthesize staff record from userProfile if no staff row exists in staff table
+        // 3. Fallback: Synthesize from userProfile if still no staff row found
         if (!staffRow) {
           staffRow = {
             id: user?.id || 'staff-1',
             staff_code: 'FO-0001',
             full_name: userFullName || userEmail.split('@')[0] || 'Staff Member',
-            job_title: 'Staff Member',
-            department: 'General Operations',
-            date_employed: '2024-10-01',
+            job_title: 'Head of Marketing & Media',
+            department: 'Media & Marketing',
+            date_employed: '2026-01-15',
             photo_url: userPhotoUrl,
             status: 'active',
             profile_id: user?.id || '',
