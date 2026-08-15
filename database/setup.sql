@@ -667,6 +667,24 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- Auto-link staff profile trigger
+CREATE OR REPLACE FUNCTION public.auto_link_staff_profile()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE public.staff
+  SET profile_id = NEW.id
+  WHERE LOWER(email) = LOWER(NEW.email)
+    AND profile_id IS NULL;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_auto_link_staff_profile ON public.profiles;
+CREATE TRIGGER trg_auto_link_staff_profile
+AFTER INSERT OR UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.auto_link_staff_profile();
+
 
 -- ────────────────────────────────────────────────────────────
 -- STORAGE BUCKETS & POLICIES SETUP

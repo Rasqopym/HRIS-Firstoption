@@ -34,16 +34,16 @@ INSERT INTO public.tax_bands (band_order, lower_bound, upper_bound, rate) VALUES
 DELETE FROM public.leave_types;
 
 INSERT INTO public.leave_types
-  (name, annual_entitlement_days, is_paid, requires_document)
+  (name, annual_entitlement_days, is_paid, attracts_bonus, requires_document)
 VALUES
-  ('Annual Leave',        21,  true,  false),
-  ('Sick Leave',          14,  true,  true),
-  ('Maternity Leave',     84,  true,  true),
-  ('Paternity Leave',      3,  true,  false),
-  ('Casual Leave',         5,  true,  false),
-  ('Examination Leave',    5,  true,  true),
-  ('Compassionate Leave',  3,  true,  false),
-  ('Unpaid Leave',        30,  false, false);
+  ('Annual Leave',        21,  true,  true,  false),
+  ('Sick Leave',          14,  true,  false, true),
+  ('Casual Leave',         5,  true,  false, false),
+  ('Compassionate Leave',  3,  true,  false, false),
+  ('Unpaid Leave',        30,  false, false, false),
+  ('Paternity Leave',      4,  true,  false, false),
+  ('Maternity Leave',     90,  true,  false, true),
+  ('Examination Leave',    4,  true,  false, true);
 
 
 -- ────────────────────────────────────────────────────────────
