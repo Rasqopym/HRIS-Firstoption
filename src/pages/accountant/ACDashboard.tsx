@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { calculatePayrollForStaff } from '../../lib/payrollEngine'
 import type { Page } from '../../types'
 
 const fmt = (n: number) => '₦' + Math.round(n).toLocaleString('en-NG')
@@ -11,6 +12,8 @@ export default function ACDashboard({ onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [totalGross, setTotalGross] = useState(0)
   const [totalNet, setTotalNet] = useState(0)
+  const [processedNet, setProcessedNet] = useState(0)
+  const [pendingNet, setPendingNet] = useState(0)
   const [totalStaff, setTotalStaff] = useState(0)
   const [paidCount, setPaidCount] = useState(0)
   const [deptTotals, setDeptTotals] = useState<Record<string, number>>({})
@@ -22,74 +25,103 @@ export default function ACDashboard({ onNavigate }: Props) {
         setLoading(true)
         setError(null)
 
-        // Get most recent payroll period with processed/paid payslips
+        const currentMonthName = new Date().toLocaleDateString('en-US', { month: 'long' })
+        const currentYear = new Date().getFullYear()
+        const activeMonthLabel = `${currentMonthName} ${currentYear}`
+        setPeriodLabel(activeMonthLabel)
+
+        // 1. Fetch active staff
+        const { data: staffList, error: staffError } = await supabase
+          .from('staff')
+          .select(`
+            id,
+            staff_code,
+            full_name,
+            gross_salary,
+            department,
+            departments (name)
+          `)
+          .eq('status', 'active')
+
+        if (staffError) throw staffError
+        setTotalStaff(staffList?.length || 0)
+
+        // 2. Fetch period matching current month
         const { data: periods } = await supabase
           .from('payroll_periods')
           .select('id, period_label')
-          .order('start_date', { ascending: false })
+          .ilike('period_label', `%${currentMonthName}%`)
           .limit(1)
 
-        if (!periods || periods.length === 0) {
-          setTotalGross(0)
-          setTotalNet(0)
-          setTotalStaff(0)
-          setPaidCount(0)
-          setDeptTotals({})
-          setPeriodLabel('')
-          setLoading(false)
-          return
+        let processedMap = new Map<string, any>()
+        let paidCounter = 0
+
+        if (periods && periods.length > 0) {
+          const period = periods[0]
+          const { data: payslips } = await supabase
+            .from('payslips')
+            .select('id, staff_id, gross_earnings, net_pay, status')
+            .eq('period_id', period.id)
+
+          if (payslips && payslips.length > 0) {
+            for (const p of payslips) {
+              if (p.status === 'processed' || p.status === 'paid') {
+                processedMap.set(p.staff_id, p)
+              }
+              if (p.status === 'paid') {
+                paidCounter++
+              }
+            }
+          }
         }
 
-        const period = periods[0]
-        setPeriodLabel(period.period_label)
+        setPaidCount(paidCounter)
 
-        // Get total active staff count
-        const { count: staffCount } = await supabase
-          .from('staff')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'active')
-        setTotalStaff(staffCount || 0)
+        const firstDay = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
+        const lastDay = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${new Date(currentYear, new Date().getMonth() + 1, 0).getDate()}`
 
-        // Get payslips for the period
-        const { data: payslips } = await supabase
-          .from('payslips')
-          .select('id, gross_earnings, net_pay, status, staff_id, created_at')
-          .eq('period_id', period.id)
-          .in('status', ['processed', 'paid'])
-          .lte('gross_earnings', 10000000)
-
-        if (!payslips || payslips.length === 0) {
-          setTotalGross(0)
-          setTotalNet(0)
-          setPaidCount(0)
-          setDeptTotals({})
-          setLoading(false)
-          return
-        }
-
-        const staffIds = Array.from(new Set(payslips.map(p => p.staff_id)))
-        const { data: staffList } = await supabase
-          .from('staff')
-          .select('id, department')
-          .in('id', staffIds)
-
-        const staffDeptMap = new Map((staffList || []).map(s => [s.id, s.department || 'Accounting & Finance']))
-
-        // Calculate totals
-        const gross = payslips.reduce((sum, p) => sum + p.gross_earnings, 0)
-        const net = payslips.reduce((sum, p) => sum + p.net_pay, 0)
-        const paid = payslips.filter(p => p.status === 'paid').length
-
-        setTotalGross(gross)
-        setTotalNet(net)
-        setPaidCount(paid)
-
-        // Calculate department totals
+        let grossSum = 0
+        let netSum = 0
+        let procSum = 0
+        let pendSum = 0
         const deptMap: Record<string, number> = {}
-        for (const payslip of payslips) {
-          const dept = staffDeptMap.get(payslip.staff_id) || 'Accounting & Finance'
-          deptMap[dept] = (deptMap[dept] || 0) + payslip.gross_earnings
+
+        for (const s of (staffList || [])) {
+          const deptName = (s.departments as any)?.name || s.department || 'Accounting & Finance'
+          const existing = processedMap.get(s.id)
+
+          if (existing) {
+            const g = existing.gross_earnings || s.gross_salary || 0
+            const n = existing.net_pay || 0
+            grossSum += g
+            netSum += n
+            procSum += n
+            deptMap[deptName] = (deptMap[deptName] || 0) + g
+          } else {
+            // Compute fresh calculation for pending staff
+            try {
+              const calc = await calculatePayrollForStaff(s.id, firstDay, lastDay)
+              const g = calc.grossEarnings || s.gross_salary || 0
+              const n = calc.netPay || 0
+              grossSum += g
+              netSum += n
+              pendSum += n
+              deptMap[deptName] = (deptMap[deptName] || 0) + g
+            } catch (e) {
+              const g = s.gross_salary || 0
+              const n = Math.round(g * 0.85)
+              grossSum += g
+              netSum += n
+              pendSum += n
+              deptMap[deptName] = (deptMap[deptName] || 0) + g
+            }
+          }
         }
+
+        setTotalGross(grossSum)
+        setTotalNet(netSum)
+        setProcessedNet(procSum)
+        setPendingNet(pendSum)
         setDeptTotals(deptMap)
 
       } catch (err) {

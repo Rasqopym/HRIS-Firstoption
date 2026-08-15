@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { calculatePayrollForStaff } from '../../lib/payrollEngine'
 import type { Page } from '../../types'
 
 interface Props { onNavigate: (p: Page) => void }
@@ -33,6 +34,8 @@ export default function SADashboard({ onNavigate }: Props) {
   const [activeAccounts, setActiveAccounts] = useState(0)
   const [suspendedAccounts, setSuspendedAccounts] = useState(0)
   const [monthlyPayroll, setMonthlyPayroll] = useState(0)
+  const [processedPayroll, setProcessedPayroll] = useState(0)
+  const [pendingPayroll, setPendingPayroll] = useState(0)
   const [periodLabel, setPeriodLabel] = useState('')
   const [deptHeadcount, setDeptHeadcount] = useState<Record<string, number>>({})
   const [activityFeed, setActivityFeed] = useState<any[]>([])
@@ -56,29 +59,63 @@ export default function SADashboard({ onNavigate }: Props) {
         setActiveAccounts(active)
         setSuspendedAccounts(suspended)
 
-        // Fetch most recent payroll period and calculate monthly payroll
+        // Fetch payroll for current active month (e.g. August 2026)
+        let procSum = 0
+        let pendSum = 0
+        const currentMonthName = new Date().toLocaleDateString('en-US', { month: 'long' })
+        const currentYear = new Date().getFullYear()
+        const activeMonthLabel = `${currentMonthName} ${currentYear}`
+        setPeriodLabel(activeMonthLabel)
+
+        const { data: activeStaff } = await supabase
+          .from('staff')
+          .select('id, staff_code, full_name, gross_salary')
+          .eq('status', 'active')
+
         const { data: periods } = await supabase
           .from('payroll_periods')
           .select('id, period_label')
-          .order('start_date', { ascending: false })
+          .ilike('period_label', `%${currentMonthName}%`)
           .limit(1)
+
+        const processedStaffIds = new Set<string>()
 
         if (periods && periods.length > 0) {
           const period = periods[0]
-          setPeriodLabel(period.period_label)
-
           const { data: payslips } = await supabase
             .from('payslips')
-            .select('net_pay, gross_earnings')
+            .select('staff_id, net_pay, gross_earnings, status')
             .eq('period_id', period.id)
             .in('status', ['processed', 'paid'])
             .lte('gross_earnings', 10000000)
 
           if (payslips && payslips.length > 0) {
-            const totalNet = payslips.reduce((sum, p) => sum + p.net_pay, 0)
-            setMonthlyPayroll(totalNet)
+            for (const p of payslips) {
+              processedStaffIds.add(p.staff_id)
+              procSum += (p.net_pay || 0)
+            }
           }
         }
+
+        // For active staff members without a processed/paid payslip in DB, compute pending net pay dynamically
+        const firstDay = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
+        const lastDay = `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${new Date(currentYear, new Date().getMonth() + 1, 0).getDate()}`
+
+        for (const s of (activeStaff || [])) {
+          if (!processedStaffIds.has(s.id)) {
+            try {
+              const calc = await calculatePayrollForStaff(s.id, firstDay, lastDay)
+              pendSum += (calc.netPay || 0)
+            } catch (e) {
+              pendSum += Math.round((s.gross_salary || 0) * 0.85)
+            }
+          }
+        }
+
+        const totalNetPayroll = procSum + pendSum
+        setMonthlyPayroll(totalNetPayroll)
+        setProcessedPayroll(procSum)
+        setPendingPayroll(pendSum)
 
         // Fetch department headcount from staff table
         const { data: staffData, error: staffError } = await supabase
@@ -150,7 +187,7 @@ export default function SADashboard({ onNavigate }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {[
           { label: 'Total Accounts', value: totalAccounts, sub: `${activeAccounts} active user profiles`, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>, color: 'text-blue-600', bg: 'bg-blue-50/80', border: 'border-blue-100' },
-          { label: 'Monthly Payroll', value: monthlyPayroll > 0 ? fmt(monthlyPayroll) : '—', sub: periodLabel || 'No payroll processed', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>, color: monthlyPayroll > 0 ? 'text-emerald-600' : 'text-slate-400', bg: monthlyPayroll > 0 ? 'bg-emerald-50/80' : 'bg-slate-50', border: monthlyPayroll > 0 ? 'border-emerald-100' : 'border-slate-100' },
+          { label: 'Monthly Payroll', value: monthlyPayroll > 0 ? fmt(monthlyPayroll) : '—', sub: periodLabel ? `${periodLabel} · ${fmt(processedPayroll)} Proc / ${fmt(pendingPayroll)} Pend` : 'No payroll processed', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>, color: monthlyPayroll > 0 ? 'text-emerald-600' : 'text-slate-400', bg: monthlyPayroll > 0 ? 'bg-emerald-50/80' : 'bg-slate-50', border: monthlyPayroll > 0 ? 'border-emerald-100' : 'border-slate-100' },
           { label: 'Active Accounts', value: activeAccounts, sub: `${suspendedAccounts} suspended accounts`, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>, color: 'text-indigo-600', bg: 'bg-indigo-50/80', border: 'border-indigo-100' },
           { label: 'Suspended', value: suspendedAccounts, sub: 'Require administrative review', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>, color: 'text-amber-600', bg: 'bg-amber-50/80', border: 'border-amber-100' },
         ].map(kpi => (

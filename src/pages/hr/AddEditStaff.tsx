@@ -131,49 +131,63 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
     try {
       const fullName = `${personal.firstName} ${personal.lastName}`
       const deptObj = departments.find(d => d.id === employment.department)
-      const deptName = deptObj ? deptObj.name : (employment.department || 'Accounting & Finance')
-      const deptId = deptObj ? deptObj.id : (employment.department?.length === 36 ? employment.department : null)
+      const deptName = deptObj ? deptObj.name : (employment.department || 'General Operations')
+      const rawDeptId = deptObj?.id || employment.department
+      const isValidUuid = (id?: string | null) => !!id && id.length === 36 && id.includes('-')
+      const validDeptId = isValidUuid(rawDeptId) ? rawDeptId : null
 
-      let data, error
+      let data: any = null
+      let error: any = null
+
+      const basePayload: any = {
+        full_name: fullName,
+        email: personal.email || null,
+        phone: personal.phone || null,
+        dob: personal.dob || null,
+        gender: personal.gender || null,
+        address: personal.address || null,
+        state: personal.state || null,
+        next_of_kin: personal.nextOfKin || null,
+        next_of_kin_phone: personal.nextOfKinPhone || null,
+        job_title: employment.jobTitle || 'Staff',
+        date_employed: employment.employmentDate || null,
+        employment_type: employment.employmentType || 'Full-time',
+        gross_salary: financial.grossSalary ? Number(financial.grossSalary) : null,
+        bank_name: financial.bankName || null,
+        account_number: financial.accountNumber || null,
+        account_name: financial.accountName || null,
+        status: 'active',
+      }
+
+      if (validDeptId) {
+        basePayload.department_id = validDeptId
+      }
+      if (deptName) {
+        basePayload.department = deptName
+      }
 
       if (isEditMode && staffId) {
         // UPDATE existing staff
-        const updatePayload = {
-          full_name: fullName,
-          email: personal.email,
-          phone: personal.phone,
-          dob: personal.dob || null,
-          gender: personal.gender,
-          address: personal.address || null,
-          state: personal.state || null,
-          next_of_kin: personal.nextOfKin || null,
-          next_of_kin_phone: personal.nextOfKinPhone || null,
-          department_id: deptId,
-          department: deptName,
-          job_title: employment.jobTitle,
-          date_employed: employment.employmentDate || null,
-          employment_type: employment.employmentType,
-          gross_salary: financial.grossSalary ? Number(financial.grossSalary) : null,
-          bank_name: financial.bankName || null,
-          account_number: financial.accountNumber || null,
-          account_name: financial.accountName || null,
-        }
-
-        console.log('[AddEditStaff UPDATE] Payload being sent:', updatePayload)
-
-        const result = await supabase
+        let updateRes = await supabase
           .from('staff')
-          .update(updatePayload)
+          .update(basePayload)
           .eq('id', staffId)
           .select('id, staff_code')
-          .single()
+          .maybeSingle()
 
-        data = result.data
-        error = result.error
+        if (updateRes.error && updateRes.error.message?.includes('department')) {
+          delete basePayload.department
+          updateRes = await supabase
+            .from('staff')
+            .update(basePayload)
+            .eq('id', staffId)
+            .select('id, staff_code')
+            .maybeSingle()
+        }
 
-        if (error) throw error
+        if (updateRes.error) throw updateRes.error
+        data = updateRes.data
 
-        // Log the action
         await logAction({
           action: 'UPDATE',
           entity: 'Staff',
@@ -182,40 +196,27 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
         })
       } else {
         // INSERT new staff
-        const result = await supabase
+        let insertRes = await supabase
           .from('staff')
-          .insert({
-            full_name: fullName,
-            email: personal.email,
-            phone: personal.phone,
-            dob: personal.dob || null,
-            gender: personal.gender,
-            address: personal.address || null,
-            state: personal.state || null,
-            next_of_kin: personal.nextOfKin || null,
-            next_of_kin_phone: personal.nextOfKinPhone || null,
-            department_id: deptId,
-            department: deptName,
-            job_title: employment.jobTitle,
-            date_employed: employment.employmentDate || null,
-            employment_type: employment.employmentType,
-            gross_salary: financial.grossSalary ? Number(financial.grossSalary) : null,
-            bank_name: financial.bankName || null,
-            account_number: financial.accountNumber || null,
-            account_name: financial.accountName || null,
-            status: 'active',
-          })
+          .insert(basePayload)
           .select('id, staff_code')
-          .single()
+          .maybeSingle()
 
-        data = result.data
-        error = result.error
+        // Fallback if 'department' column does not exist on schema
+        if (insertRes.error && insertRes.error.message?.includes('department')) {
+          delete basePayload.department
+          insertRes = await supabase
+            .from('staff')
+            .insert(basePayload)
+            .select('id, staff_code')
+            .maybeSingle()
+        }
 
-        if (error) throw error
+        if (insertRes.error) throw insertRes.error
+        data = insertRes.data
 
         setGeneratedStaffId(data?.staff_code || 'N/A')
 
-        // Log the action
         await logAction({
           action: 'CREATE',
           entity: 'Staff',
@@ -225,8 +226,9 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
       }
 
       setSubmitted(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save staff record')
+    } catch (err: any) {
+      const errMsg = err?.message || err?.details || (err instanceof Error ? err.message : String(err)) || 'Failed to save staff record'
+      setError(errMsg)
       console.error('Error saving staff:', err)
     } finally {
       setSubmitting(false)

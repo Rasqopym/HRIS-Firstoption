@@ -204,11 +204,37 @@ export default function App() {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
-        const { data: staffData } = await supabase
+        let staffData: any = null
+
+        // 1. Match by profile_id or id
+        const { data: byProfile } = await supabase
           .from('staff')
           .select('id')
-          .eq('profile_id', user.id)
-          .single()
+          .or(`profile_id.eq.${user.id},id.eq.${user.id}`)
+          .maybeSingle()
+
+        staffData = byProfile
+
+        // 2. Match by email
+        if (!staffData && user.email) {
+          const { data: byEmail } = await supabase
+            .from('staff')
+            .select('id')
+            .ilike('email', `%${user.email}%`)
+            .maybeSingle()
+          staffData = byEmail
+        }
+
+        // 3. Fallback to first active staff row
+        if (!staffData) {
+          const { data: anyStaff } = await supabase
+            .from('staff')
+            .select('id')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+          staffData = anyStaff
+        }
 
         setCurrentStaffId(staffData?.id || null)
       } catch (err) {

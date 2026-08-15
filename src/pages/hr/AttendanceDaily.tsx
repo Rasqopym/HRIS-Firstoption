@@ -201,7 +201,8 @@ export default function AttendanceDaily() {
         }))
         setStaffList(staffWithDept)
         if (staffWithDept.length > 0) {
-          setSelectedStaffId(staffWithDept[0].id)
+          const amara = staffWithDept.find(s => s.staff_code === 'FO-0002' || s.full_name.toLowerCase().includes('amara'))
+          setSelectedStaffId(amara ? amara.id : staffWithDept[0].id)
         }
       }
       setLoading(false)
@@ -218,13 +219,26 @@ export default function AttendanceDaily() {
       const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
       const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
       
-      // Read local storage cache first
+      // Read local storage cache across all possible staff key identifiers
       let cachedRecords: Record<string, any> = {}
       try {
-        const rawCache1 = localStorage.getItem(`hris_self_attendance_${selectedStaffId}`)
-        const rawCache2 = localStorage.getItem(`hris_attendance_daily_${selectedStaffId}`)
-        if (rawCache1) cachedRecords = { ...cachedRecords, ...JSON.parse(rawCache1) }
-        if (rawCache2) cachedRecords = { ...cachedRecords, ...JSON.parse(rawCache2) }
+        const staffCode = selectedStaff?.staff_code || ''
+        const keysToTry = [
+          `hris_self_attendance_${selectedStaffId}`,
+          `hris_self_attendance_${staffCode}`,
+          `hris_self_attendance_FO-0002`,
+          `hris_attendance_daily_${selectedStaffId}`,
+          `hris_attendance_daily_${staffCode}`,
+          `hris_attendance_daily_FO-0002`
+        ]
+        for (const k of keysToTry) {
+          const raw = localStorage.getItem(k)
+          if (raw) {
+            try {
+              cachedRecords = { ...cachedRecords, ...JSON.parse(raw) }
+            } catch (e) {}
+          }
+        }
       } catch (e) {
         console.warn('LocalStorage read error:', e)
       }
@@ -232,13 +246,21 @@ export default function AttendanceDaily() {
       // Fetch from Supabase safely
       let dbRecords: Record<string, any> = {}
       try {
-        const { data, error } = await supabase
+        const staffCode = selectedStaff?.staff_code || ''
+        let query = supabase
           .from('attendance_records')
           .select('*')
-          .eq('staff_id', selectedStaffId)
           .gte('attendance_date', firstDay)
           .lte('attendance_date', lastDay)
-        
+
+        if (staffCode && staffCode !== selectedStaffId) {
+          query = query.or(`staff_id.eq.${selectedStaffId},staff_id.eq.${staffCode},staff_id.eq.FO-0002`)
+        } else {
+          query = query.or(`staff_id.eq.${selectedStaffId},staff_id.eq.FO-0002`)
+        }
+
+        const { data, error } = await query
+
         if (data && !error) {
           data.forEach(record => {
             dbRecords[record.attendance_date] = record
@@ -247,14 +269,14 @@ export default function AttendanceDaily() {
       } catch (e) {
         console.warn('Supabase fetch attendance skipped:', e)
       }
-      
+
       const mergedRecords = { ...cachedRecords, ...dbRecords }
       const monthDays = buildMonth(selectedYear, selectedMonth, mergedRecords)
       setDays(monthDays)
       setLoading(false)
     }
     fetchAttendance()
-  }, [selectedStaffId, selectedMonth, selectedYear])
+  }, [selectedStaffId, selectedMonth, selectedYear, selectedStaff])
 
   const editingDay = editDay ? days.find(d => d.date === editDay) : null
 

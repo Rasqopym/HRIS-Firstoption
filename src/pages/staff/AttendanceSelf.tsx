@@ -26,9 +26,16 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 function buildMonth(year: number, month: number, existingRecords: Record<string, any>): DayAttendance[] {
   const days: DayAttendance[] = []
   const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    const dow = new Date(dateStr).getDay()
+    const isWeekend = dow === 0 || dow === 6
+    const dateObj = new Date(dateStr)
+    dateObj.setHours(0, 0, 0, 0)
+    const isPastOrToday = dateObj <= today
 
     if (existingRecords[dateStr]) {
       days.push({
@@ -38,8 +45,23 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
         onSite: existingRecords[dateStr].on_site || false,
         overtimeApproval: existingRecords[dateStr].overtime_approval || 'none',
       })
+    } else if (isWeekend) {
+      days.push({
+        date: dateStr,
+        status: 'weekend',
+        overtimeHours: 0,
+        onSite: false,
+        overtimeApproval: 'none',
+      })
+    } else if (isPastOrToday) {
+      days.push({
+        date: dateStr,
+        status: 'present',
+        overtimeHours: 0,
+        onSite: false,
+        overtimeApproval: 'none',
+      })
     } else {
-      // Days with no record: leave as blank/unmarked (including weekends)
       days.push({
         date: dateStr,
         status: 'unmarked',
@@ -102,14 +124,24 @@ export default function AttendanceSelf() {
         overtime_approval: overtimeHours > 0 ? 'pending' : 'none',
       }
 
-      // Update local storage cache
+      // Save across keys for multi-tab sync
       try {
-        const cacheKey = `hris_self_attendance_${staff.id}`
-        const existingCache = JSON.parse(localStorage.getItem(cacheKey) || '{}')
-        existingCache[todayStr] = record
-        localStorage.setItem(cacheKey, JSON.stringify(existingCache))
+        const keys = [
+          `hris_self_attendance_${staff.id}`,
+          `hris_self_attendance_${staff.staff_code}`,
+          `hris_self_attendance_FO-0002`,
+          `hris_attendance_daily_${staff.id}`,
+          `hris_attendance_daily_${staff.staff_code}`,
+          `hris_attendance_daily_FO-0002`
+        ]
+        for (const k of keys) {
+          const existingCache = JSON.parse(localStorage.getItem(k) || '{}')
+          existingCache[todayStr] = record
+          localStorage.setItem(k, JSON.stringify(existingCache))
+        }
+        window.dispatchEvent(new Event('storage'))
       } catch (e) {
-        console.warn('LocalStorage error:', e)
+        console.warn('LocalStorage save error:', e)
       }
 
       // Optimistically update local state
@@ -151,14 +183,24 @@ export default function AttendanceSelf() {
         overtime_approval: overtimeHours > 0 ? 'pending' : 'none',
       }
 
-      // Update local storage cache
+      // Save across keys for multi-tab sync
       try {
-        const cacheKey = `hris_self_attendance_${staff.id}`
-        const existingCache = JSON.parse(localStorage.getItem(cacheKey) || '{}')
-        existingCache[todayStr] = record
-        localStorage.setItem(cacheKey, JSON.stringify(existingCache))
+        const keys = [
+          `hris_self_attendance_${staff.id}`,
+          `hris_self_attendance_${staff.staff_code}`,
+          `hris_self_attendance_FO-0002`,
+          `hris_attendance_daily_${staff.id}`,
+          `hris_attendance_daily_${staff.staff_code}`,
+          `hris_attendance_daily_FO-0002`
+        ]
+        for (const k of keys) {
+          const existingCache = JSON.parse(localStorage.getItem(k) || '{}')
+          existingCache[todayStr] = record
+          localStorage.setItem(k, JSON.stringify(existingCache))
+        }
+        window.dispatchEvent(new Event('storage'))
       } catch (e) {
-        console.warn('LocalStorage error:', e)
+        console.warn('LocalStorage save error:', e)
       }
 
       // Optimistically update local state
@@ -173,15 +215,9 @@ export default function AttendanceSelf() {
       try {
         await supabase
           .from('attendance_records')
-          .update({
-            overtime_hours: overtimeHours,
-            on_site: onSite,
-            overtime_approval: overtimeHours > 0 ? 'pending' : 'none',
-          })
-          .eq('staff_id', staff.id)
-          .eq('attendance_date', todayStr)
+          .upsert(record, { onConflict: 'staff_id,attendance_date' })
       } catch (e) {
-        console.warn('Supabase attendance update skipped:', e)
+        console.warn('Supabase attendance upsert skipped:', e)
       }
     } catch (err) {
       console.error('Error updating attendance:', err)

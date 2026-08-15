@@ -227,8 +227,8 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
       for (const s of mappedStaff) {
         const existingPayslip = existingPayslipsMap.get(s.id)
         
-        if (existingPayslip) {
-          // Load from existing payslip
+        if (existingPayslip && (existingPayslip.status === 'processed' || existingPayslip.status === 'paid')) {
+          // Load from locked/processed payslip
           const { data: lineItems } = await supabase
             .from('payslip_line_items')
             .select('*, salary_components(name, category)')
@@ -318,8 +318,10 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
   const totalNet = rows.reduce((a, r) => a + r.netPay, 0)
   const totalGross = rows.reduce((a, r) => a + r.grossBase, 0)
   const totalTax = rows.reduce((a, r) => a + r.paye, 0)
+  const processedNet = rows.filter(r => r.status === 'processed' || r.status === 'paid').reduce((a, r) => a + r.netPay, 0)
+  const pendingNet = rows.filter(r => r.status === 'pending').reduce((a, r) => a + r.netPay, 0)
   const pending = rows.filter(r => r.status === 'pending').length
-  const processed = rows.filter(r => r.status === 'processed').length
+  const processed = rows.filter(r => r.status === 'processed' || r.status === 'paid').length
 
   const handlePrevMonth = () => {
     if (selectedMonth === 0) {
@@ -557,18 +559,19 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
+      {/* Summary cards with Processed and Pending breakdown */}
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3.5 mb-5">
         {[
-          { l: 'Total Gross', v: fmt(totalGross), color: 'text-slate-800' },
-          { l: 'Total PAYE', v: fmt(totalTax), color: 'text-red-600' },
-          { l: 'Net Disbursement', v: fmt(totalNet), color: 'text-emerald-600' },
-          { l: 'Progress', v: `${rows.length - pending}/${rows.length}`, color: 'text-blue-600', sub: `${pending} pending` },
+          { l: 'Total Gross', v: fmt(totalGross), color: 'text-slate-800', sub: `${rows.length} total staff` },
+          { l: 'Total PAYE', v: fmt(totalTax), color: 'text-red-600', sub: 'Statutory tax' },
+          { l: 'Net Disbursement', v: fmt(totalNet), color: 'text-emerald-600', sub: 'Expected payout' },
+          { l: 'Processed Net', v: fmt(processedNet), color: 'text-blue-600', sub: `${processed} processed` },
+          { l: 'Pending Net', v: fmt(pendingNet), color: 'text-amber-600', sub: `${pending} pending` },
         ].map(c => (
-          <div key={c.l} className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-            <div className={`font-display font-bold text-xl ${c.color} font-mono-data`}>{c.v}</div>
-            <div className="text-xs text-slate-500 mt-0.5">{c.l}</div>
-            {c.sub && <div className="text-xs text-slate-400">{c.sub}</div>}
+          <div key={c.l} className="bg-white rounded-xl border border-slate-100 shadow-sm p-3.5">
+            <div className={`font-display font-bold text-lg sm:text-xl ${c.color} font-mono-data`}>{c.v}</div>
+            <div className="text-xs font-semibold text-slate-700 mt-0.5">{c.l}</div>
+            {c.sub && <div className="text-[11px] text-slate-400 font-medium mt-0.5">{c.sub}</div>}
           </div>
         ))}
       </div>

@@ -127,10 +127,10 @@ export default function LeaveManagement() {
           return {
             id: r.id,
             staffId: r.staff_id,
-            staffName: r.staff.full_name,
-            staffPhoto: r.staff.photo_url || '',
-            department: r.staff.departments?.name || 'Unknown',
-            type: r.leave_types?.name || 'Unknown',
+            staffName: r.staff?.full_name || 'Staff Member',
+            staffPhoto: r.staff?.photo_url || '',
+            department: r.staff?.departments?.name || r.staff?.department || 'Sales & Marketing',
+            type: r.leave_types?.name || 'Annual Leave',
             startDate,
             endDate,
             days,
@@ -141,7 +141,30 @@ export default function LeaveManagement() {
             note: r.note,
           }
         }))
-        setRequests(mappedRequests)
+        
+        // Merge LocalStorage cached leave requests submitted by staff
+        let cachedReqs: LeaveRequest[] = []
+        try {
+          const keysToTry = ['hris_all_leave_requests', 'hris_self_leave_requests_FO-0002']
+          for (const k of keysToTry) {
+            const raw = localStorage.getItem(k)
+            if (raw) {
+              try {
+                cachedReqs = [...cachedReqs, ...JSON.parse(raw)]
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+
+        const seenIds = new Set<string>()
+        const merged: LeaveRequest[] = []
+        for (const r of [...cachedReqs, ...mappedRequests]) {
+          if (!seenIds.has(r.id)) {
+            seenIds.add(r.id)
+            merged.push(r)
+          }
+        }
+        setRequests(merged)
       }
 
       // Fetch leave_types

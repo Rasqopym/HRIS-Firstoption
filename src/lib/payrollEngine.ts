@@ -116,6 +116,83 @@ export async function calculatePayrollForStaff(
     }
   }
 
+  // Check localStorage cache for freshly saved salary components or applied templates
+  if (typeof window !== 'undefined') {
+    try {
+      const cachedStr = localStorage.getItem(`hris_salary_structure_${staffId}`)
+      if (cachedStr) {
+        const cachedList = JSON.parse(cachedStr)
+        if (Array.isArray(cachedList) && cachedList.length > 0) {
+          activeComponents.length = 0 // Override with user's customized structure
+          seenComponentNames.clear()
+          for (const item of cachedList) {
+            if (!item.active) continue
+            const compName = (item.name || '').trim().toLowerCase()
+            if (compName && !seenComponentNames.has(compName)) {
+              seenComponentNames.add(compName)
+              activeComponents.push({
+                id: item.id || `comp-${compName}`,
+                staff_id: staffId,
+                component_id: item.id || `comp-${compName}`,
+                rate: item.rate || 0,
+                is_active: item.active,
+                is_taxable: item.taxable,
+                rate_type: item.rateType === 'pct_gross' ? 'percentage_of_gross' :
+                           item.rateType === 'pct_basic' ? 'percentage_of_basic' :
+                           item.rateType === 'per_day' ? 'per_day' :
+                           item.rateType === 'per_hour' ? 'per_hour' : 'flat_amount',
+                salary_components: {
+                  id: item.id || `comp-${compName}`,
+                  name: item.name,
+                  category: item.category === 'earning' ? 'allowance' : 'deduction',
+                  default_rate_type: 'flat_amount'
+                }
+              })
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[payrollEngine] LocalStorage cache read skipped:', e)
+    }
+  }
+
+  // Synthesize default salary breakdown if no staff_salary_components exist yet for staff with gross_salary
+  if (activeComponents.length === 0 && (staff.gross_salary || 0) > 0) {
+    activeComponents.push(
+      {
+        id: 'default-basic',
+        staff_id: staffId,
+        component_id: 'comp-basic',
+        rate: 40,
+        is_active: true,
+        is_taxable: true,
+        rate_type: 'percentage_of_gross',
+        salary_components: { id: 'comp-basic', name: 'Basic Salary', category: 'allowance', default_rate_type: 'percentage_of_gross' }
+      },
+      {
+        id: 'default-housing',
+        staff_id: staffId,
+        component_id: 'comp-housing',
+        rate: 30,
+        is_active: true,
+        is_taxable: true,
+        rate_type: 'percentage_of_gross',
+        salary_components: { id: 'comp-housing', name: 'Housing Allowance', category: 'allowance', default_rate_type: 'percentage_of_gross' }
+      },
+      {
+        id: 'default-transport',
+        staff_id: staffId,
+        component_id: 'comp-transport',
+        rate: 30,
+        is_active: true,
+        is_taxable: true,
+        rate_type: 'percentage_of_gross',
+        salary_components: { id: 'comp-transport', name: 'Transport Allowance', category: 'allowance', default_rate_type: 'percentage_of_gross' }
+      }
+    )
+  }
+
   // 3. Fetch attendance records for the period
   const { data: attendanceRecords, error: attendanceError } = await supabase
     .from('attendance_records')
