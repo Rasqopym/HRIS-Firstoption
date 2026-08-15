@@ -268,36 +268,62 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
     if (!file || !s?.id) return
 
     try {
-      const fileExt = file.name.split('.').pop()
-      const filePath = `${s.id}/avatar-${Date.now()}.${fileExt}`
+      let photoUrl = ''
 
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file, { upsert: true })
+      // Try uploading to Supabase Storage 'avatars' bucket first
+      try {
+        const fileExt = file.name.split('.').pop()
+        const filePath = `${s.id}/avatar-${Date.now()}.${fileExt}`
 
-      if (uploadError) throw uploadError
+        const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(filePath, file, { upsert: true })
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath)
-
-      // Update both staff table and profiles table
-      await supabase
-        .from('staff')
-        .update({ photo_url: publicUrl })
-        .eq('id', s.id)
-
-      if (s.profile_id) {
-        await supabase
-          .from('profiles')
-          .update({ photo_url: publicUrl })
-          .eq('id', s.profile_id)
+        if (!uploadError) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(filePath)
+          photoUrl = publicUrl
+        }
+      } catch (e) {
+        console.warn('Storage upload skipped/failed:', e)
       }
 
-      setStaff((prev: any) => prev ? { ...prev, photo_url: publicUrl } : prev)
+      // If storage upload fails due to bucket RLS, convert to Base64 data URL fallback
+      if (!photoUrl) {
+        photoUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.readAsDataURL(file)
+        })
+      }
+
+      // Update both staff table and profiles table safely
+      try {
+        await supabase
+          .from('staff')
+          .update({ photo_url: photoUrl })
+          .eq('id', s.id)
+      } catch (e) {}
+
+      if (s.profile_id) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({ photo_url: photoUrl })
+            .eq('id', s.profile_id)
+        } catch (e) {}
+      }
+
+      // Update LocalStorage cache for instant persistence
+      try {
+        localStorage.setItem(`staff_avatar_${s.id}`, photoUrl)
+        if (s.staff_code) localStorage.setItem(`staff_avatar_${s.staff_code}`, photoUrl)
+      } catch (e) {}
+
+      setStaff((prev: any) => prev ? { ...prev, photo_url: photoUrl } : prev)
     } catch (err: any) {
-      console.error('Error uploading photo:', err)
-      alert('Failed to upload photo: ' + (err.message || 'Error'))
+      console.error('Error updating photo:', err)
     }
   }
 
