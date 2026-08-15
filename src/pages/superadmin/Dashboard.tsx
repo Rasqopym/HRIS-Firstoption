@@ -125,16 +125,9 @@ export default function SADashboard({ onNavigate }: Props) {
         const deptMap: Record<string, number> = {}
         if (!staffError && staffData && staffData.length > 0) {
           for (const s of staffData) {
-            const deptName = (s as any)?.departments?.name || (s as any)?.department || 'Sales & Marketing'
+            const deptName = (s as any)?.departments?.name || (s as any)?.department || 'Media & Marketing'
             deptMap[deptName] = (deptMap[deptName] || 0) + 1
           }
-        }
-        
-        // If map is still empty, synthesize headcount breakdown dynamically from active staff count
-        if (Object.keys(deptMap).length === 0) {
-          deptMap['Sales & Marketing'] = Math.max(1, Math.ceil(active * 0.6))
-          deptMap['Accounting & Finance'] = Math.max(1, Math.floor(active * 0.2))
-          deptMap['General Operations'] = Math.max(1, Math.floor(active * 0.2))
         }
 
         setDeptHeadcount(deptMap)
