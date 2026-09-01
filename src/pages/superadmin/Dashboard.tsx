@@ -135,7 +135,7 @@ export default function SADashboard({ onNavigate }: Props) {
         try {
           const { data: sData } = await supabase
             .from('staff')
-            .select('id, profile_id, email, department, departments(name)')
+            .select('id, profile_id, email, department_id, departments(name)')
           if (sData) staffData = sData
         } catch (e) {}
 
