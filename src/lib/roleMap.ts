@@ -17,11 +17,14 @@ const REVERSE_ROLE_MAP: Record<Role, string> = {
 }
 
 export function dbRoleToApp(dbRole: string): Role {
-  const appRole = ROLE_MAP[dbRole]
-  if (!appRole) {
-    throw new Error(`Unrecognized database role: ${dbRole}`)
-  }
-  return appRole
+  if (!dbRole) return 'staff'
+  const normalized = String(dbRole).toLowerCase().trim()
+  if (normalized === 'superadmin' || normalized === 'super_admin') return 'superadmin'
+  if (normalized === 'hr') return 'hr'
+  if (normalized === 'accountant') return 'accountant'
+  if (normalized === 'auditor') return 'auditor'
+  if (normalized === 'staff') return 'staff'
+  return ROLE_MAP[dbRole] || 'staff'
 }
 
 export function appRoleToDb(appRole: Role): string {
