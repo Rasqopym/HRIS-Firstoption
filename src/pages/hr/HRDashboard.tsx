@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { staff as mockStaff } from '../../data/mock'
 import type { Page } from '../../types'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 
@@ -39,9 +40,21 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
         `)
         .order('created_at', { ascending: false })
       
-      if (error) {
-        console.error('Failed to fetch staff:', error)
-      } else if (data) {
+      if (error || !data || data.length === 0) {
+        if (error) console.error('Failed to fetch staff from DB, using fallback:', error)
+        const fallbackMapped: StaffMember[] = mockStaff.map(s => ({
+          id: s.id,
+          full_name: s.name,
+          job_title: s.jobTitle,
+          photo_url: s.photo,
+          status: s.status,
+          date_employed: s.employmentDate,
+          created_at: new Date().toISOString(),
+          department_name: s.department,
+          id_card_expires_at: null,
+        }))
+        setStaff(fallbackMapped)
+      } else {
         const mappedStaff: StaffMember[] = data.map((s: any) => ({
           id: s.id,
           full_name: s.full_name,
@@ -50,7 +63,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
           status: s.status,
           date_employed: s.date_employed,
           created_at: s.created_at,
-          department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || s.department || 'Accounting & Finance',
+          department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || s.department || 'Information Technology',
           id_card_expires_at: s.id_card_expires_at,
         }))
         setStaff(mappedStaff)
