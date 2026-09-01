@@ -45,10 +45,10 @@ export default function SADashboard({ onNavigate }: Props) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch profile counts
+        // Fetch profile counts and metadata
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
-          .select('id, status')
+          .select('id, status, role, email')
 
         if (profilesError) throw profilesError
 
@@ -118,25 +118,42 @@ export default function SADashboard({ onNavigate }: Props) {
         setProcessedPayroll(procSum)
         setPendingPayroll(pendSum)
 
-        // Fetch department headcount from staff table with join & fallback
-        const { data: staffData, error: staffError } = await supabase
+        // Fetch department headcount from profiles and staff tables
+        const { data: staffData } = await supabase
           .from('staff')
-          .select('id, department, departments(name)')
+          .select('id, profile_id, email, department, departments(name)')
 
         const deptMap: Record<string, number> = {}
-        if (!staffError && staffData && staffData.length > 0) {
+
+        if (profiles && profiles.length > 0) {
+          const staffRecords = staffData || []
+          for (const p of profiles) {
+            const appRole = dbRoleToApp((p as any).role)
+            const matchedStaff = staffRecords.find(s => s.profile_id === p.id || (s.email && (p as any).email && s.email.toLowerCase() === (p as any).email.toLowerCase()))
+            
+            let deptName = ''
+            if (matchedStaff?.departments?.name) {
+              deptName = matchedStaff.departments.name
+            } else if (matchedStaff?.department) {
+              deptName = matchedStaff.department
+            } else {
+              if (appRole === 'superadmin') deptName = 'System Administration'
+              else if (appRole === 'hr') deptName = 'Human Resources'
+              else if (appRole === 'accountant') deptName = 'Accounting & Finance'
+              else if (appRole === 'auditor') deptName = 'Internal Audit'
+              else if (appRole === 'staff') deptName = 'Media & Marketing'
+              else deptName = 'General'
+            }
+            
+            deptMap[deptName] = (deptMap[deptName] || 0) + 1
+          }
+        } else if (staffData && staffData.length > 0) {
           for (const s of staffData) {
             const deptName =
               (s as any)?.departments?.name ||
               (Array.isArray((s as any)?.departments) ? (s as any)?.departments[0]?.name : null) ||
               (s as any)?.department ||
               'Information Technology'
-            deptMap[deptName] = (deptMap[deptName] || 0) + 1
-          }
-        } else {
-          // Fallback to mock dataset if database staff table is not populated yet
-          for (const s of mockStaff) {
-            const deptName = s.department || 'Information Technology'
             deptMap[deptName] = (deptMap[deptName] || 0) + 1
           }
         }

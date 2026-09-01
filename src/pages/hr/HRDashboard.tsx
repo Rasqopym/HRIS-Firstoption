@@ -40,34 +40,50 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
         `)
         .order('created_at', { ascending: false })
       
-      if (error || !data || data.length === 0) {
-        if (error) console.error('Failed to fetch staff from DB, using fallback:', error)
-        const fallbackMapped: StaffMember[] = mockStaff.map(s => ({
-          id: s.id,
-          full_name: s.name,
-          job_title: s.jobTitle,
-          photo_url: s.photo,
-          status: s.status,
-          date_employed: s.employmentDate,
-          created_at: new Date().toISOString(),
-          department_name: s.department,
-          id_card_expires_at: null,
-        }))
-        setStaff(fallbackMapped)
-      } else {
-        const mappedStaff: StaffMember[] = data.map((s: any) => ({
+      let mappedStaff: StaffMember[] = []
+
+      if (!error && data && data.length > 0) {
+        mappedStaff = data.map((s: any) => ({
           id: s.id,
           full_name: s.full_name,
-          job_title: s.job_title,
+          job_title: s.job_title || 'Staff Member',
           photo_url: s.photo_url,
           status: s.status,
-          date_employed: s.date_employed,
+          date_employed: s.date_employed || s.created_at?.split('T')[0],
           created_at: s.created_at,
           department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || s.department || 'Information Technology',
           id_card_expires_at: s.id_card_expires_at,
         }))
-        setStaff(mappedStaff)
+      } else {
+        // Query profiles table from Supabase
+        const { data: pData } = await supabase
+          .from('profiles')
+          .select('id, full_name, role, status, email, created_at, photo_url')
+
+        if (pData && pData.length > 0) {
+          mappedStaff = pData.map((p: any) => {
+            let dept = 'Media & Marketing'
+            if (p.role === 'super_admin' || p.role === 'superadmin') dept = 'System Administration'
+            else if (p.role === 'hr') dept = 'Human Resources'
+            else if (p.role === 'accountant') dept = 'Accounting & Finance'
+            else if (p.role === 'auditor') dept = 'Internal Audit'
+
+            return {
+              id: p.id,
+              full_name: p.full_name || p.email || 'User Account',
+              job_title: p.role?.toUpperCase() || 'Staff Member',
+              photo_url: p.photo_url,
+              status: p.status || 'active',
+              date_employed: p.created_at?.split('T')[0] || '2026-08-01',
+              created_at: p.created_at || new Date().toISOString(),
+              department_name: dept,
+              id_card_expires_at: null,
+            }
+          })
+        }
       }
+
+      setStaff(mappedStaff)
       setLoading(false)
     }
     fetchStaff()
