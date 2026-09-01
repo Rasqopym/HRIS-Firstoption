@@ -130,7 +130,7 @@ export default function SADashboard({ onNavigate }: Props) {
         setProcessedPayroll(procSum)
         setPendingPayroll(pendSum)
 
-        // Fetch department headcount from profiles and staff tables
+        // Fetch department headcount from staff and profiles tables
         let staffData: any[] = []
         try {
           const { data: sData } = await supabase
@@ -141,41 +141,22 @@ export default function SADashboard({ onNavigate }: Props) {
 
         const deptMap: Record<string, number> = {}
 
-        if (profiles && profiles.length > 0) {
-          const staffRecords = staffData || []
-          for (const p of profiles) {
-            const appRole = dbRoleToApp((p as any).role)
-            const matchedStaff = staffRecords.find(s => s.profile_id === p.id || (s.email && (p as any).email && s.email.toLowerCase() === (p as any).email.toLowerCase()))
-            
-            let deptName = ''
-            if (matchedStaff?.departments?.name) {
-              deptName = matchedStaff.departments.name
-            } else if (matchedStaff?.department) {
-              deptName = matchedStaff.department
-            } else {
-              if (appRole === 'superadmin') deptName = 'System Administration'
-              else if (appRole === 'hr') deptName = 'Human Resources'
-              else if (appRole === 'accountant') deptName = 'Accounting & Finance'
-              else if (appRole === 'auditor') deptName = 'Internal Audit'
-              else if (appRole === 'staff') deptName = 'Media & Marketing'
-              else deptName = 'General'
-            }
-            
-            deptMap[deptName] = (deptMap[deptName] || 0) + 1
-          }
-        } else if (staffData && staffData.length > 0) {
+        if (staffData && staffData.length > 0) {
           for (const s of staffData) {
             const deptName =
               (s as any)?.departments?.name ||
               (Array.isArray((s as any)?.departments) ? (s as any)?.departments[0]?.name : null) ||
               (s as any)?.department ||
-              'Information Technology'
+              'Media & Marketing'
             deptMap[deptName] = (deptMap[deptName] || 0) + 1
           }
-        } else {
-          // Complete fallback so chart is never empty
-          for (const s of mockStaff) {
-            const deptName = s.department || 'Information Technology'
+        } else if (profiles && profiles.length > 0) {
+          // Count staff members from profiles
+          const staffProfiles = profiles.filter(p => dbRoleToApp((p as any).role) === 'staff')
+          const listToCount = staffProfiles.length > 0 ? staffProfiles : profiles
+
+          for (const p of listToCount) {
+            let deptName = (p as any).department || 'Media & Marketing'
             deptMap[deptName] = (deptMap[deptName] || 0) + 1
           }
         }
