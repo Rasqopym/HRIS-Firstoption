@@ -871,7 +871,9 @@ export default function IDCardGenerator() {
     return (
       <div className="p-6 flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <div className="text-slate-300 text-4xl mb-3">🪪</div>
+          <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="8" cy="12" r="2"/><path d="M14 9h4M14 12h4M14 15h4"/></svg>
+          </div>
           <div className="text-slate-500 font-medium">No active staff found</div>
           <p className="text-slate-400 text-sm mt-1">Add staff members to generate ID cards</p>
         </div>

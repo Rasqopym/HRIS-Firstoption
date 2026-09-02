@@ -121,6 +121,11 @@ export type AttendanceStatus = 'present' | 'absent' | 'on_leave' | 'public_holid
 export interface DayAttendance {
   date: string           // 'YYYY-MM-DD'
   status: AttendanceStatus
+  clockInTime?: string
+  clockOutTime?: string
+  isLate?: boolean
+  lateMinutes?: number
+  distanceMeters?: number
   overtimeHours: number
   onSite: boolean
   overtimeApproval: 'none' | 'pending' | 'approved' | 'rejected'
@@ -135,6 +140,8 @@ export interface MonthlyAttendanceSummary {
   daysPresent: number
   daysAbsent: number
   daysOnLeave: number
+  daysLate: number
+  totalLateMinutes: number
   totalOvertimeHours: number
   daysOnSite: number
   approvedOvertimeHours: number

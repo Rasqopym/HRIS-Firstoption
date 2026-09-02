@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { logAction } from '../../lib/auditLog'
 import type { DayAttendance, AttendanceStatus } from '../../types'
+import { formatTime12Hour, formatDistance } from '../../lib/geofence'
 
 const STATUS_COLORS: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-500',
@@ -24,9 +25,16 @@ const STATUS_CELL: Record<AttendanceStatus, string> = {
   unmarked: 'bg-slate-50 border-slate-200 text-slate-400',
 }
 
-function buildMonth(year: number, month: number, existingRecords: Record<string, any>): DayAttendance[] {
-  const days: DayAttendance[] = []
-  const daysInMonth = new Date(year, month, 0).getDate()
+interface ExtendedDayAttendance extends DayAttendance {
+  workMode?: 'office' | 'field' | 'remote'
+  matchedLocationName?: string
+  fieldClientName?: string
+  fieldNotes?: string
+}
+
+function buildMonth(year: number, month: number, existingRecords: Record<string, any>): ExtendedDayAttendance[] {
+  const days: ExtendedDayAttendance[] = []
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   
@@ -38,14 +46,23 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
     dateObj.setHours(0, 0, 0, 0)
     const isFuture = dateObj > today
     
-    // Use existing record if available
     if (existingRecords[dateStr]) {
+      const rec = existingRecords[dateStr]
       days.push({
         date: dateStr,
-        status: existingRecords[dateStr].status,
-        overtimeHours: existingRecords[dateStr].overtime_hours || 0,
-        onSite: existingRecords[dateStr].on_site || false,
-        overtimeApproval: existingRecords[dateStr].overtime_approval || 'none',
+        status: rec.status,
+        clockInTime: rec.clock_in_time || rec.clockInTime,
+        clockOutTime: rec.clock_out_time || rec.clockOutTime,
+        isLate: rec.is_late ?? rec.isLate ?? false,
+        lateMinutes: rec.late_minutes ?? rec.lateMinutes ?? 0,
+        distanceMeters: rec.clock_in_distance_meters ?? rec.distanceMeters,
+        workMode: rec.work_mode || rec.workMode || 'office',
+        matchedLocationName: rec.matched_location_name || rec.matchedLocationName,
+        fieldClientName: rec.field_client_name || rec.fieldClientName,
+        fieldNotes: rec.field_notes || rec.fieldNotes,
+        overtimeHours: rec.overtime_hours || rec.overtimeHours || 0,
+        onSite: rec.on_site ?? rec.onSite ?? false,
+        overtimeApproval: rec.overtime_approval || rec.overtimeApproval || 'none',
       })
     } else if (isWeekend) {
       days.push({
@@ -58,13 +75,12 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
     } else if (isFuture) {
       days.push({
         date: dateStr,
-        status: 'present',
+        status: 'unmarked',
         overtimeHours: 0,
         onSite: false,
         overtimeApproval: 'none',
       })
     } else {
-      // Default to present for past days with no record
       days.push({
         date: dateStr,
         status: 'present',
@@ -91,27 +107,34 @@ export default function AttendanceDaily() {
   const [selectedStaffId, setSelectedStaffId] = useState<string>('')
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
-  const [days, setDays] = useState<DayAttendance[]>([])
+  const [days, setDays] = useState<ExtendedDayAttendance[]>([])
   const [editDay, setEditDay] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const selectedStaff = staffList.find(s => s.id === selectedStaffId) || staffList[0]
 
-  const updateDay = async (date: string, patch: Partial<DayAttendance>) => {
-    // Update local state immediately
+  const updateDay = async (date: string, patch: Partial<ExtendedDayAttendance>) => {
     setDays(prev => prev.map(d => d.date === date ? { ...d, ...patch } : d))
     
+    const currentDay = days.find(d => d.date === date)
     const record = {
       staff_id: selectedStaffId,
       attendance_date: date,
-      status: patch.status || days.find(d => d.date === date)?.status || 'present',
-      overtime_hours: patch.overtimeHours ?? days.find(d => d.date === date)?.overtimeHours ?? 0,
-      on_site: patch.onSite ?? days.find(d => d.date === date)?.onSite ?? false,
-      overtime_approval: patch.overtimeApproval ?? days.find(d => d.date === date)?.overtimeApproval ?? 'none',
+      status: patch.status || currentDay?.status || 'present',
+      clock_in_time: patch.clockInTime !== undefined ? patch.clockInTime : currentDay?.clockInTime || null,
+      clock_out_time: patch.clockOutTime !== undefined ? patch.clockOutTime : currentDay?.clockOutTime || null,
+      is_late: patch.isLate !== undefined ? patch.isLate : currentDay?.isLate || false,
+      late_minutes: patch.lateMinutes !== undefined ? patch.lateMinutes : currentDay?.lateMinutes || 0,
+      work_mode: patch.workMode !== undefined ? patch.workMode : currentDay?.workMode || 'office',
+      matched_location_name: patch.matchedLocationName !== undefined ? patch.matchedLocationName : currentDay?.matchedLocationName || null,
+      field_client_name: patch.fieldClientName !== undefined ? patch.fieldClientName : currentDay?.fieldClientName || null,
+      field_notes: patch.fieldNotes !== undefined ? patch.fieldNotes : currentDay?.fieldNotes || null,
+      overtime_hours: patch.overtimeHours ?? currentDay?.overtimeHours ?? 0,
+      on_site: patch.onSite ?? currentDay?.onSite ?? false,
+      overtime_approval: patch.overtimeApproval ?? currentDay?.overtimeApproval ?? 'none',
     }
 
-    // Save to local storage cache immediately for real-time sync with staff view
     try {
       const cacheKey = `hris_self_attendance_${selectedStaffId}`
       const existingCache = JSON.parse(localStorage.getItem(cacheKey) || '{}')
@@ -122,7 +145,6 @@ export default function AttendanceDaily() {
       console.warn('LocalStorage save error:', e)
     }
 
-    // Upsert to database
     try {
       await supabase
         .from('attendance_records')
@@ -132,8 +154,18 @@ export default function AttendanceDaily() {
     }
   }
 
+  const presentDays = days.filter(d => d.status === 'present').length
+  const lateDays = days.filter(d => d.status === 'present' && d.isLate).length
+  const onTimeDays = presentDays - lateDays
+  const fieldVisits = days.filter(d => d.status === 'present' && d.workMode === 'field').length
+  const totalLateMinutes = days.filter(d => d.status === 'present' && d.isLate).reduce((acc, d) => acc + (d.lateMinutes || 0), 0)
+
   const summary = {
-    present: days.filter(d => d.status === 'present').length,
+    present: presentDays,
+    onTime: onTimeDays,
+    late: lateDays,
+    fieldVisits,
+    lateMinutes: totalLateMinutes,
     absent: days.filter(d => d.status === 'absent').length,
     onLeave: days.filter(d => d.status === 'on_leave').length,
     overtimeHrs: days.reduce((a, d) => a + d.overtimeHours, 0),
@@ -178,7 +210,6 @@ export default function AttendanceDaily() {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  // Fetch staff list on mount
   useEffect(() => {
     const fetchStaff = async () => {
       setLoading(true)
@@ -201,8 +232,7 @@ export default function AttendanceDaily() {
         }))
         setStaffList(staffWithDept)
         if (staffWithDept.length > 0) {
-          const amara = staffWithDept.find(s => s.staff_code === 'FO-0002' || s.full_name.toLowerCase().includes('amara'))
-          setSelectedStaffId(amara ? amara.id : staffWithDept[0].id)
+          setSelectedStaffId(staffWithDept[0].id)
         }
       }
       setLoading(false)
@@ -210,7 +240,6 @@ export default function AttendanceDaily() {
     fetchStaff()
   }, [])
 
-  // Fetch attendance when staff or month changes
   useEffect(() => {
     const fetchAttendance = async () => {
       if (!selectedStaffId) return
@@ -219,17 +248,14 @@ export default function AttendanceDaily() {
       const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
       const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
       
-      // Read local storage cache across all possible staff key identifiers
       let cachedRecords: Record<string, any> = {}
       try {
         const staffCode = selectedStaff?.staff_code || ''
         const keysToTry = [
           `hris_self_attendance_${selectedStaffId}`,
           `hris_self_attendance_${staffCode}`,
-          `hris_self_attendance_FO-0002`,
           `hris_attendance_daily_${selectedStaffId}`,
           `hris_attendance_daily_${staffCode}`,
-          `hris_attendance_daily_FO-0002`
         ]
         for (const k of keysToTry) {
           const raw = localStorage.getItem(k)
@@ -243,7 +269,6 @@ export default function AttendanceDaily() {
         console.warn('LocalStorage read error:', e)
       }
 
-      // Fetch from Supabase safely
       let dbRecords: Record<string, any> = {}
       try {
         const staffCode = selectedStaff?.staff_code || ''
@@ -254,9 +279,9 @@ export default function AttendanceDaily() {
           .lte('attendance_date', lastDay)
 
         if (staffCode && staffCode !== selectedStaffId) {
-          query = query.or(`staff_id.eq.${selectedStaffId},staff_id.eq.${staffCode},staff_id.eq.FO-0002`)
+          query = query.or(`staff_id.eq.${selectedStaffId},staff_id.eq.${staffCode}`)
         } else {
-          query = query.or(`staff_id.eq.${selectedStaffId},staff_id.eq.FO-0002`)
+          query = query.eq('staff_id', selectedStaffId)
         }
 
         const { data, error } = await query
@@ -282,220 +307,327 @@ export default function AttendanceDaily() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center">
-        <div className="text-slate-500">Loading attendance data...</div>
+      <div className="p-6 flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
       </div>
     )
   }
 
   return (
-    <div className="p-6 anim-fade-up">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6 anim-fade-up space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="font-display font-semibold text-slate-800 text-xl">Daily Attendance</h2>
-          <p className="text-sm text-slate-500">{monthYearLabel} — mark attendance, overtime & site deployment</p>
+          <h1 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">Daily Attendance</h1>
+          <p className="text-sm text-slate-500">{monthYearLabel} — clock-in times, multi-branch geofencing, and field work verification</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={handlePrevMonth} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600">
-            ‹
-          </button>
-          <span className="text-sm font-medium text-slate-700 min-w-[140px] text-center">{monthYearLabel}</span>
-          <button onClick={handleNextMonth} className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600">
-            ›
-          </button>
-          <select
-            value={selectedStaffId}
-            onChange={e => { setSelectedStaffId(e.target.value); setEditDay(null) }}
-            className="px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1">
+            <button onClick={handlePrevMonth} className="px-2.5 py-1 rounded hover:bg-slate-100 text-slate-600 font-bold">‹</button>
+            <span className="text-xs font-semibold text-slate-700 px-2">{monthYearLabel}</span>
+            <button onClick={handleNextMonth} className="px-2.5 py-1 rounded hover:bg-slate-100 text-slate-600 font-bold">›</button>
+          </div>
+          <button
+            onClick={handleSave}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5 ${
+              saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
           >
-            {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.staff_code})</option>)}
-          </select>
-          <button onClick={handleSave} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${saved ? 'bg-emerald-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-            {saved ? '✓ Saved' : 'Save Attendance'}
+            {saved ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Saved</span>
+              </>
+            ) : 'Save Changes'}
           </button>
         </div>
       </div>
 
-      {/* Staff header */}
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 mb-5 flex items-center gap-4">
-        {selectedStaff && (
-          <>
-            <img src={selectedStaff.photo_url || ''} alt={selectedStaff.full_name} className="w-12 h-12 rounded-full object-cover" />
-            <div className="flex-1">
-              <div className="font-display font-semibold text-slate-800">{selectedStaff.full_name}</div>
-              <div className="text-xs text-slate-500">{selectedStaff.job_title} · {selectedStaff.department_name}</div>
-            </div>
-          </>
-        )}
-        {/* Summary pills */}
-        <div className="flex items-center gap-3 flex-wrap">
-          {[
-            { l: 'Present', v: summary.present, color: 'bg-emerald-100 text-emerald-700' },
-            { l: 'Absent', v: summary.absent, color: 'bg-red-100 text-red-700' },
-            { l: 'On Leave', v: summary.onLeave, color: 'bg-amber-100 text-amber-700' },
-            { l: 'OT Hours', v: `${summary.overtimeHrs}h`, color: 'bg-violet-100 text-violet-700' },
-            { l: 'Site Days', v: summary.sitedays, color: 'bg-blue-100 text-blue-700' },
-          ].map(p => (
-            <div key={p.l} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${p.color}`}>
-              <span className="font-mono-data font-bold text-sm">{p.v}</span>
-              <span className="ml-1 opacity-70">{p.l}</span>
-            </div>
-          ))}
-          {summary.pendingOT > 0 && (
-            <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-100 text-orange-700">
-              <span className="font-mono-data font-bold text-sm">{summary.pendingOT}</span>
-              <span className="ml-1 opacity-70">OT Pending</span>
-            </div>
-          )}
+      {/* Staff Selector */}
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Select Employee</label>
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 sm:flex-wrap">
+          {staffList.map(s => {
+            const isSelected = s.id === selectedStaffId
+            return (
+              <button
+                key={s.id}
+                onClick={() => setSelectedStaffId(s.id)}
+                className={`px-3 py-2 rounded-xl text-xs font-medium transition-all flex items-center gap-2 flex-shrink-0 sm:flex-shrink ${
+                  isSelected
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-100'
+                }`}
+              >
+                <span>{s.full_name}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  {s.staff_code}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Calendar grid */}
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden mb-5">
-        {/* Day headers */}
+      {/* Summary KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-emerald-600">{summary.present}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Days Present</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-blue-600">{summary.onTime}</div>
+          <div className="text-xs text-slate-500 mt-0.5">On-Time Arrivals</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-amber-600">{summary.late}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Late Arrivals ({summary.lateMinutes}m)</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-amber-500">{summary.fieldVisits}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Field / Site Visits</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-purple-600">{summary.onLeave}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Days on Leave</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-violet-600">{summary.overtimeHrs}h</div>
+          <div className="text-xs text-slate-500 mt-0.5">Overtime Hours</div>
+        </div>
+      </div>
+
+      {/* Attendance Calendar Grid */}
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+          <span className="font-display font-semibold text-slate-700 text-sm">
+            {selectedStaff?.full_name} ({selectedStaff?.staff_code}) — {monthYearLabel}
+          </span>
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> On Time</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400"></span> Late</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Field Work</span>
+          </div>
+        </div>
         <div className="grid grid-cols-7 border-b border-slate-100">
           {DAY_NAMES.map(d => (
-            <div key={d} className="py-2 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide bg-slate-50/60">
-              {d}
-            </div>
+            <div key={d} className="py-2 text-center text-xs font-semibold text-slate-400 uppercase bg-slate-50/60">{d}</div>
           ))}
         </div>
-        {/* Calendar cells */}
         <div className="grid grid-cols-7">
-          {/* Leading empty cells */}
           {Array.from({ length: firstDow }, (_, i) => (
-            <div key={`empty-${i}`} className="aspect-square border-r border-b border-slate-50 bg-slate-50/30" />
+            <div key={`empty-${i}`} className="aspect-square border-r border-b border-slate-50 bg-slate-50/20" />
           ))}
           {days.map(day => {
             const d = Number(day.date.split('-')[2])
-            const isWeekend = day.status === 'weekend'
-            const isEditing = editDay === day.date
-            const dateObj = new Date(day.date)
-            dateObj.setHours(0, 0, 0, 0)
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            const isFuture = dateObj > today
+            const dow = new Date(day.date).getDay()
+            const isWeekend = dow === 0 || dow === 6
+            const isUnmarked = day.status === 'unmarked'
+
             return (
               <div
                 key={day.date}
-                onClick={() => !isWeekend && !isFuture && setEditDay(isEditing ? null : day.date)}
-                className={`relative p-2 border-r border-b border-slate-50 transition-colors min-h-[72px] ${isWeekend ? 'bg-slate-50/60 cursor-default' : isFuture ? 'bg-slate-100/40 cursor-default opacity-60' : 'hover:bg-blue-50/40 cursor-pointer'} ${isEditing ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+                onClick={() => setEditDay(day.date)}
+                className={`p-2 border-r border-b border-slate-50 min-h-[78px] cursor-pointer hover:bg-slate-50/80 transition-colors ${
+                  isWeekend ? 'bg-slate-50/30' : ''
+                }`}
               >
-                <div className="flex items-start justify-between mb-1">
-                  <span className={`text-xs font-semibold ${isWeekend || isFuture ? 'text-slate-300' : 'text-slate-600'}`}>{d}</span>
-                  {!isWeekend && !isFuture && (
-                    <span className={`w-2 h-2 rounded-full flex-none ${STATUS_COLORS[day.status]}`} />
+                <div className="flex items-start justify-between">
+                  <span className={`text-xs font-semibold ${isWeekend ? 'text-slate-400' : 'text-slate-700'}`}>{d}</span>
+                  {!isWeekend && !isUnmarked && (
+                    <span className={`w-2 h-2 rounded-full ${day.workMode === 'field' ? 'bg-amber-500' : day.isLate ? 'bg-amber-400' : STATUS_COLORS[day.status]}`} />
                   )}
                 </div>
-                {!isWeekend && !isFuture && (
-                  <>
-                    <div className={`text-xs px-1 py-0.5 rounded text-center leading-tight ${STATUS_CELL[day.status]}`}>
-                      {STATUS_TEXT[day.status].replace(' ', '\n')}
+
+                {!isWeekend && !isUnmarked && (
+                  <div className="mt-1 space-y-0.5">
+                    <div className={`text-[10px] px-1 py-0.5 rounded leading-tight text-center font-medium ${
+                      day.workMode === 'field'
+                        ? 'bg-amber-100 text-amber-900'
+                        : day.isLate
+                        ? 'bg-amber-100 text-amber-800'
+                        : STATUS_CELL[day.status]
+                    }`}>
+                      {day.workMode === 'field' ? 'Field Visit' : day.isLate ? `Late (${day.lateMinutes}m)` : STATUS_TEXT[day.status]}
                     </div>
-                    <div className="flex items-center gap-1 mt-1 flex-wrap">
-                      {day.overtimeHours > 0 && (
-                        <span className={`text-xs px-1 rounded ${day.overtimeApproval === 'approved' ? 'bg-violet-100 text-violet-600' : day.overtimeApproval === 'pending' ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-500'}`}>
-                          +{day.overtimeHours}h OT
-                        </span>
-                      )}
-                      {day.onSite && (
-                        <span className="text-xs px-1 rounded bg-blue-100 text-blue-600">Site</span>
-                      )}
-                    </div>
-                  </>
+                    {day.clockInTime && (
+                      <div className="text-[9px] text-slate-500 text-center font-mono">
+                        {formatTime12Hour(day.clockInTime)}
+                      </div>
+                    )}
+                  </div>
                 )}
-                {isFuture && (
-                  <div className="text-xs text-slate-400 text-center mt-1">Future</div>
-                )}
+
+                <div className="flex gap-1 mt-1 flex-wrap justify-center">
+                  {day.overtimeHours > 0 && <span className="text-violet-600 font-mono text-[9px] font-semibold">+{day.overtimeHours}h</span>}
+                  {day.workMode === 'field' && <span className="text-amber-600 text-[9px] font-semibold">Field</span>}
+                </div>
               </div>
             )
           })}
         </div>
       </div>
 
-      {/* Day editor panel */}
-      {editDay && editingDay && (
-        <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-5 anim-fade">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-slate-800">
-              Edit: {new Date(editDay).toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            </h3>
-            <button onClick={() => setEditDay(null)} className="text-slate-400 hover:text-slate-600 p-1">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {/* Status */}
-            <div className="col-span-2">
-              <label className="block text-xs font-medium text-slate-600 mb-2">Attendance Status</label>
-              <div className="flex gap-2 flex-wrap">
-                {(['present', 'absent', 'on_leave', 'public_holiday'] as AttendanceStatus[]).map(s => (
-                  <button
-                    key={s}
-                    onClick={() => updateDay(editDay, { status: s })}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${editingDay.status === s ? STATUS_CELL[s] + ' border-current' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-                  >
-                    {STATUS_TEXT[s]}
-                  </button>
-                ))}
+      {/* Edit Day Modal with Location / Field Work Inspector */}
+      {editingDay && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setEditDay(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-800">Edit Attendance Record</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{editingDay.date} · {selectedStaff?.full_name}</p>
               </div>
+              <button onClick={() => setEditDay(null)} className="text-slate-400 hover:text-slate-600">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
 
-            {/* Overtime */}
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-2">Overtime Hours</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number" min={0} step={0.5} value={editingDay.overtimeHours}
-                  onChange={e => updateDay(editDay, { overtimeHours: Number(e.target.value), overtimeApproval: Number(e.target.value) > 0 ? 'pending' : 'none' })}
-                  className="w-24 px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 font-mono-data"
-                />
-                <span className="text-xs text-slate-400">hrs</span>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Status</label>
+                  <select
+                    value={editingDay.status}
+                    onChange={e => updateDay(editingDay.date, { status: e.target.value as AttendanceStatus })}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+                  >
+                    <option value="present">Present</option>
+                    <option value="absent">Absent</option>
+                    <option value="on_leave">On Leave</option>
+                    <option value="public_holiday">Public Holiday</option>
+                    <option value="weekend">Weekend</option>
+                    <option value="unmarked">Unmarked</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Work Mode</label>
+                  <select
+                    value={editingDay.workMode || 'office'}
+                    onChange={e => updateDay(editingDay.date, { workMode: e.target.value as any })}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+                  >
+                    <option value="office">Office Branch</option>
+                    <option value="field">Field / Client Visit</option>
+                    <option value="remote">Remote Work</option>
+                  </select>
+                </div>
               </div>
-              {editingDay.overtimeHours > 0 && (
-                <div className="mt-2 flex gap-1">
-                  {(['pending', 'approved', 'rejected'] as const).map(s => (
-                    <button
-                      key={s}
-                      onClick={() => updateDay(editDay, { overtimeApproval: s })}
-                      className={`text-xs px-2 py-0.5 rounded capitalize border transition-all ${editingDay.overtimeApproval === s ? (s === 'approved' ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : s === 'rejected' ? 'bg-red-100 border-red-300 text-red-700' : 'bg-orange-100 border-orange-300 text-orange-700') : 'border-slate-200 text-slate-400'}`}
-                    >
-                      {s}
-                    </button>
-                  ))}
+
+              {editingDay.workMode === 'field' && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 space-y-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-amber-900 uppercase">Client / Site Visited</label>
+                    <input
+                      type="text"
+                      value={editingDay.fieldClientName || ''}
+                      onChange={e => updateDay(editingDay.date, { fieldClientName: e.target.value })}
+                      placeholder="e.g. Dangote Sugar HQ"
+                      className="w-full px-2.5 py-1.5 text-xs rounded border border-amber-300 bg-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-amber-900 uppercase">Visit Remarks / Notes</label>
+                    <input
+                      type="text"
+                      value={editingDay.fieldNotes || ''}
+                      onChange={e => updateDay(editingDay.date, { fieldNotes: e.target.value })}
+                      placeholder="e.g. Delivered proposal & contract review"
+                      className="w-full px-2.5 py-1.5 text-xs rounded border border-amber-300 bg-white focus:outline-none"
+                    />
+                  </div>
                 </div>
               )}
+
+              {editingDay.matchedLocationName && editingDay.workMode === 'office' && (
+                <div className="text-xs text-blue-700 bg-blue-50 p-2.5 rounded-lg border border-blue-100 flex items-center gap-1.5">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
+                  <span>Clocked in at <strong>{editingDay.matchedLocationName}</strong></span>
+                  {editingDay.distanceMeters !== undefined && <span>({formatDistance(editingDay.distanceMeters)})</span>}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Clock In Time</label>
+                  <input
+                    type="time"
+                    value={editingDay.clockInTime || ''}
+                    onChange={e => updateDay(editingDay.date, { clockInTime: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Clock Out Time</label>
+                  <input
+                    type="time"
+                    value={editingDay.clockOutTime || ''}
+                    onChange={e => updateDay(editingDay.date, { clockOutTime: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 cursor-pointer pt-2">
+                  <input
+                    type="checkbox"
+                    checked={editingDay.isLate || false}
+                    onChange={e => updateDay(editingDay.date, { isLate: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-400"
+                  />
+                  <span className="text-xs font-semibold text-slate-700">Mark as Late</span>
+                </label>
+
+                {editingDay.isLate && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">Minutes Late</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editingDay.lateMinutes || 0}
+                      onChange={e => updateDay(editingDay.date, { lateMinutes: parseInt(e.target.value, 10) || 0 })}
+                      className="w-full px-2.5 py-1.5 text-sm rounded border border-slate-200 focus:outline-none focus:border-blue-400 font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingDay.onSite || false}
+                    onChange={e => updateDay(editingDay.date, { onSite: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-semibold text-slate-700">On-Site Work</span>
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">OT Hours:</span>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editingDay.overtimeHours || 0}
+                    onChange={e => updateDay(editingDay.date, { overtimeHours: parseFloat(e.target.value) || 0 })}
+                    className="w-16 px-2 py-1 text-xs rounded border border-slate-200 font-mono text-center"
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* On Site */}
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-2">Project Site Deployment</label>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
-                onClick={() => updateDay(editDay, { onSite: !editingDay.onSite })}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${editingDay.onSite ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-slate-200 text-slate-500'}`}
+                onClick={() => setEditDay(null)}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
               >
-                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${editingDay.onSite ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}>
-                  {editingDay.onSite && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                </div>
-                On Site Today
+                Done
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Legend */}
-      <div className="flex items-center gap-4 mt-4 flex-wrap">
-        <span className="text-xs text-slate-400 font-medium">Legend:</span>
-        {(Object.entries(STATUS_COLORS) as [AttendanceStatus, string][]).map(([s, color]) => (
-          <div key={s} className="flex items-center gap-1">
-            <span className={`w-3 h-3 rounded-full ${color}`} />
-            <span className="text-xs text-slate-500">{STATUS_TEXT[s]}</span>
-          </div>
-        ))}
-        <div className="flex items-center gap-1"><span className="text-xs px-1 rounded bg-violet-100 text-violet-600">+Nh OT</span><span className="text-xs text-slate-500">Overtime</span></div>
-        <div className="flex items-center gap-1"><span className="text-xs px-1 rounded bg-blue-100 text-blue-600">Site</span><span className="text-xs text-slate-500">On-site deployment</span></div>
-      </div>
     </div>
   )
 }

@@ -503,7 +503,12 @@ export default function MyAppraisal({ onNavigate }: Props) {
                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-5 py-2.5 text-sm transition-colors disabled:opacity-50">
                 Submit Self Appraisal
               </button>
-              {saveMsg && <span className="text-emerald-600 text-sm font-medium animate-pulse">✓ {saveMsg}</span>}
+              {saveMsg && (
+                <span className="text-emerald-600 text-sm font-medium animate-pulse inline-flex items-center gap-1">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>{saveMsg}</span>
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -662,7 +667,12 @@ export default function MyAppraisal({ onNavigate }: Props) {
                   className="border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50">Save Draft</button>
                 <button onClick={() => saveReview360(true)} disabled={saving}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-6 py-2.5 text-sm transition-colors disabled:opacity-50">Submit 360°</button>
-                {saveMsg && <span className="text-emerald-600 text-sm font-medium animate-pulse">✓ {saveMsg}</span>}
+                {saveMsg && (
+                <span className="text-emerald-600 text-sm font-medium animate-pulse inline-flex items-center gap-1">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>{saveMsg}</span>
+                </span>
+              )}
               </div>
             </div>
           )}
@@ -734,7 +744,12 @@ export default function MyAppraisal({ onNavigate }: Props) {
                   <div className="flex items-center gap-3 pt-2">
                     <button onClick={() => saveReviewKpi(false)} disabled={saving} className="border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50">Save Draft</button>
                     <button onClick={() => saveReviewKpi(true)} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-6 py-2.5 text-sm transition-colors disabled:opacity-50">Submit Role KPIs</button>
-                    {saveMsg && <span className="text-emerald-600 text-sm font-medium animate-pulse">✓ {saveMsg}</span>}
+                    {saveMsg && (
+                <span className="text-emerald-600 text-sm font-medium animate-pulse inline-flex items-center gap-1">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>{saveMsg}</span>
+                </span>
+              )}
                   </div>
                 </>
               )}
@@ -768,7 +783,12 @@ export default function MyAppraisal({ onNavigate }: Props) {
                   className="border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50">Save Draft</button>
                 <button onClick={() => saveReviewSupervisor(true)} disabled={saving}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-6 py-2.5 text-sm transition-colors disabled:opacity-50">Submit Supervisor Assessment</button>
-                {saveMsg && <span className="text-emerald-600 text-sm font-medium animate-pulse">✓ {saveMsg}</span>}
+                {saveMsg && (
+                <span className="text-emerald-600 text-sm font-medium animate-pulse inline-flex items-center gap-1">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>{saveMsg}</span>
+                </span>
+              )}
               </div>
             </div>
           )}
@@ -793,7 +813,12 @@ export default function MyAppraisal({ onNavigate }: Props) {
                   className="border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors disabled:opacity-50">Save Draft</button>
                 <button onClick={() => saveReviewQualitative(true)} disabled={saving}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-6 py-2.5 text-sm transition-colors disabled:opacity-50">Submit Qualitative Feedback</button>
-                {saveMsg && <span className="text-emerald-600 text-sm font-medium animate-pulse">✓ {saveMsg}</span>}
+                {saveMsg && (
+                <span className="text-emerald-600 text-sm font-medium animate-pulse inline-flex items-center gap-1">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>{saveMsg}</span>
+                </span>
+              )}
               </div>
             </div>
           )}

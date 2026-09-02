@@ -317,10 +317,16 @@ export default function LeaveManagement() {
                 <div className="mt-3 p-3 bg-slate-50 rounded-lg text-sm text-slate-600">{r.reason}</div>
 
                 {r.status === 'approved' && r.approvedBy && (
-                  <div className="mt-2 text-xs text-emerald-600">✓ Approved by {r.approvedBy}</div>
+                  <div className="mt-2 text-xs text-emerald-600 flex items-center gap-1">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Approved by {r.approvedBy}</span>
+                  </div>
                 )}
                 {r.status === 'rejected' && r.note && (
-                  <div className="mt-2 text-xs text-red-600">✗ Rejected: {r.note}</div>
+                  <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    <span>Rejected: {r.note}</span>
+                  </div>
                 )}
 
                 {r.status === 'pending' && (
@@ -490,9 +496,14 @@ export default function LeaveManagement() {
                           details: `Updated ${t.name} attracts leave allowance bonus to ${newValue ? 'Yes' : 'No'}`
                         })
                       }}
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${t.attractsLeaveAllowance ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors inline-flex items-center gap-1 ${t.attractsLeaveAllowance ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                     >
-                      {t.attractsLeaveAllowance ? '✓ Bonus Pay' : 'No Bonus'}
+                      {t.attractsLeaveAllowance ? (
+                        <>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                          <span>Bonus Pay</span>
+                        </>
+                      ) : 'No Bonus'}
                     </button>
                   </td>
                   <td className="py-3 px-4">
@@ -515,9 +526,14 @@ export default function LeaveManagement() {
                           details: `Updated ${t.name} requires document to ${newValue ? 'Required' : 'Optional'}`
                         })
                       }}
-                      className={`text-xs cursor-pointer hover:underline ${t.requiresDocument ? 'text-slate-600' : 'text-slate-400'}`}
+                      className={`text-xs cursor-pointer hover:underline inline-flex items-center gap-1 ${t.requiresDocument ? 'text-slate-600 font-medium' : 'text-slate-400'}`}
                     >
-                      {t.requiresDocument ? '✓ Required' : 'Optional'}
+                      {t.requiresDocument ? (
+                        <>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                          <span>Required</span>
+                        </>
+                      ) : 'Optional'}
                     </button>
                   </td>
                   <td className="py-3 px-4 text-right">
