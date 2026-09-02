@@ -168,6 +168,15 @@ function IconPercent() {
     </svg>
   )
 }
+function IconClipboardCheck() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+      <rect x="9" y="3" width="6" height="4" rx="1"/>
+      <path d="M9 14l2 2 4-4"/>
+    </svg>
+  )
+}
 function IconUser() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -208,6 +217,9 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
             { label: 'Daily Attendance', page: 'hr-attendance-daily', icon: <IconCalendar /> },
             { label: 'Monthly Summary', page: 'hr-attendance-summary', icon: <IconBarChart /> },
             { label: 'Leave Management', page: 'hr-leave-mgmt', icon: <IconUmbrella /> },
+            { label: 'Appraisal Cycles', page: 'hr-appraisal-cycles', icon: <IconCalendar /> },
+            { label: 'Appraisal Form', page: 'hr-appraisal-form', icon: <IconClipboardCheck /> },
+            { label: 'Appraisal Summary', page: 'hr-appraisal-summary', icon: <IconBarChart /> },
           ],
         },
         {
@@ -245,6 +257,13 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
         {
           section: 'Leave', items: [
             { label: 'Leave Management', page: 'hr-leave-mgmt', icon: <IconUmbrella /> },
+          ],
+        },
+        {
+          section: 'Performance', items: [
+            { label: 'Appraisal Cycles', page: 'hr-appraisal-cycles', icon: <IconCalendar /> },
+            { label: 'Appraisal Form', page: 'hr-appraisal-form', icon: <IconClipboardCheck /> },
+            { label: 'Final Summary', page: 'hr-appraisal-summary', icon: <IconBarChart /> },
           ],
         },
       ]
@@ -285,6 +304,11 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
           section: 'Time & Leave', items: [
             { label: 'My Attendance', page: 'st-attendance', icon: <IconCalendar /> },
             { label: 'My Leave', page: 'st-leave', icon: <IconUmbrella /> },
+          ],
+        },
+        {
+          section: 'Performance', items: [
+            { label: 'My Appraisal', page: 'st-appraisal', icon: <IconClipboardCheck /> },
           ],
         },
       ]
@@ -617,6 +641,9 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
     'st-dashboard': 'My Dashboard', 'st-payslips': 'My Payslips',
     'st-profile': 'My Profile', 'st-id-card': 'My ID Card',
     'st-attendance': 'My Attendance', 'st-leave': 'My Leave',
+    'st-appraisal': 'My Appraisal',
+    'hr-appraisal-cycles': 'Appraisal Cycles', 'hr-appraisal-form': 'Appraisal Form',
+    'hr-appraisal-summary': 'Appraisal Summary',
     'profile': 'My Profile',
   }
 

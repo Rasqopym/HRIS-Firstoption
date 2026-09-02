@@ -42,6 +42,12 @@ import SelfServiceDashboard from './pages/staff/SelfServiceDashboard'
 import MyPayslips from './pages/staff/MyPayslips'
 import AttendanceSelf from './pages/staff/AttendanceSelf'
 import LeaveRequest from './pages/staff/LeaveRequest'
+import MyAppraisal from './pages/staff/MyAppraisal'
+
+// Performance Appraisal pages
+import AppraisalCycles from './pages/hr/appraisal/AppraisalCycles'
+import AppraisalForm from './pages/hr/appraisal/AppraisalForm'
+import AppraisalSummary from './pages/hr/appraisal/AppraisalSummary'
 
 function defaultPage(role: Role): Page {
   switch (role) {
@@ -354,6 +360,12 @@ export default function App() {
       case 'st-id-card': return <IDCardGenerator key={page} />
       case 'st-attendance': return <AttendanceSelf key={page} />
       case 'st-leave': return <LeaveRequest key={page} />
+      case 'st-appraisal': return <MyAppraisal key={page} onNavigate={navigate} />
+
+      // Performance Appraisal
+      case 'hr-appraisal-cycles': return <AppraisalCycles key={page} onNavigate={navigate} />
+      case 'hr-appraisal-form': return <AppraisalForm key={page} onNavigate={navigate} />
+      case 'hr-appraisal-summary': return <AppraisalSummary key={page} onNavigate={navigate} />
 
       // Profile (shared across all roles)
       case 'profile': return <Profile key={page} />

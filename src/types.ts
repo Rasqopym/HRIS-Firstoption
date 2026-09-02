@@ -6,10 +6,11 @@ export type Page =
   | 'sa-salary-defaults' | 'sa-tax-bands'
   | 'hr-dashboard' | 'hr-directory' | 'hr-profile' | 'hr-add-staff' | 'hr-id-cards'
   | 'hr-attendance-daily' | 'hr-attendance-summary' | 'hr-leave-mgmt' | 'hr-leave-config'
+  | 'hr-appraisal-cycles' | 'hr-appraisal-form' | 'hr-appraisal-summary'
   | 'ac-dashboard' | 'ac-payroll' | 'ac-payslip' | 'ac-reports' | 'ac-tax-remittance'
   | 'au-dashboard' | 'au-audit' | 'au-flags' | 'au-compliance'
   | 'st-dashboard' | 'st-payslips' | 'st-payslip' | 'st-profile' | 'st-id-card'
-  | 'st-attendance' | 'st-leave'
+  | 'st-attendance' | 'st-leave' | 'st-appraisal'
   | 'profile'
 
 export interface StaffMember {
