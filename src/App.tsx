@@ -23,6 +23,7 @@ import IDCardGenerator from './pages/hr/IDCardGenerator'
 import AttendanceDaily from './pages/hr/AttendanceDaily'
 import AttendanceSummary from './pages/hr/AttendanceSummary'
 import LeaveManagement from './pages/hr/LeaveManagement'
+import PublicHolidays from './pages/hr/PublicHolidays'
 
 // Accountant pages
 import ACDashboard from './pages/accountant/ACDashboard'
@@ -336,6 +337,7 @@ export default function App() {
       case 'hr-id-cards': return <IDCardGenerator key={page} />
       case 'hr-attendance-daily': return <AttendanceDaily key={page} />
       case 'hr-attendance-summary': return <AttendanceSummary key={page} />
+      case 'hr-holidays': return <PublicHolidays key={page} />
       case 'hr-leave-mgmt': return <LeaveManagement key={page} />
       case 'hr-leave-config': return <LeaveManagement key={page} />
 

@@ -26,7 +26,45 @@ export default function Login({ onLogin }: LoginProps) {
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [resetSuccess, setResetSuccess] = useState(false)
 
+  // PWA Direct Installation State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(() => window.__pwaInstallPrompt || null)
+  const [isStandalone, setIsStandalone] = useState(false)
+  const [installed, setInstalled] = useState(false)
+  const [showIosInstructions, setShowIosInstructions] = useState(false)
+  const isIos = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
   useEffect(() => {
+    // Check if running in standalone mode (already installed)
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true
+    setIsStandalone(checkStandalone)
+
+    if (window.__pwaInstallPrompt) {
+      setDeferredPrompt(window.__pwaInstallPrompt)
+    }
+
+    const listener = (p: any) => {
+      setDeferredPrompt(p)
+    }
+
+    if (window.__pwaInstallListeners) {
+      window.__pwaInstallListeners.push(listener)
+    }
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault()
+      window.__pwaInstallPrompt = e
+      setDeferredPrompt(e)
+    }
+
+    const handleAppInstalled = () => {
+      setInstalled(true)
+      setDeferredPrompt(null)
+      window.__pwaInstallPrompt = null
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.addEventListener('appinstalled', handleAppInstalled)
+
     // Detect password reset / recovery link from hash
     const hash = window.location.hash || ''
     if (hash.includes('otp_expired') || hash.includes('invalid') || hash.includes('access_denied')) {
@@ -44,9 +82,27 @@ export default function Login({ onLogin }: LoginProps) {
     })
 
     return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', handleAppInstalled)
       authListener.subscription.unsubscribe()
     }
   }, [])
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt()
+      const { outcome } = await deferredPrompt.userChoice
+      if (outcome === 'accepted') {
+        setInstalled(true)
+        setDeferredPrompt(null)
+      }
+    } else if (isIos) {
+      setShowIosInstructions(true)
+    } else {
+      // Fallback alert / modal guidance
+      alert('To install the app, tap your browser menu (⋮) and select "Install App" or "Add to Home screen".')
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -404,6 +460,35 @@ export default function Login({ onLogin }: LoginProps) {
                   ) : 'Sign in'}
                 </button>
               </form>
+
+              {/* Direct App Download / Install Action */}
+              {!isStandalone && (
+                <div className="mt-6 pt-5 border-t border-slate-100">
+                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border border-blue-100/80 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-blue-600 flex-none flex items-center justify-center text-white shadow-xs">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-800">Install Mobile / Desktop App</div>
+                        <div className="text-[11px] text-slate-500 truncate">One-tap shift attendance & offline access</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleInstallApp}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex-none shadow-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <span>Install</span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 anim-fade-up">
@@ -456,6 +541,56 @@ export default function Login({ onLogin }: LoginProps) {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* iOS Safari Installation Modal Dialog */}
+          {showIosInstructions && (
+            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-5 space-y-4 anim-fade-up">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
+                      FO
+                    </div>
+                    <h3 className="font-display font-bold text-slate-800 text-base">Install on iPhone / iPad</h3>
+                  </div>
+                  <button
+                    onClick={() => setShowIosInstructions(false)}
+                    className="p-1 rounded-md text-slate-400 hover:text-slate-600"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs text-slate-600">
+                  <div className="flex items-start gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center flex-none">1</span>
+                    <div>
+                      Tap the <strong className="text-slate-800">Share</strong> button at the bottom of Safari (the square icon with arrow pointing up <span className="text-blue-600 font-bold">↑</span>).
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center flex-none">2</span>
+                    <div>
+                      Scroll down and tap <strong className="text-slate-800">"Add to Home Screen"</strong>.
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center flex-none">3</span>
+                    <div>
+                      Tap <strong className="text-slate-800">Add</strong> in the top-right corner to launch the standalone app.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowIosInstructions(false)}
+                  className="w-full py-2 rounded-xl bg-blue-600 text-white font-semibold text-xs shadow-xs"
+                >
+                  Got It
+                </button>
+              </div>
             </div>
           )}
 

@@ -112,3 +112,27 @@ input:focus, select:focus, textarea:focus {
   border-color: #3b82f6 !important;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
 }
+
+/* PWA & Mobile Viewport Enhancements */
+@supports (padding: env(safe-area-inset-bottom)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  nav.fixed.bottom-0 {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* Optimize touch targets on mobile */
+@media (max-width: 768px) {
+  button, a, input, select {
+    touch-action: manipulation;
+  }
+  
+  /* Prevent text zoom on focus in iOS Safari */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}

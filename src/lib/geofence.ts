@@ -1,5 +1,5 @@
 /**
- * Utility helpers for GPS Geofencing, Multi-Branch matching, and Lateness calculations
+ * Utility helpers for GPS Geofencing, Multi-Branch matching, Site Visits, and Lateness calculations
  */
 
 export interface OfficeLocation {
@@ -135,4 +135,37 @@ export function formatDistance(meters?: number | null): string {
   if (meters === undefined || meters === null) return '—'
   if (meters < 1000) return `${meters}m`
   return `${(meters / 1000).toFixed(2)}km`
+}
+
+/**
+ * Calculates duration between arrival and departure time (or current time if in progress)
+ */
+export function calculateVisitDuration(arrivalTimeStr?: string, departureTimeStr?: string | null): string {
+  if (!arrivalTimeStr) return '0m'
+  
+  const parseTimeToMinutes = (tStr: string): number => {
+    if (tStr.includes('T')) {
+      const d = new Date(tStr)
+      return d.getHours() * 60 + d.getMinutes()
+    }
+    const [h, m] = tStr.split(':')
+    return parseInt(h || '0', 10) * 60 + parseInt(m || '0', 10)
+  }
+
+  const startMins = parseTimeToMinutes(arrivalTimeStr)
+  let endMins = startMins
+  if (departureTimeStr) {
+    endMins = parseTimeToMinutes(departureTimeStr)
+  } else {
+    const now = new Date()
+    endMins = now.getHours() * 60 + now.getMinutes()
+  }
+
+  const diffMins = Math.max(0, endMins - startMins)
+  const hours = Math.floor(diffMins / 60)
+  const mins = diffMins % 60
+
+  if (hours === 0) return `${mins}m`
+  if (mins === 0) return `${hours}h`
+  return `${hours}h ${mins}m`
 }

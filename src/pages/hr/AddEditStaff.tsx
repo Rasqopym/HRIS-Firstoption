@@ -17,6 +17,7 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
   const [generatedStaffId, setGeneratedStaffId] = useState('')
+  const [staffCode, setStaffCode] = useState('')
   const [error, setError] = useState('')
   const [isEditMode, setIsEditMode] = useState(false)
 
@@ -51,6 +52,7 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
     const fetchStaffData = async () => {
       if (!staffId) {
         setIsEditMode(false)
+        setStaffCode('')
         return
       }
 
@@ -97,6 +99,7 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
             accountName: data.account_name || '',
           })
 
+          setStaffCode(data.staff_code || '')
           setGeneratedStaffId(data.staff_code || '')
         }
       } catch (err) {
@@ -157,6 +160,10 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
         account_number: financial.accountNumber || null,
         account_name: financial.accountName || null,
         status: 'active',
+      }
+
+      if (staffCode.trim()) {
+        basePayload.staff_code = staffCode.trim().toUpperCase()
       }
 
       if (validDeptId) {
@@ -387,7 +394,21 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
             <div className="anim-fade">
               <h3 className="font-display font-semibold text-slate-800 text-lg mb-5">Employment Details</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                    Staff ID / Employee Code {isEditMode ? '(Editable by Admin)' : '(Optional / Manual Assignment)'}
+                  </label>
+                  <input
+                    value={staffCode}
+                    onChange={e => setStaffCode(e.target.value.toUpperCase())}
+                    placeholder={isEditMode ? "e.g. FO-0001" : "Leave blank to auto-generate or type custom ID"}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 font-mono-data uppercase bg-slate-50/50"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {isEditMode ? 'Superadmin can edit or re-assign this Staff ID.' : 'Manually assign an ID or leave blank to automatically generate the next code.'}
+                  </p>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-medium text-slate-600 mb-1.5">Employment Date</label>
                   <input
                     type="date" value={employment.employmentDate}
@@ -414,7 +435,7 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400"
                   />
                 </div>
-                <div>
+                <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-medium text-slate-600 mb-1.5">Employment Type</label>
                   <select
                     value={employment.employmentType}
@@ -491,6 +512,7 @@ export default function AddEditStaff({ onNavigate, staffId }: Props) {
                     { l: 'Phone', v: personal.phone },
                   ]},
                   { title: 'Employment', items: [
+                    { l: 'Staff ID', v: staffCode || (isEditMode ? 'Unchanged' : 'Auto-generated (FO-XXXX)'), mono: true },
                     { l: 'Department', v: departments.find(d => d.id === employment.department)?.name || '—' },
                     { l: 'Job Title', v: employment.jobTitle },
                     { l: 'Employment Date', v: employment.employmentDate || '—' },

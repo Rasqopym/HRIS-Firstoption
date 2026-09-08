@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { StaffMember, StaffStatus, Page } from '../../types'
+import { getStaffConfirmationStatus } from '../../lib/pushNotification'
 
 interface Props {
   onNavigate: (p: Page) => void
@@ -20,6 +21,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
   const [search, setSearch] = useState('')
   const [filterDept, setFilterDept] = useState('all')
   const [filterStatus, setFilterStatus] = useState<StaffStatus | 'all'>('all')
+  const [filterConfirmation, setFilterConfirmation] = useState<'all' | 'confirmed' | 'pending' | 'due'>('all')
   const [view, setView] = useState<'table' | 'grid'>('table')
 
   useEffect(() => {
@@ -51,6 +53,8 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
           jobTitle: s.job_title,
           status: s.status as StaffStatus,
           employmentDate: s.date_employed?.split('T')[0] || '',
+          isConfirmed: s.is_confirmed ?? false,
+          confirmationDate: s.confirmation_date?.split('T')[0] || null,
           photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
         })) ?? []
 
@@ -71,6 +75,14 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
     if (q && !s.name.toLowerCase().includes(q) && !s.email.toLowerCase().includes(q) && !s.staffId.toLowerCase().includes(q) && !s.jobTitle.toLowerCase().includes(q)) return false
     if (filterDept !== 'all' && s.department !== filterDept) return false
     if (filterStatus !== 'all' && s.status !== filterStatus) return false
+    if (filterConfirmation !== 'all') {
+      if (filterConfirmation === 'confirmed' && !s.isConfirmed) return false
+      if (filterConfirmation === 'pending' && s.isConfirmed) return false
+      if (filterConfirmation === 'due') {
+        const conf = getStaffConfirmationStatus(s.employmentDate)
+        if (s.isConfirmed || !conf?.isDueForConfirmation) return false
+      }
+    }
     return true
   })
 
@@ -119,7 +131,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
             className="pl-9 pr-4 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 w-full"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           <select
             value={filterDept}
             onChange={e => setFilterDept(e.target.value)}
@@ -137,6 +149,16 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
             <option value="active">Active</option>
             <option value="suspended">Suspended</option>
             <option value="offboarded">Offboarded</option>
+          </select>
+          <select
+            value={filterConfirmation}
+            onChange={e => setFilterConfirmation(e.target.value as any)}
+            className="flex-1 sm:flex-none px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-200 focus:outline-none bg-white focus:border-blue-400 font-medium"
+          >
+            <option value="all">All Confirmation</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="pending">Pending (Probation)</option>
+            <option value="due">Due Soon (3-Month)</option>
           </select>
           <div className="ml-auto flex items-center gap-1 bg-slate-100 rounded-lg p-1">
             <button
@@ -169,6 +191,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
                   <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Department</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Job Title</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                  <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Confirmation</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Joined</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide"></th>
                 </tr>
@@ -176,7 +199,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
               <tbody className="divide-y divide-slate-50">
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center">
+                    <td colSpan={8} className="py-16 text-center">
                       <div className="flex justify-center mb-3">
                         <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center">
                           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -204,11 +227,46 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
                     <td className="py-3.5 px-4 text-sm text-slate-600">{s.department}</td>
                     <td className="py-3.5 px-4 text-sm text-slate-600">{s.jobTitle}</td>
                     <td className="py-3.5 px-4">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[s.status]}`}>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[s.status]}`}>
                         {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-xs font-mono-data text-slate-500">{s.employmentDate}</td>
+                    <td className="py-3.5 px-4">
+                      {s.isConfirmed ? (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <svg className="w-3 h-3 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                            Confirmed
+                          </span>
+                          {s.confirmationDate && (
+                            <span className="text-[10px] text-slate-400 font-mono-data ml-1">
+                              {s.confirmationDate}
+                            </span>
+                          )}
+                        </div>
+                      ) : (() => {
+                        const conf = getStaffConfirmationStatus(s.employmentDate)
+                        if (conf && conf.isDueForConfirmation) {
+                          return (
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide ${
+                              conf.isOverdue ? 'bg-red-50 text-red-700 border border-red-200 animate-pulse' : 'bg-amber-50 text-amber-800 border border-amber-200'
+                            }`}>
+                              <svg className="w-3 h-3 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                              <span>{conf.isOverdue ? 'Confirmation Overdue' : `Due in ${conf.daysRemaining}d`}</span>
+                            </span>
+                          )
+                        }
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                            <svg className="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            Pending (Probation)
+                          </span>
+                        )
+                      })()}
+                    </td>
+                    <td className="py-3.5 px-4 text-xs font-mono-data text-slate-500">
+                      <div>{s.employmentDate || 'N/A'}</div>
+                    </td>
                     <td className="py-3.5 px-4" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => handleView(s)}
@@ -255,11 +313,36 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
                 <div className="font-semibold text-slate-800 text-sm">{s.name}</div>
                 <div className="text-xs text-slate-500 mt-0.5">{s.jobTitle}</div>
                 <div className="text-xs text-slate-400 mt-0.5">{s.department}</div>
-                <div className="mt-3">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[s.status]}`}>
+                
+                <div className="mt-3 flex items-center justify-center gap-1.5 flex-wrap">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[s.status]}`}>
                     {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
                   </span>
+                  {s.isConfirmed ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <svg className="w-2.5 h-2.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      Confirmed
+                    </span>
+                  ) : (() => {
+                    const conf = getStaffConfirmationStatus(s.employmentDate)
+                    if (conf && conf.isDueForConfirmation) {
+                      return (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          conf.isOverdue ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}>
+                          <svg className="w-2.5 h-2.5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                          <span>{conf.isOverdue ? 'Overdue' : `Due (${conf.daysRemaining}d)`}</span>
+                        </span>
+                      )
+                    }
+                    return (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                        Probation
+                      </span>
+                    )
+                  })()}
                 </div>
+
                 <div className="mt-2.5 font-mono-data text-slate-400 text-xs bg-slate-50 px-2 py-0.5 rounded">{s.staffId}</div>
               </div>
             </div>

@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { notifyCompanySettingsUpdated } from '../../hooks/useCompanySettings'
 import type { OfficeLocation } from '../../lib/geofence'
+import { getDefaultPublicHolidays, type PublicHoliday } from '../../lib/holidays'
 
-type Tab = 'company' | 'departments' | 'attendance' | 'roles' | 'branding'
+type Tab = 'company' | 'departments' | 'attendance' | 'holidays' | 'roles' | 'branding'
 
 interface Department {
   id: string
@@ -64,6 +65,16 @@ export default function SystemSettings() {
   const [detectingNewBranch, setDetectingNewBranch] = useState(false)
   const [detectFeedback, setDetectFeedback] = useState('')
 
+  // Public Holidays State
+  const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
+  const [showAddHoliday, setShowAddHoliday] = useState(false)
+  const [newHoliday, setNewHoliday] = useState({
+    name: '',
+    holiday_date: '',
+    is_recurring: true,
+    description: '',
+  })
+
   useEffect(() => {
     const fetchDepartments = async () => {
       try {
@@ -109,6 +120,17 @@ export default function SystemSettings() {
             }]
           } else {
             locs = [{ id: 'loc-1', name: 'Main Head Office', lat: 6.5244, lng: 3.3792, radius_meters: 100, is_active: true }]
+          }
+
+          // Load custom holidays
+          if (Array.isArray(data.custom_holidays)) {
+            setCustomHolidays(data.custom_holidays)
+            localStorage.setItem('hris_custom_holidays', JSON.stringify(data.custom_holidays))
+          } else {
+            try {
+              const cached = localStorage.getItem('hris_custom_holidays')
+              if (cached) setCustomHolidays(JSON.parse(cached))
+            } catch (e) {}
           }
 
           setCompanySettings({
@@ -167,6 +189,9 @@ export default function SystemSettings() {
       subtitle: cleanSubtitle,
     })
 
+    // Persist custom holidays locally
+    localStorage.setItem('hris_custom_holidays', JSON.stringify(customHolidays))
+
     try {
       const { error } = await supabase
         .from('company_settings')
@@ -195,6 +220,7 @@ export default function SystemSettings() {
           office_lng: primaryLoc.lng,
           office_radius_meters: primaryLoc.radius_meters,
           office_address_label: primaryLoc.name,
+          custom_holidays: customHolidays,
         })
         .eq('id', 1)
 
@@ -277,6 +303,45 @@ export default function SystemSettings() {
       ...c,
       office_locations: c.office_locations.map(l => l.id === id ? { ...l, is_active: !l.is_active } : l),
     }))
+  }
+
+  const handleAddHoliday = async () => {
+    if (!newHoliday.name.trim() || !newHoliday.holiday_date) return
+    const item: PublicHoliday = {
+      id: `hol-custom-${Date.now()}`,
+      name: newHoliday.name.trim(),
+      holiday_date: newHoliday.holiday_date,
+      is_recurring: newHoliday.is_recurring,
+      description: newHoliday.description.trim() || 'Custom declared holiday',
+    }
+    const updated = [...customHolidays, item]
+    setCustomHolidays(updated)
+    localStorage.setItem('hris_custom_holidays', JSON.stringify(updated))
+    window.dispatchEvent(new Event('storage'))
+    
+    try {
+      await supabase
+        .from('company_settings')
+        .update({ custom_holidays: updated })
+        .eq('id', 1)
+    } catch (e) {}
+
+    setNewHoliday({ name: '', holiday_date: '', is_recurring: true, description: '' })
+    setShowAddHoliday(false)
+  }
+
+  const handleDeleteHoliday = async (id: string) => {
+    const updated = customHolidays.filter(h => h.id !== id)
+    setCustomHolidays(updated)
+    localStorage.setItem('hris_custom_holidays', JSON.stringify(updated))
+    window.dispatchEvent(new Event('storage'))
+
+    try {
+      await supabase
+        .from('company_settings')
+        .update({ custom_holidays: updated })
+        .eq('id', 1)
+    } catch (e) {}
   }
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -420,6 +485,7 @@ export default function SystemSettings() {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'company', label: 'Company Profile' },
     { id: 'attendance', label: 'Attendance & Geofencing' },
+    { id: 'holidays', label: 'Public Holidays' },
     { id: 'departments', label: 'Departments' },
     { id: 'roles', label: 'Roles & Permissions' },
     { id: 'branding', label: 'Branding' },
@@ -858,6 +924,227 @@ export default function SystemSettings() {
                 </button>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* Public Holidays */}
+      {tab === 'holidays' && (
+        <div className="space-y-6 max-w-4xl">
+          {/* Header & Quick Action */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-display font-semibold text-slate-800 text-lg flex items-center gap-2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                  Public Holidays & Observances
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Public holidays are recognized as paid non-working days. They automatically deduct from monthly required working days and prevent false absence penalties.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddHoliday(true)}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium flex items-center gap-2 self-start sm:self-auto transition-colors shadow-sm"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Declare Holiday
+              </button>
+            </div>
+
+            {/* Metric Highlights */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-100">
+              <div className="p-4 rounded-lg bg-blue-50 border border-blue-100">
+                <span className="text-xs font-semibold text-blue-800 uppercase tracking-wider block">Statutory Holidays</span>
+                <span className="text-2xl font-bold font-mono-data text-blue-900 mt-1 block">{getDefaultPublicHolidays(new Date().getFullYear()).length}</span>
+                <span className="text-xs text-blue-600 mt-0.5 block">National gazetted holidays</span>
+              </div>
+              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-100">
+                <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wider block">Declared Company Holidays</span>
+                <span className="text-2xl font-bold font-mono-data text-emerald-900 mt-1 block">{customHolidays.length}</span>
+                <span className="text-xs text-emerald-600 mt-0.5 block">Ad-hoc & company observances</span>
+              </div>
+              <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider block">Attendance Rule</span>
+                <span className="text-sm font-medium text-slate-800 mt-2 block flex items-center gap-1.5">
+                  <svg className="text-emerald-600 shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  0% Absence Penalty
+                </span>
+                <span className="text-xs text-slate-500 mt-0.5 block">Paid off / Working day deducted</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Custom Declared Holidays */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <h4 className="font-semibold text-slate-800 text-sm mb-4 flex items-center justify-between">
+              <span>Company Declared & Ad-Hoc Public Holidays</span>
+              <span className="text-xs text-slate-400 font-normal">{customHolidays.length} active</span>
+            </h4>
+
+            {customHolidays.length === 0 ? (
+              <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                <svg className="mx-auto text-slate-300 mb-2" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <p className="text-sm text-slate-600 font-medium">No custom public holidays declared yet</p>
+                <p className="text-xs text-slate-400 mt-1">Add government-declared public holidays or company work-free days here.</p>
+                <button
+                  onClick={() => setShowAddHoliday(true)}
+                  className="mt-3 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-white transition-colors"
+                >
+                  + Add Custom Holiday
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left">
+                      <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Holiday Name</th>
+                      <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Date</th>
+                      <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Type</th>
+                      <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Description</th>
+                      <th className="py-2.5 px-3 text-right text-xs font-semibold text-slate-500 uppercase">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {customHolidays.map(h => (
+                      <tr key={h.id} className="hover:bg-slate-50">
+                        <td className="py-3 px-3 font-medium text-slate-800">{h.name}</td>
+                        <td className="py-3 px-3 text-slate-600 font-mono-data text-xs">{h.holiday_date}</td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${h.is_recurring ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {h.is_recurring ? 'Annual Recurring' : 'Single Event'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-slate-500 text-xs">{h.description || '—'}</td>
+                        <td className="py-3 px-3 text-right">
+                          <button
+                            onClick={() => handleDeleteHoliday(h.id)}
+                            className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Statutory Default Holidays */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <h4 className="font-semibold text-slate-800 text-sm mb-4 flex items-center justify-between">
+              <span>National Statutory Public Holidays (Automatic)</span>
+              <span className="text-xs text-slate-400 font-normal">Built-in calendar</span>
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left">
+                    <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Holiday Name</th>
+                    <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Standard Date</th>
+                    <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                    <th className="py-2.5 px-3 text-xs font-semibold text-slate-500 uppercase">Official Basis</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {getDefaultPublicHolidays(new Date().getFullYear()).map(h => (
+                    <tr key={h.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-3 font-medium text-slate-800">{h.name}</td>
+                      <td className="py-3 px-3 text-slate-600 font-mono-data text-xs">{h.holiday_date}</td>
+                      <td className="py-3 px-3">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
+                          Active & Paid Off
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-slate-500 text-xs">{h.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Declare Holiday Modal */}
+          {showAddHoliday && (
+            <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full p-6 space-y-4 anim-fade-up">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display font-semibold text-slate-800 text-base">Declare Public Holiday</h3>
+                  <button
+                    onClick={() => setShowAddHoliday(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Holiday Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Eid-el-Fitr, Good Friday, Inauguration Day"
+                      value={newHoliday.name}
+                      onChange={e => setNewHoliday(h => ({ ...h, name: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Holiday Date *</label>
+                    <input
+                      type="date"
+                      value={newHoliday.holiday_date}
+                      onChange={e => setNewHoliday(h => ({ ...h, holiday_date: e.target.value }))}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 font-mono-data"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="is-recurring-holiday"
+                      checked={newHoliday.is_recurring}
+                      onChange={e => setNewHoliday(h => ({ ...h, is_recurring: e.target.checked }))}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <label htmlFor="is-recurring-holiday" className="text-xs text-slate-700 cursor-pointer">
+                      Repeats annually on this date
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Description / Notes</label>
+                    <textarea
+                      placeholder="e.g. Federal Government declared public holiday for celebration..."
+                      value={newHoliday.description}
+                      onChange={e => setNewHoliday(h => ({ ...h, description: e.target.value }))}
+                      rows={2}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    onClick={() => setShowAddHoliday(false)}
+                    className="px-4 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddHoliday}
+                    disabled={!newHoliday.name.trim() || !newHoliday.holiday_date}
+                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
+                  >
+                    Save Holiday
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       )}

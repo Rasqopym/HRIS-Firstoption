@@ -28,4 +28,5 @@ ADD COLUMN IF NOT EXISTS clock_in_distance_meters INT,
 ADD COLUMN IF NOT EXISTS matched_location_name VARCHAR(255),
 ADD COLUMN IF NOT EXISTS work_mode VARCHAR(50) DEFAULT 'office', -- 'office' | 'field' | 'remote'
 ADD COLUMN IF NOT EXISTS field_client_name VARCHAR(255),
-ADD COLUMN IF NOT EXISTS field_notes TEXT;
+ADD COLUMN IF NOT EXISTS field_notes TEXT,
+ADD COLUMN IF NOT EXISTS site_visits JSONB DEFAULT '[]'::jsonb;

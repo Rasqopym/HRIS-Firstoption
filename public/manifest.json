@@ -1,0 +1,55 @@
+﻿{
+  "name": "Firstoption HRIS Platform",
+  "short_name": "Firstoption HRIS",
+  "description": "Comprehensive Human Resource & Workforce Management System",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f2744",
+  "theme_color": "#0f2744",
+  "scope": "/",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Clock In / Attendance",
+      "short_name": "Attendance",
+      "description": "Clock in and register daily shift",
+      "url": "/#st-attendance",
+      "icons": [{ "src": "/pwa-192x192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Staff Directory",
+      "short_name": "Directory",
+      "description": "View employee list and profiles",
+      "url": "/#hr-directory",
+      "icons": [{ "src": "/pwa-192x192.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Request Leave",
+      "short_name": "Leave",
+      "description": "Apply for annual or casual leave",
+      "url": "/#st-leave",
+      "icons": [{ "src": "/pwa-192x192.svg", "sizes": "192x192" }]
+    }
+  ]
+}

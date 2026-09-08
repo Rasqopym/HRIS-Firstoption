@@ -3,6 +3,7 @@ import type { Role, Page, HRISNotification } from '../types'
 import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 import { useCompanySettings } from '../hooks/useCompanySettings'
+import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus } from '../lib/pushNotification'
 
 interface LayoutProps {
   role: Role
@@ -216,6 +217,7 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
             { label: 'ID Card Generator', page: 'hr-id-cards', icon: <IconIdCard /> },
             { label: 'Daily Attendance', page: 'hr-attendance-daily', icon: <IconCalendar /> },
             { label: 'Monthly Summary', page: 'hr-attendance-summary', icon: <IconBarChart /> },
+            { label: 'Public Holidays', page: 'hr-holidays', icon: <IconCalendar /> },
             { label: 'Leave Management', page: 'hr-leave-mgmt', icon: <IconUmbrella /> },
             { label: 'Appraisal Cycles', page: 'hr-appraisal-cycles', icon: <IconCalendar /> },
             { label: 'Appraisal Form', page: 'hr-appraisal-form', icon: <IconClipboardCheck /> },
@@ -249,9 +251,10 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
           ],
         },
         {
-          section: 'Attendance', items: [
+          section: 'Attendance & Holidays', items: [
             { label: 'Daily Attendance', page: 'hr-attendance-daily', icon: <IconCalendar /> },
             { label: 'Monthly Summary', page: 'hr-attendance-summary', icon: <IconBarChart /> },
+            { label: 'Public Holidays', page: 'hr-holidays', icon: <IconCalendar /> },
           ],
         },
         {
@@ -344,6 +347,40 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
   const [notifs, setNotifs] = useState<HRISNotification[]>([])
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; photo: string } | null>(null)
+  
+  // PWA Installation & Device Standalone Detection
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+  const [showInstallBanner, setShowInstallBanner] = useState(false)
+  const [isStandalone, setIsStandalone] = useState(false)
+
+  useEffect(() => {
+    // Check if running in standalone mode (installed PWA)
+    const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true
+    setIsStandalone(checkStandalone)
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+      // Only show banner if not already dismissed in this session
+      const dismissed = sessionStorage.getItem('pwa_install_dismissed')
+      if (!dismissed) {
+        setShowInstallBanner(true)
+      }
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  }, [])
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return
+    deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+    if (outcome === 'accepted') {
+      setShowInstallBanner(false)
+      setDeferredPrompt(null)
+    }
+  }
 
   const navSections = navForRole(role)
   const unreadCount = notifs.filter(n => !n.read).length
@@ -420,6 +457,35 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
               read: false,
             })
           })
+
+          // Check Staff 3-Month Confirmation Milestone
+          const { data: staffDirectory } = await supabase
+            .from('staff')
+            .select('id, full_name, staff_code, date_employed, job_title')
+            .eq('status', 'active')
+
+          const dueConfirmations: Array<{ id: string; name: string; staffCode: string; daysRemaining: number }> = []
+          ;(staffDirectory || []).forEach((st: any) => {
+            const conf = getStaffConfirmationStatus(st.date_employed)
+            if (conf && conf.isDueForConfirmation) {
+              dueConfirmations.push({
+                id: st.id,
+                name: st.full_name,
+                staffCode: st.staff_code,
+                daysRemaining: conf.daysRemaining
+              })
+
+              items.push({
+                id: `conf-${st.id}`,
+                title: conf.isOverdue ? 'Staff Confirmation Overdue' : 'Staff Confirmation Due (3 Months)',
+                message: `${st.full_name} (${st.staff_code}) is ${conf.isOverdue ? `overdue by ${Math.abs(conf.daysRemaining)} days` : `due for confirmation in ${conf.daysRemaining} days`} (Target: ${conf.confirmationDueDate}).`,
+                timestamp: conf.confirmationDueDate,
+                type: conf.isOverdue ? 'error' : 'warning',
+                read: false,
+              })
+            }
+          })
+          localStorage.setItem('hris_staff_confirmations_due', JSON.stringify(dueConfirmations))
         }
 
         if (role === 'accountant' || role === 'superadmin') {
@@ -469,6 +535,32 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
               .eq('profile_id', user.id)
               .maybeSingle()
             if (staffRow) {
+              // Fetch date_employed
+              const { data: stDetail } = await supabase
+                .from('staff')
+                .select('id, full_name, date_employed')
+                .eq('id', staffRow.id)
+                .maybeSingle()
+
+              if (stDetail?.date_employed) {
+                const conf = getStaffConfirmationStatus(stDetail.date_employed)
+                if (conf && conf.isDueForConfirmation) {
+                  localStorage.setItem('hris_self_confirmation_due', 'true')
+                  items.push({
+                    id: `self-conf-${stDetail.id}`,
+                    title: conf.isOverdue ? 'Employment Confirmation Review Overdue' : 'Employment Confirmation Milestone (3 Months)',
+                    message: conf.isOverdue
+                      ? `Your 3-month probation period ended on ${conf.confirmationDueDate}. Please reach out to HR for your official confirmation letter.`
+                      : `You have reached your 3-month employment confirmation milestone (${conf.daysRemaining} days remaining, Target: ${conf.confirmationDueDate}).`,
+                    timestamp: conf.confirmationDueDate,
+                    type: 'info',
+                    read: false,
+                  })
+                } else {
+                  localStorage.setItem('hris_self_confirmation_due', 'false')
+                }
+              }
+
               const { data: myLeaves } = await supabase
                 .from('leave_requests')
                 .select('id, start_date, end_date, created_at, leave_types(name)')
@@ -491,12 +583,20 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
         }
 
         setNotifs(items)
+        localStorage.setItem('hris_pending_actions_count', String(items.filter(i => !i.read).length))
+
+        // Trigger routine push reminders
+        try {
+          runRoutineReminders(role)
+        } catch (e) {}
       } catch (err) {
         console.error('Error fetching notifications:', err)
       }
     }
 
     fetchNotifications()
+    const interval = setInterval(fetchNotifications, 60000) // Periodic 1-minute check for reminders
+    return () => clearInterval(interval)
   }, [role, page])
 
   useEffect(() => {
@@ -980,7 +1080,7 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto relative bg-slate-50/60">
+        <main className="flex-1 overflow-y-auto relative bg-slate-50/60 pb-16 md:pb-0">
           {children}
 
           {/* Click outside to close menus */}
@@ -991,7 +1091,169 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
             />
           )}
         </main>
+
+        {/* ── Mobile Bottom Navigation Bar (PWA Touch Bar) ── */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-2 py-1.5 flex items-center justify-around shadow-lg">
+          {role === 'staff' ? (
+            <>
+              <button
+                onClick={() => onNavigate('st-dashboard')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'st-dashboard' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconGrid />
+                <span className="text-[10px]">Home</span>
+              </button>
+              <button
+                onClick={() => onNavigate('st-attendance')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'st-attendance' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconCalendar />
+                <span className="text-[10px]">Clock In</span>
+              </button>
+              <button
+                onClick={() => onNavigate('st-leave')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'st-leave' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconUmbrella />
+                <span className="text-[10px]">Leave</span>
+              </button>
+              <button
+                onClick={() => onNavigate('st-payslips')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'st-payslips' || page === 'st-payslip' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconFileText />
+                <span className="text-[10px]">Payslips</span>
+              </button>
+              <button
+                onClick={() => setMobileOpen(true)}
+                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500 hover:text-slate-800"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+                <span className="text-[10px]">Menu</span>
+              </button>
+            </>
+          ) : role === 'hr' ? (
+            <>
+              <button
+                onClick={() => onNavigate('hr-dashboard')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'hr-dashboard' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconGrid />
+                <span className="text-[10px]">Overview</span>
+              </button>
+              <button
+                onClick={() => onNavigate('hr-directory')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'hr-directory' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconUsers />
+                <span className="text-[10px]">Staff</span>
+              </button>
+              <button
+                onClick={() => onNavigate('hr-attendance-daily')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'hr-attendance-daily' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconCalendar />
+                <span className="text-[10px]">Attendance</span>
+              </button>
+              <button
+                onClick={() => onNavigate('hr-leave-mgmt')}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                  page === 'hr-leave-mgmt' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconUmbrella />
+                <span className="text-[10px]">Leave</span>
+              </button>
+              <button
+                onClick={() => setMobileOpen(true)}
+                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500 hover:text-slate-800"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+                <span className="text-[10px]">More</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => onNavigate(role === 'superadmin' ? 'sa-dashboard' : role === 'accountant' ? 'ac-dashboard' : 'au-dashboard')}
+                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-blue-600 font-semibold"
+              >
+                <IconGrid />
+                <span className="text-[10px]">Dashboard</span>
+              </button>
+              <button
+                onClick={() => setShowSearch(true)}
+                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500"
+              >
+                <IconSearch />
+                <span className="text-[10px]">Search</span>
+              </button>
+              <button
+                onClick={() => setMobileOpen(true)}
+                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+                <span className="text-[10px]">All Pages</span>
+              </button>
+            </>
+          )}
+        </nav>
       </div>
+
+      {/* ── PWA Install App Toast Banner ── */}
+      {showInstallBanner && !isStandalone && (
+        <aside
+          aria-label="Install Application"
+          className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-96 z-50 bg-slate-900/95 backdrop-blur-md text-white rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center gap-3.5 anim-fade-up"
+        >
+          <div className="w-11 h-11 rounded-xl bg-blue-600 flex-none flex items-center justify-center text-white font-bold text-sm shadow-md">
+            FO
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-semibold text-xs text-white leading-tight">Install Firstoption App</h4>
+            <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">
+              Install to your home screen for fast offline access and instant shift clock-in.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5 flex-none">
+            <button
+              onClick={handleInstallApp}
+              className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold shadow-xs transition-colors"
+            >
+              Install
+            </button>
+            <button
+              onClick={() => {
+                setShowInstallBanner(false)
+                sessionStorage.setItem('pwa_install_dismissed', 'true')
+              }}
+              className="text-[10px] text-slate-400 hover:text-white transition-colors text-center"
+            >
+              Dismiss
+            </button>
+          </div>
+        </aside>
+      )}
 
       {/* Notifications panel */}
       {showNotifications && (
@@ -1000,7 +1262,7 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
           <div className="fixed right-0 top-0 h-full w-full sm:w-96 bg-white shadow-2xl z-50 flex flex-col anim-slide-right">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
-                <h2 className="font-display font-semibold text-slate-800">Notifications</h2>
+                <h2 className="font-display font-semibold text-slate-800">Notifications & Alerts</h2>
                 <p className="text-xs text-slate-500">{unreadCount} unread</p>
               </div>
               <div className="flex items-center gap-2">
@@ -1012,6 +1274,38 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                 </button>
               </div>
             </div>
+
+            {/* Push Notification Opt-in Prompt */}
+            {'Notification' in window && Notification.permission !== 'granted' && (
+              <div className="p-3.5 mx-4 mt-3 bg-blue-50/90 border border-blue-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center flex-none">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-blue-950">Enable Push Notifications</div>
+                    <div className="text-[11px] text-blue-700 truncate">Get shift reminders & task alerts</div>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    const res = await requestNotificationPermission()
+                    if (res === 'granted') {
+                      sendLocalNotification({
+                        title: 'Notifications Enabled',
+                        body: 'You will now receive timely reminders for clock-in, approvals, and important company tasks.',
+                      })
+                    }
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex-none shadow-xs transition-colors"
+                >
+                  Enable
+                </button>
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto">
               {notifs.map(n => (
                 <div

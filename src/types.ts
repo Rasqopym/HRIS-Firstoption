@@ -5,7 +5,7 @@ export type Page =
   | 'sa-dashboard' | 'sa-users' | 'sa-settings' | 'sa-audit'
   | 'sa-salary-defaults' | 'sa-tax-bands'
   | 'hr-dashboard' | 'hr-directory' | 'hr-profile' | 'hr-add-staff' | 'hr-id-cards'
-  | 'hr-attendance-daily' | 'hr-attendance-summary' | 'hr-leave-mgmt' | 'hr-leave-config'
+  | 'hr-attendance-daily' | 'hr-attendance-summary' | 'hr-holidays' | 'hr-leave-mgmt' | 'hr-leave-config'
   | 'hr-appraisal-cycles' | 'hr-appraisal-form' | 'hr-appraisal-summary'
   | 'ac-dashboard' | 'ac-payroll' | 'ac-payslip' | 'ac-reports' | 'ac-tax-remittance'
   | 'au-dashboard' | 'au-audit' | 'au-flags' | 'au-compliance'
@@ -23,6 +23,8 @@ export interface StaffMember {
   department: string
   jobTitle: string
   employmentDate: string
+  isConfirmed?: boolean
+  confirmationDate?: string | null
   status: StaffStatus
   lastLogin: string
   phone: string
@@ -118,6 +120,19 @@ export interface SalaryTemplate {
 
 export type AttendanceStatus = 'present' | 'absent' | 'on_leave' | 'public_holiday' | 'weekend' | 'unmarked'
 
+export interface SiteVisit {
+  id: string
+  site_name: string
+  arrival_time: string
+  departure_time?: string | null
+  lat?: number | null
+  lng?: number | null
+  distance_meters?: number | null
+  purpose?: string
+  remarks?: string
+  status: 'in_progress' | 'completed'
+}
+
 export interface DayAttendance {
   date: string           // 'YYYY-MM-DD'
   status: AttendanceStatus
@@ -126,6 +141,11 @@ export interface DayAttendance {
   isLate?: boolean
   lateMinutes?: number
   distanceMeters?: number
+  workMode?: 'office' | 'field' | 'remote'
+  matchedLocationName?: string
+  fieldClientName?: string
+  fieldNotes?: string
+  siteVisits?: SiteVisit[]
   overtimeHours: number
   onSite: boolean
   overtimeApproval: 'none' | 'pending' | 'approved' | 'rejected'

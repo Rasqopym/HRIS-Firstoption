@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import * as XLSX from 'xlsx'
+import { calculateWorkingDaysInMonth, isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 
 interface StaffMember {
   id: string
@@ -14,6 +15,7 @@ interface AttendanceSummary {
   name: string
   department: string
   daysPresent: number
+  weekendShifts: number
   onTimeDays: number
   lateDays: number
   totalLateMinutes: number
@@ -34,7 +36,8 @@ const exportToExcel = (summaries: AttendanceSummary[], month: number, year: numb
       'Staff Name',
       'Staff Code',
       'Department',
-      'Days Present',
+      'Total Days Present',
+      'Weekend Shifts',
       'On-Time Days',
       'Late Days',
       'Total Late (Minutes)',
@@ -48,6 +51,7 @@ const exportToExcel = (summaries: AttendanceSummary[], month: number, year: numb
       s.staffId,
       s.department,
       s.daysPresent,
+      s.weekendShifts,
       s.onTimeDays,
       s.lateDays,
       s.totalLateMinutes,
@@ -71,6 +75,7 @@ export default function AttendanceSummary() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [summaries, setSummaries] = useState<AttendanceSummary[]>([])
+  const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
   const [loading, setLoading] = useState(true)
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -94,22 +99,34 @@ export default function AttendanceSummary() {
     }
   }
 
-  const getTotalWorkingDays = () => {
-    const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate()
-    let workingDays = 0
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dow = new Date(selectedYear, selectedMonth, d).getDay()
-      if (dow !== 0 && dow !== 6) {
-        workingDays++
-      }
-    }
-    return workingDays
+  const getWorkingDaysInfo = () => {
+    return calculateWorkingDaysInMonth(selectedYear, selectedMonth, customHolidays)
   }
 
   useEffect(() => {
     const fetchSummaries = async () => {
       setLoading(true)
       
+      let fetchedHolidays: PublicHoliday[] = []
+      try {
+        const { data: settingsData } = await supabase
+          .from('company_settings')
+          .select('custom_holidays')
+          .eq('id', 1)
+          .maybeSingle()
+
+        if (settingsData && Array.isArray(settingsData.custom_holidays)) {
+          fetchedHolidays = settingsData.custom_holidays
+          setCustomHolidays(settingsData.custom_holidays)
+        } else {
+          const cached = localStorage.getItem('hris_custom_holidays')
+          if (cached) {
+            fetchedHolidays = JSON.parse(cached)
+            setCustomHolidays(fetchedHolidays)
+          }
+        }
+      } catch (e) {}
+
       const { data: staffData, error: staffError } = await supabase
         .from('staff')
         .select('id, staff_code, full_name, departments(name)')
@@ -166,18 +183,53 @@ export default function AttendanceSummary() {
         attendanceByStaff[staff.id] = Object.values(staffRecordsMap)
       })
 
+      const today = new Date()
+      const isCurrentMonth = selectedMonth === today.getMonth() && selectedYear === today.getFullYear()
+      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate()
+      const lastEvaluatedDay = isCurrentMonth ? today.getDate() : daysInMonth
+      
+      let pastWorkingDays = 0
+      for (let d = 1; d <= lastEvaluatedDay; d++) {
+        const dateStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        const dow = new Date(selectedYear, selectedMonth, d).getDay()
+        if (dow !== 0 && dow !== 6) {
+          const isHoliday = isPublicHoliday(dateStr, fetchedHolidays)
+          if (!isHoliday) {
+            if (!isCurrentMonth || d < today.getDate()) {
+              pastWorkingDays++
+            }
+          }
+        }
+      }
+
       const computedSummaries: AttendanceSummary[] = staffWithDept.map(staff => {
         const records = attendanceByStaff[staff.id] || []
         
         const daysPresent = records.filter(r => r.status === 'present').length
+        const weekdayPresent = records.filter(r => {
+          if (r.status !== 'present') return false
+          const dow = new Date(r.attendance_date).getDay()
+          return dow !== 0 && dow !== 6
+        }).length
+
+        const weekendShifts = records.filter(r => {
+          if (r.status !== 'present') return false
+          const dow = new Date(r.attendance_date).getDay()
+          return dow === 0 || dow === 6
+        }).length
+
         const lateDays = records.filter(r => r.status === 'present' && (r.is_late || r.isLate)).length
         const onTimeDays = Math.max(0, daysPresent - lateDays)
         const totalLateMinutes = records
           .filter(r => r.status === 'present' && (r.is_late || r.isLate))
           .reduce((sum, r) => sum + (r.late_minutes || r.lateMinutes || 0), 0)
 
-        const daysAbsent = records.filter(r => r.status === 'absent').length
+        const explicitAbsent = records.filter(r => r.status === 'absent').length
         const daysOnLeave = records.filter(r => r.status === 'on_leave').length
+        // Missed weekday working days (excluding approved leave) - weekends are never counted as absent
+        const unrecordedAbsent = Math.max(0, pastWorkingDays - weekdayPresent - daysOnLeave)
+        const daysAbsent = Math.max(explicitAbsent, unrecordedAbsent)
+        
         const totalOvertimeHours = records.reduce((sum, r) => sum + (r.overtime_hours || r.overtimeHours || 0), 0)
         const approvedOvertimeHours = records
           .filter(r => r.overtime_approval === 'approved')
@@ -189,6 +241,7 @@ export default function AttendanceSummary() {
           name: staff.full_name,
           department: staff.department_name,
           daysPresent,
+          weekendShifts,
           onTimeDays,
           lateDays,
           totalLateMinutes,
@@ -215,33 +268,37 @@ export default function AttendanceSummary() {
     )
   }
 
-  const totalWorkingDays = getTotalWorkingDays()
+  const { totalWorkingDays, holidayCountOnWeekdays } = getWorkingDaysInfo()
   const avgDaysPresent = summaries.length > 0 
     ? (summaries.reduce((a, s) => a + s.daysPresent, 0) / summaries.length).toFixed(1)
     : '0'
   const totalLateCount = summaries.reduce((a, s) => a + s.lateDays, 0)
   const totalOTHours = summaries.reduce((a, s) => a + s.approvedOvertimeHours, 0).toFixed(1)
-  const staffOnLeave = summaries.filter(s => s.daysOnLeave > 0).length
+  const totalWeekendShifts = summaries.reduce((a, s) => a + s.weekendShifts, 0)
 
   return (
     <div className="p-4 sm:p-6 anim-fade-up space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">Monthly Attendance Summary</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{monthYearLabel} — monthly presence, lateness records, and overtime summary</p>
+          <p className="text-sm text-slate-500 mt-0.5">{monthYearLabel} — monthly presence, weekend shifts, lateness records, and overtime summary</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1">
-            <button onClick={handlePrevMonth} className="px-2.5 py-1 rounded hover:bg-slate-100 text-slate-600 font-bold">‹</button>
-            <span className="text-xs font-semibold text-slate-700 px-2 min-w-[120px] text-center">{monthYearLabel}</span>
-            <button onClick={handleNextMonth} className="px-2.5 py-1 rounded hover:bg-slate-100 text-slate-600 font-bold">›</button>
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 shadow-2xs">
+            <button onClick={handlePrevMonth} className="p-1.5 hover:bg-slate-100 rounded text-slate-600 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <span className="text-xs sm:text-sm font-semibold text-slate-700 px-2 min-w-[120px] text-center">{monthYearLabel}</span>
+            <button onClick={handleNextMonth} className="p-1.5 hover:bg-slate-100 rounded text-slate-600 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
           </div>
           <button 
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors shadow-2xs"
             onClick={() => exportToExcel(summaries, selectedMonth, selectedYear)}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export Excel
+            <span>Export Excel</span>
           </button>
         </div>
       </div>
@@ -250,34 +307,36 @@ export default function AttendanceSummary() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
           <div className="font-display font-bold text-2xl text-slate-800 font-mono-data">{totalWorkingDays}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Total Working Days</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">{monthYearLabel}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Standard Working Days</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            {holidayCountOnWeekdays > 0 ? `${holidayCountOnWeekdays} public holiday${holidayCountOnWeekdays > 1 ? 's' : ''} deducted` : 'Monday to Friday baseline'}
+          </div>
         </div>
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
           <div className="font-display font-bold text-2xl text-emerald-600 font-mono-data">{avgDaysPresent}</div>
           <div className="text-xs text-slate-500 mt-0.5">Avg Days Present</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Per staff member</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Includes weekend shifts</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+          <div className="font-display font-bold text-2xl text-indigo-600 font-mono-data">{totalWeekendShifts}</div>
+          <div className="text-xs text-slate-500 mt-0.5">Weekend Shifts Worked</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Saturday rota & Sunday OT</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
           <div className="font-display font-bold text-2xl text-amber-600 font-mono-data">{totalLateCount}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Total Late Arrivals</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Company-wide</div>
+          <div className="text-xs text-slate-500 mt-0.5">Late Arrivals</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Weekdays only</div>
         </div>
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
           <div className="font-display font-bold text-2xl text-violet-600 font-mono-data">{totalOTHours}h</div>
           <div className="text-xs text-slate-500 mt-0.5">Approved OT Hours</div>
           <div className="text-[10px] text-slate-400 mt-0.5">Billable for payroll</div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-          <div className="font-display font-bold text-2xl text-purple-600 font-mono-data">{staffOnLeave}</div>
-          <div className="text-xs text-slate-500 mt-0.5">Staff on Leave</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Taken this month</div>
-        </div>
       </div>
 
       {/* Summary Table */}
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto no-scrollbar">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/50">
@@ -285,6 +344,7 @@ export default function AttendanceSummary() {
                 <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-4 py-3">Code</th>
                 <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-4 py-3">Department</th>
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">Present</th>
+                <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">Weekend Shifts</th>
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">On Time</th>
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">Late (Mins)</th>
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">Absent</th>
@@ -300,6 +360,15 @@ export default function AttendanceSummary() {
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{s.staffId}</td>
                   <td className="px-4 py-3 text-xs text-slate-600">{s.department}</td>
                   <td className="px-3 py-3 text-center font-semibold text-emerald-600">{s.daysPresent}</td>
+                  <td className="px-3 py-3 text-center font-semibold text-indigo-600">
+                    {s.weekendShifts > 0 ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold">
+                        +{s.weekendShifts}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-center font-medium text-blue-600">{s.onTimeDays}</td>
                   <td className="px-3 py-3 text-center">
                     {s.lateDays > 0 ? (
