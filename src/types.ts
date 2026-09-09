@@ -3,7 +3,7 @@ export type StaffStatus = 'active' | 'suspended' | 'offboarded'
 
 export type Page =
   | 'sa-dashboard' | 'sa-users' | 'sa-settings' | 'sa-audit'
-  | 'sa-salary-defaults' | 'sa-tax-bands'
+  | 'sa-salary-defaults' | 'sa-tax-bands' | 'sa-appraisals'
   | 'hr-dashboard' | 'hr-directory' | 'hr-profile' | 'hr-add-staff' | 'hr-id-cards'
   | 'hr-attendance-daily' | 'hr-attendance-summary' | 'hr-holidays' | 'hr-leave-mgmt' | 'hr-leave-config'
   | 'hr-appraisal-cycles' | 'hr-appraisal-form' | 'hr-appraisal-summary'

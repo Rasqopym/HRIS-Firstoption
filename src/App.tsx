@@ -13,6 +13,7 @@ import UserManagement from './pages/superadmin/UserManagement'
 import SystemSettings from './pages/superadmin/SystemSettings'
 import SalaryDefaults from './pages/superadmin/SalaryDefaults'
 import TaxBands from './pages/superadmin/TaxBands'
+import AppraisalBuilder from './pages/superadmin/AppraisalBuilder'
 
 // HR pages
 import HRDashboard from './pages/hr/HRDashboard'
@@ -328,6 +329,7 @@ export default function App() {
       case 'sa-audit': return <AuditTrail key={page} />
       case 'sa-salary-defaults': return <SalaryDefaults key={page} />
       case 'sa-tax-bands': return <TaxBands key={page} />
+      case 'sa-appraisals': return <AppraisalBuilder key={page} onNavigate={navigate} />
 
       // HR
       case 'hr-dashboard': return <HRDashboard key={page} onNavigate={navigate} onSelectStaff={setSelectedStaffId} />

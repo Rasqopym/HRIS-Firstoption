@@ -156,7 +156,7 @@ export interface DepartmentKPI {
 export const DEPARTMENT_KPIS: DepartmentKPI[] = [
   {
     key: 'sales',
-    label: 'Sales / Business Development',
+    label: 'Sales & Marketing / Business Development',
     items: [
       { key: 'sales_target', label: 'Sales/revenue target achievement', weight: 30 },
       { key: 'new_customers', label: 'New customer acquisition', weight: 15 },
@@ -169,7 +169,7 @@ export const DEPARTMENT_KPIS: DepartmentKPI[] = [
   },
   {
     key: 'technical',
-    label: 'Technical / Solar Installation',
+    label: 'Technical & Field Services / Solar Installation',
     items: [
       { key: 'install_quality', label: 'Installation/service quality', weight: 25 },
       { key: 'tech_accuracy', label: 'Technical accuracy & competence', weight: 20 },
@@ -182,43 +182,183 @@ export const DEPARTMENT_KPIS: DepartmentKPI[] = [
   },
   {
     key: 'customer_service',
-    label: 'Customer Service',
+    label: 'Customer Support / Customer Service',
     items: [
-      { key: 'csat', label: 'Customer satisfaction', weight: 25 },
-      { key: 'response_time', label: 'Response time', weight: 20 },
-      { key: 'complaint_resolution', label: 'Complaint resolution', weight: 20 },
+      { key: 'csat', label: 'Customer satisfaction (CSAT)', weight: 25 },
+      { key: 'response_time', label: 'Response & resolution time', weight: 20 },
+      { key: 'complaint_resolution', label: 'Complaint resolution rate', weight: 20 },
       { key: 'followup_effectiveness', label: 'Follow-up effectiveness', weight: 15 },
-      { key: 'comm_quality', label: 'Communication quality', weight: 10 },
-      { key: 'record_keeping', label: 'Record keeping', weight: 10 },
+      { key: 'comm_quality', label: 'Communication quality & empathy', weight: 10 },
+      { key: 'record_keeping', label: 'Record keeping & ticket logging', weight: 10 },
     ],
   },
   {
     key: 'marketing',
-    label: 'Marketing / Branding',
+    label: 'Media & Marketing / Branding',
     items: [
-      { key: 'campaign_performance', label: 'Campaign performance', weight: 20 },
-      { key: 'lead_gen', label: 'Lead generation/conversion contribution', weight: 20 },
-      { key: 'content_output', label: 'Content output & quality', weight: 15 },
-      { key: 'brand_consistency', label: 'Brand consistency', weight: 15 },
-      { key: 'digital_engagement', label: 'Digital engagement/growth', weight: 10 },
-      { key: 'campaign_execution', label: 'Campaign execution', weight: 10 },
+      { key: 'campaign_performance', label: 'Campaign performance & reach', weight: 20 },
+      { key: 'lead_gen', label: 'Lead generation contribution', weight: 20 },
+      { key: 'content_output', label: 'Content output & creative quality', weight: 15 },
+      { key: 'brand_consistency', label: 'Brand consistency & guidelines', weight: 15 },
+      { key: 'digital_engagement', label: 'Digital engagement & growth', weight: 10 },
+      { key: 'campaign_execution', label: 'Campaign execution & timeliness', weight: 10 },
       { key: 'mkt_reporting', label: 'Reporting & analytics', weight: 10 },
     ],
   },
   {
-    key: 'admin',
-    label: 'Administration / Operations',
+    key: 'finance',
+    label: 'Accounting & Finance',
     items: [
-      { key: 'task_completion', label: 'Task completion', weight: 20 },
+      { key: 'fin_accuracy', label: 'Financial records accuracy & reconciliation', weight: 25 },
+      { key: 'invoicing_collections', label: 'Timely invoicing & collections', weight: 20 },
+      { key: 'statutory_compliance', label: 'Tax & statutory compliance', weight: 20 },
+      { key: 'cost_control', label: 'Cost control & budget tracking', weight: 15 },
+      { key: 'audit_readiness', label: 'Audit readiness & record keeping', weight: 10 },
+      { key: 'payroll_timeliness', label: 'Vendor & payroll timeliness', weight: 10 },
+    ],
+  },
+  {
+    key: 'hr',
+    label: 'Human Resources & Administration',
+    items: [
+      { key: 'recruitment_onboarding', label: 'Recruitment & onboarding efficiency', weight: 20 },
+      { key: 'records_accuracy', label: 'Staff records & file accuracy', weight: 20 },
+      { key: 'policy_compliance', label: 'Policy compliance & labor law adherence', weight: 15 },
+      { key: 'attendance_oversight', label: 'Attendance & leave oversight', weight: 15 },
+      { key: 'workplace_relations', label: 'Employee relations & workplace morale', weight: 15 },
+      { key: 'facility_admin', label: 'Facility & general administration', weight: 15 },
+    ],
+  },
+  {
+    key: 'admin',
+    label: 'General Operations & Administration',
+    items: [
+      { key: 'task_completion', label: 'Daily task completion & output', weight: 20 },
       { key: 'accuracy_docs', label: 'Accuracy & documentation', weight: 20 },
-      { key: 'admin_efficiency', label: 'Administrative efficiency', weight: 15 },
-      { key: 'process_compliance', label: 'Process compliance', weight: 15 },
-      { key: 'timeliness', label: 'Timeliness', weight: 15 },
-      { key: 'internal_support', label: 'Internal support', weight: 10 },
-      { key: 'admin_reporting', label: 'Reporting', weight: 5 },
+      { key: 'admin_efficiency', label: 'Operational efficiency & flow', weight: 15 },
+      { key: 'process_compliance', label: 'Process compliance & SLA adherence', weight: 15 },
+      { key: 'timeliness', label: 'Punctuality & turnaround timeliness', weight: 15 },
+      { key: 'internal_support', label: 'Cross-team operational support', weight: 10 },
+      { key: 'admin_reporting', label: 'Operational reporting & logging', weight: 5 },
     ],
   },
 ]
+
+export function getKpiItemsForDepartment(deptNameOrKey: string): { key: string; label: string; items: KPIItem[] } {
+  if (!deptNameOrKey) return DEPARTMENT_KPIS[0]
+
+  const normalized = deptNameOrKey.toLowerCase().trim()
+
+  // 1. Direct match by key or label
+  const direct = DEPARTMENT_KPIS.find(d => d.key.toLowerCase() === normalized || d.label.toLowerCase() === normalized)
+  if (direct) return direct
+
+  // 2. Keyword-based matching
+  if (normalized.includes('account') || normalized.includes('finance') || normalized.includes('audit')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'finance') || DEPARTMENT_KPIS[4]
+  }
+  if (normalized.includes('solar') || normalized.includes('field') || normalized.includes('install') || normalized.includes('engineer') || normalized.includes('tech')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'technical') || DEPARTMENT_KPIS[1]
+  }
+  if (normalized.includes('sale') || normalized.includes('commercial') || normalized.includes('business dev')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'sales') || DEPARTMENT_KPIS[0]
+  }
+  if (normalized.includes('customer') || normalized.includes('support') || normalized.includes('service') || normalized.includes('care') || normalized.includes('client')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'customer_service') || DEPARTMENT_KPIS[2]
+  }
+  if (normalized.includes('market') || normalized.includes('brand') || normalized.includes('media') || normalized.includes('digital') || normalized.includes('creative')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'marketing') || DEPARTMENT_KPIS[3]
+  }
+  if (normalized.includes('human') || normalized.includes('hr') || normalized.includes('personnel') || normalized.includes('people')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'hr') || DEPARTMENT_KPIS[5]
+  }
+  if (normalized.includes('operat') || normalized.includes('admin') || normalized.includes('logistics')) {
+    return DEPARTMENT_KPIS.find(d => d.key === 'admin') || DEPARTMENT_KPIS[6]
+  }
+
+  // 3. Fallback customized for any new system department
+  return {
+    key: normalized.replace(/\s+/g, '_'),
+    label: deptNameOrKey,
+    items: [
+      { key: 'task_completion', label: `${deptNameOrKey} Target & Goal Achievement`, weight: 25 },
+      { key: 'accuracy_docs', label: 'Quality, Accuracy & Documentation', weight: 25 },
+      { key: 'process_compliance', label: 'Process Compliance & Operational SLA', weight: 20 },
+      { key: 'timeliness', label: 'Turnaround Timeliness & Responsiveness', weight: 15 },
+      { key: 'internal_support', label: 'Inter-Departmental Support & Synergy', weight: 15 },
+    ],
+  }
+}
+
+export function templateHasKpiSection(template: any): boolean {
+  if (!template || !template.sections) return false
+  return template.sections.some((s: any) =>
+    s.key === 'role_kpis' || s.id === 'sec-kpis' || s.title?.toLowerCase().includes('kpi')
+  )
+}
+
+export function getAvailableTemplateDeptCategories(
+  template: any,
+  systemDepartments?: { id: string; name: string }[]
+): { key: string; label: string }[] {
+  const kpiSection = template?.sections?.find((s: any) =>
+    s.key === 'role_kpis' || s.id === 'sec-kpis' || s.title?.toLowerCase().includes('kpi')
+  )
+  if (kpiSection?.items && kpiSection.items.length > 0) {
+    const uniqueKeys = Array.from(new Set(kpiSection.items.map((i: any) => i.categoryKey || i.targetDepartments?.[0]).filter(Boolean))) as string[]
+    return uniqueKeys.map(k => {
+      const existing = DEPARTMENT_KPIS.find(d => d.key === k)
+      if (existing) return { key: existing.key, label: existing.label }
+      return { key: k, label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }
+    })
+  }
+  if (systemDepartments && systemDepartments.length > 0) {
+    return systemDepartments.map(d => {
+      const match = getKpiItemsForDepartment(d.name)
+      return { key: match.key, label: d.name }
+    })
+  }
+  return DEPARTMENT_KPIS
+}
+
+export function resolveTemplateDeptKpis(
+  template: any,
+  deptNameOrKey: string
+): { key: string; label: string; items: KPIItem[] } {
+  const fallback = getKpiItemsForDepartment(deptNameOrKey)
+  if (!template || !template.sections) return fallback
+
+  const kpiSection = template.sections.find((s: any) =>
+    s.key === 'role_kpis' || s.id === 'sec-kpis' || s.title?.toLowerCase().includes('kpi')
+  )
+  if (!kpiSection || !kpiSection.items || kpiSection.items.length === 0) {
+    return fallback
+  }
+
+  const normalized = (deptNameOrKey || '').toLowerCase().trim()
+  const matchedKey = fallback.key
+
+  const filtered = kpiSection.items.filter((it: any) => {
+    const itCat = (it.categoryKey || '').toLowerCase()
+    return itCat === matchedKey ||
+           itCat === normalized ||
+           it.targetDepartments?.some((d: string) => d.toLowerCase() === normalized)
+  })
+
+  if (filtered.length > 0) {
+    return {
+      key: matchedKey,
+      label: fallback.label,
+      items: filtered.map((it: any) => ({
+        key: it.key || it.id,
+        label: it.text || it.label || '',
+        weight: it.weight || 10,
+      }))
+    }
+  }
+
+  return fallback
+}
 
 
 // ══════════════════════════════════════════════════════════
@@ -337,3 +477,55 @@ export function calcFinalScore(avg360: number, avgKPI: number, avgSupervisor: nu
   const totalWeighted = weighted360 + weightedKPI + weightedSupervisor
   return (totalWeighted / 5) * 100
 }
+
+// ══════════════════════════════════════════════════════════
+// DYNAMIC APPRAISAL & CROSS-REFERENCE INTEGRATION HELPERS
+// ══════════════════════════════════════════════════════════
+
+export interface CrossReferenceMatch {
+  isCrossRef: boolean
+  rule?: {
+    id: string
+    evaluatorDepartment: string
+    targetDepartment: string
+    description: string
+    isMandatory: boolean
+  }
+}
+
+/**
+ * Get active template cross-reference rules from local cache / state
+ */
+export function getActiveCrossRefRules(): any[] {
+  try {
+    const raw = localStorage.getItem('hris_appraisal_templates_v2')
+    if (raw) {
+      const templates = JSON.parse(raw)
+      const active = templates.find((t: any) => t.isActive) || templates[0]
+      if (active?.crossReferences) return active.crossReferences
+    }
+  } catch (e) {}
+  return [
+    { id: 'cr-1', evaluatorDepartment: 'Sales & Marketing', targetDepartment: 'General Operations', description: 'Evaluate operational responsiveness to sales orders', isMandatory: true },
+    { id: 'cr-2', evaluatorDepartment: 'Accounting & Finance', targetDepartment: 'Sales & Marketing', description: 'Evaluate invoicing accuracy and documentation', isMandatory: true },
+  ]
+}
+
+/**
+ * Check if a reviewer is evaluating an employee as part of a Cross-Department pairing
+ */
+export function checkCrossDepartmentReview(reviewerDept?: string, employeeDept?: string): CrossReferenceMatch {
+  if (!reviewerDept || !employeeDept || reviewerDept === employeeDept) {
+    return { isCrossRef: false }
+  }
+  const rules = getActiveCrossRefRules()
+  const matched = rules.find(
+    r => (r.evaluatorDepartment.toLowerCase() === reviewerDept.toLowerCase()) &&
+         (r.targetDepartment.toLowerCase() === employeeDept.toLowerCase())
+  )
+  if (matched) {
+    return { isCrossRef: true, rule: matched }
+  }
+  return { isCrossRef: false }
+}
+

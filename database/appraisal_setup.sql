@@ -146,7 +146,7 @@ CREATE TABLE public.appraisal_qualitative_responses (
 -- (Cached computed scores + HR-editable fields)
 -- ────────────────────────────────────────────────────────────
 
-CREATE TABLE public.appraisal_final_summary (
+CREATE TABLE IF NOT EXISTS public.appraisal_final_summary (
   id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   cycle_id                UUID        NOT NULL REFERENCES public.appraisal_cycles(id) ON DELETE CASCADE,
   employee_id             UUID        NOT NULL REFERENCES public.staff(id) ON DELETE CASCADE,
@@ -175,6 +175,28 @@ CREATE TABLE public.appraisal_final_summary (
 
 
 -- ────────────────────────────────────────────────────────────
+-- TABLE 9: APPRAISAL TEMPLATES & CUSTOM BUILDER BLUEPRINTS
+-- (Stores custom appraisal structures, weights, and items)
+-- ────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.appraisal_templates (
+  id                  TEXT        PRIMARY KEY,
+  name                TEXT        NOT NULL,
+  code                TEXT        NOT NULL,
+  description         TEXT,
+  framework_type      TEXT        NOT NULL DEFAULT 'annual_360',
+  target_roles        JSONB       DEFAULT '[]',
+  target_departments  JSONB       DEFAULT '[]',
+  is_default          BOOLEAN     DEFAULT false,
+  is_active           BOOLEAN     DEFAULT true,
+  sections            JSONB       NOT NULL DEFAULT '[]',
+  cross_references    JSONB       DEFAULT '[]',
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  updated_at          TIMESTAMPTZ DEFAULT now()
+);
+
+
+-- ────────────────────────────────────────────────────────────
 -- ENABLE ROW LEVEL SECURITY
 -- ────────────────────────────────────────────────────────────
 
@@ -186,6 +208,7 @@ ALTER TABLE public.appraisal_self_responses         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appraisal_supervisor_responses   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appraisal_qualitative_responses  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appraisal_final_summary          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.appraisal_templates              ENABLE ROW LEVEL SECURITY;
 
 
 -- ────────────────────────────────────────────────────────────
@@ -348,6 +371,16 @@ CREATE POLICY "Employee: read own final summary" ON public.appraisal_final_summa
   );
 
 
+-- ── APPRAISAL TEMPLATES ────────────────────────────────────
+
+CREATE POLICY "Authenticated: read appraisal templates" ON public.appraisal_templates
+  FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "Super admin + HR: manage appraisal templates" ON public.appraisal_templates
+  FOR ALL USING (get_my_role() IN ('super_admin', 'hr'));
+
+
 -- ════════════════════════════════════════════════════════════
 -- DONE ✅  Appraisal module tables and policies are ready.
 -- ════════════════════════════════════════════════════════════
+

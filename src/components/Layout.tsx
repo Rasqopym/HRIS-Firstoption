@@ -195,6 +195,7 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
         {
           section: 'Management', items: [
             { label: 'User Management', page: 'sa-users', icon: <IconUsers /> },
+            { label: 'Appraisal & Assessments', page: 'sa-appraisals', icon: <IconClipboardCheck /> },
             { label: 'System Settings', page: 'sa-settings', icon: <IconSettings /> },
           ],
         },

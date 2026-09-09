@@ -155,8 +155,44 @@ CREATE INDEX IF NOT EXISTS idx_attendance_records_is_late ON public.attendance_r
 
 
 -- ──────────────────────────────────────────────────────────────────────────────
--- 4. PERFORMANCE APPRAISAL & GOAL SETTING MODULE
+-- 4. PERFORMANCE APPRAISAL, TEMPLATES & GOAL SETTING MODULE
 -- ──────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.appraisal_templates (
+  id VARCHAR(100) PRIMARY KEY,
+  name TEXT NOT NULL,
+  code VARCHAR(50) NOT NULL,
+  description TEXT,
+  framework_type VARCHAR(50) DEFAULT 'annual_360',
+  target_roles JSONB DEFAULT '["all"]'::jsonb,
+  target_departments JSONB DEFAULT '["all"]'::jsonb,
+  is_default BOOLEAN DEFAULT FALSE,
+  is_active BOOLEAN DEFAULT TRUE,
+  sections JSONB DEFAULT '[]'::jsonb,
+  cross_references JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.appraisal_templates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow authenticated to view appraisal templates" ON public.appraisal_templates;
+CREATE POLICY "Allow authenticated to view appraisal templates"
+ON public.appraisal_templates FOR SELECT
+TO authenticated
+USING (true);
+
+DROP POLICY IF EXISTS "Allow Admins and HR to manage appraisal templates" ON public.appraisal_templates;
+CREATE POLICY "Allow Admins and HR to manage appraisal templates"
+ON public.appraisal_templates FOR ALL
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE profiles.id = auth.uid()
+    AND profiles.role IN ('super_admin', 'hr')
+  )
+);
 
 CREATE TABLE IF NOT EXISTS public.appraisal_cycles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
