@@ -20,6 +20,7 @@ import {
   getActiveAiModel,
   DEFAULT_GROQ_MODEL,
   DEFAULT_GEMINI_MODEL,
+  saveAiConfigToSupabase,
 } from '../../lib/geminiService'
 import {
   IconSparkles,
@@ -101,7 +102,7 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
   }
 
   // Save Config
-  const handleSave = () => {
+  const handleSave = async () => {
     setAiProvider(provider)
     if (provider === 'groq') {
       setGroqApiKey(groqKey)
@@ -110,6 +111,15 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
       setGeminiApiKey(geminiKey)
       setGeminiModel(geminiModel)
     }
+
+    // Persist to Supabase so all staff on any device inherit the key
+    await saveAiConfigToSupabase({
+      provider,
+      groqKey,
+      groqModel,
+      geminiKey,
+      geminiModel,
+    })
 
     setSavedSuccess(true)
     setTimeout(() => {

@@ -5,9 +5,11 @@
  *
  * KEY STORAGE POLICY:
  *   Only SuperAdmin can configure the AI Provider and API key.
- *   The key is stored once in the shared browser-storage key below and read
- *   transparently by all staff — no per-user override is allowed.
+ *   Settings are persisted to Supabase `app_settings` so they apply
+ *   to every user/device — localStorage is only used as a read-through cache.
  */
+
+import { supabase } from './supabase'
 
 // ── Provider & Key Storage Keys ──────────────────────────────────────────────
 export type AiProvider = 'groq' | 'gemini'
@@ -180,6 +182,65 @@ export function getActiveAiModel(): string {
 export function getActiveAiProviderLabel(): string {
   const provider = getAiProvider()
   return provider === 'groq' ? `Groq (${getGroqModel()})` : 'Google Gemini'
+}
+
+// ── Supabase Sync (shared across all users/devices) ──────────────────────────
+
+/**
+ * Save AI config to Supabase `app_settings` table.
+ * Called by SuperAdmin when they save the settings modal.
+ * All other staff load this on workspace mount so they get the same key.
+ */
+export async function saveAiConfigToSupabase(cfg: {
+  provider: AiProvider
+  groqKey: string
+  groqModel: string
+  geminiKey: string
+  geminiModel: string
+}): Promise<void> {
+  const rows = [
+    { key: 'ai_provider',    value: cfg.provider    },
+    { key: 'ai_groq_key',   value: cfg.groqKey    },
+    { key: 'ai_groq_model', value: cfg.groqModel  },
+    { key: 'ai_gemini_key', value: cfg.geminiKey  },
+    { key: 'ai_gemini_model', value: cfg.geminiModel },
+  ]
+  for (const row of rows) {
+    await supabase
+      .from('app_settings')
+      .upsert({ key: row.key, value: row.value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+  }
+}
+
+/**
+ * Load AI config from Supabase and cache in localStorage.
+ * Call this on workspace mount for every role so all staff inherit
+ * the SuperAdmin-configured key automatically.
+ * Returns true if a valid key was found and applied.
+ */
+export async function loadAiConfigFromSupabase(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('key, value')
+      .in('key', ['ai_provider', 'ai_groq_key', 'ai_groq_model', 'ai_gemini_key', 'ai_gemini_model'])
+
+    if (error || !data || data.length === 0) return false
+
+    const map: Record<string, string> = {}
+    for (const row of data) map[row.key] = row.value
+
+    if (map['ai_provider'])    setAiProvider(map['ai_provider'] as AiProvider)
+    if (map['ai_groq_key'])    setGroqApiKey(map['ai_groq_key'])
+    if (map['ai_groq_model'])  setGroqModel(map['ai_groq_model'])
+    if (map['ai_gemini_key'])  setGeminiApiKey(map['ai_gemini_key'])
+    if (map['ai_gemini_model']) setGeminiModel(map['ai_gemini_model'])
+
+    return isAiConfigured()
+  } catch (e) {
+    console.warn('[AI] Could not load config from Supabase:', e)
+    return false
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

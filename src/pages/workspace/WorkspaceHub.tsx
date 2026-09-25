@@ -68,7 +68,7 @@ import {
 import TaskBoard from './TaskBoard'
 import GeminiSettingsModal from '../../components/workspace/GeminiSettingsModal'
 import RichChatMessage from '../../components/workspace/RichChatMessage'
-import { generateChatCopilotResponse, isGeminiConfigured, getAiProvider } from '../../lib/geminiService'
+import { generateChatCopilotResponse, isGeminiConfigured, getAiProvider, loadAiConfigFromSupabase } from '../../lib/geminiService'
 import TeamMonitoring from './TeamMonitoring'
 
 interface Props {
@@ -177,9 +177,11 @@ export default function WorkspaceHub({
 
   const canAccessExecutiveDigest = isWorkspaceAdmin || isSquadLead
 
-  // 1. Initial Load: Workspaces & Staff Directory
+  // 1. Initial Load: Workspaces & Staff Directory + AI Config from Supabase
   useEffect(() => {
     loadInitialData()
+    // Load AI config from Supabase so all roles inherit SuperAdmin-configured key
+    loadAiConfigFromSupabase()
   }, [])
 
   const loadInitialData = async () => {
@@ -1738,8 +1740,13 @@ export default function WorkspaceHub({
                           }
                         }
                         if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          handleSendMessage(e)
+                          // On touch/mobile devices: Enter = newline (the send button is used to send).
+                          // On desktop: Enter = send (Shift+Enter = newline).
+                          const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+                          if (!isMobile) {
+                            e.preventDefault()
+                            handleSendMessage(e)
+                          }
                         }
                       }}
                       className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none font-medium text-slate-800"
