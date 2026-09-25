@@ -1740,10 +1740,9 @@ export default function WorkspaceHub({
                           }
                         }
                         if (e.key === 'Enter' && !e.shiftKey) {
-                          // On touch/mobile devices: Enter = newline (the send button is used to send).
-                          // On desktop: Enter = send (Shift+Enter = newline).
-                          const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-                          if (!isMobile) {
+                          // Enter always inserts a new line on all devices.
+                          // Use the Send button or Ctrl+Enter to send.
+                          if (e.ctrlKey || e.metaKey) {
                             e.preventDefault()
                             handleSendMessage(e)
                           }
