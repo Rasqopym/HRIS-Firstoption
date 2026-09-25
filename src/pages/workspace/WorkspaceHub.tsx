@@ -1710,7 +1710,7 @@ export default function WorkspaceHub({
                     <textarea
                       ref={textareaRef}
                       rows={2}
-                      placeholder="Message #${selectedChannel?.name || 'channel'} or tag @ai..."
+                      placeholder={`Message #${selectedChannel?.name || 'channel'} or tag @ai…`}
                       value={inputText}
                       onChange={handleInputChange}
                       onPaste={handlePaste}
