@@ -155,7 +155,8 @@ export default function WorkspaceHub({
     draft: ExtractedTaskDraft
   } | null>(null)
 
-  const [showRightSidebar, setShowRightSidebar] = useState(true)
+  const [showRightSidebar, setShowRightSidebar] = useState(false)
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
   // ── Role-Based Access Control (RBAC) ──
@@ -1053,15 +1054,15 @@ export default function WorkspaceHub({
   }
 
   return (
-    <div className="h-[calc(100vh-80px)] flex flex-col bg-slate-100 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="h-[calc(100dvh-135px)] md:h-[calc(100vh-80px)] flex flex-col bg-slate-100 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       {/* ═══════════════════════════════════════════════════ */}
       {/* TOP WORKSPACE NAVIGATION & TAB HEADER               */}
       {/* ═══════════════════════════════════════════════════ */}
-      <div className="bg-white border-b border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="bg-white border-b border-slate-200 px-3 py-2 sm:px-4 sm:py-2.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0">
+        <div className="flex items-center justify-between gap-2 min-w-0">
           {/* Workspace Selector */}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-black flex items-center justify-center text-sm shadow-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-blue-600 text-white font-black flex items-center justify-center text-xs sm:text-sm shadow-xs shrink-0">
               {selectedWorkspace?.name.charAt(0) || 'W'}
             </div>
             <select
@@ -1070,18 +1071,18 @@ export default function WorkspaceHub({
                 const ws = workspaces.find(w => w.id === e.target.value)
                 if (ws) setSelectedWorkspace(ws)
               }}
-              className="font-bold text-sm text-slate-800 bg-transparent border-none outline-none cursor-pointer hover:text-blue-600 max-w-[200px]"
+              className="font-bold text-xs sm:text-sm text-slate-800 bg-transparent border-none outline-none cursor-pointer hover:text-blue-600 truncate max-w-[130px] sm:max-w-[200px]"
             >
               {workspaces.map(w => (
                 <option key={w.id} value={w.id}>{w.name}</option>
               ))}
             </select>
             {(role === 'superadmin' || role === 'hr') && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => setShowNewWorkspaceModal(true)}
                   title="Create Workspace"
-                  className="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold transition-colors"
+                  className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold transition-colors"
                 >
                   +
                 </button>
@@ -1089,50 +1090,49 @@ export default function WorkspaceHub({
                   <button
                     onClick={() => handleDeleteWorkspace(selectedWorkspace.id, selectedWorkspace.name)}
                     title={`Delete workspace "${selectedWorkspace.name}"`}
-                    className="w-6 h-6 rounded-md bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-600 flex items-center justify-center text-xs transition-colors"
+                    className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-600 flex items-center justify-center text-xs transition-colors"
                   >
-                    <IconTrash className="w-3.5 h-3.5" />
+                    <IconTrash className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   </button>
                 )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Current Team & Channel Indicator (Desktop only) */}
+            {selectedTeam && selectedChannel && (
+              <div className="items-center gap-1 text-xs text-slate-600 hidden lg:flex">
+                <span className="font-semibold text-slate-800">{selectedTeam.name}</span>
+                <span>/</span>
+                <span className="font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                  #{selectedChannel.name}
+                </span>
               </div>
             )}
 
             {/* Manage Workspace Members & Roles Button */}
             <button
               onClick={() => setShowWorkspaceMembersModal(true)}
-              className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs flex items-center gap-1.5 transition-colors border border-blue-200/60 shadow-xs"
+              className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs flex items-center gap-1 transition-colors border border-blue-200/60 shadow-xs"
               title="Manage workspace members and assign Admins/Leads"
             >
               <IconUsers className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">Members & Admins</span>
+              <span className="hidden sm:inline">Members</span>
               <span className="bg-blue-200/80 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-black">
                 {workspaceMembers.length}
               </span>
             </button>
           </div>
-
-          <div className="h-4 w-px bg-slate-200 hidden sm:block"></div>
-
-          {/* Current Team & Channel Indicator */}
-          {selectedTeam && selectedChannel && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-600 hidden md:flex">
-              <span className="font-semibold text-slate-800">{selectedTeam.name}</span>
-              <span>/</span>
-              <span className="font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                #{selectedChannel.name}
-              </span>
-            </div>
-          )}
         </div>
 
-        {/* AI Engine Settings & View Switcher */}
-        <div className="flex items-center gap-2">
+        {/* AI Engine Settings & View Switcher (Scrollable horizontally on mobile) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full sm:w-auto pb-0.5 sm:pb-0">
           {role === 'superadmin' ? (
-            /* SuperAdmin: full config button */
             <button
               onClick={() => setShowGeminiSettingsModal(true)}
               title="Configure Org-Wide Workspace AI (Super Admin Only)"
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-white ${
+              className={`px-2.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer text-white shrink-0 ${
                 getAiProvider() === 'groq'
                   ? 'bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700'
                   : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700'
@@ -1146,11 +1146,10 @@ export default function WorkspaceHub({
               <span>Workspace AI</span>
             </button>
           ) : (
-            /* All other roles: read-only status indicator */
             <button
               onClick={() => setShowGeminiSettingsModal(true)}
               title={isGeminiConfigured() ? 'Workspace AI is active' : 'AI not configured — contact your Super Admin'}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer border ${
+              className={`px-2.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer border shrink-0 ${
                 isGeminiConfigured()
                   ? getAiProvider() === 'groq'
                     ? 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100'
@@ -1166,63 +1165,79 @@ export default function WorkspaceHub({
               <span>{isGeminiConfigured() ? 'AI Active' : 'AI Off'}</span>
             </button>
           )}
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeTab === 'chat'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <IconChat className="w-3.5 h-3.5" />
-            <span>Team Chat</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('tasks')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeTab === 'tasks'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <IconKanban className="w-3.5 h-3.5" />
-            <span>Kanban & Tasks</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('calendar')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeTab === 'calendar'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <IconCalendar className="w-3.5 h-3.5" />
-            <span>Task Calendar</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('monitoring')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeTab === 'monitoring'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <IconChart className="w-3.5 h-3.5" />
-            <span>Monitoring & Standups</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('scorecard')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeTab === 'scorecard'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <IconSparkles className={`w-3.5 h-3.5 ${canAccessExecutiveDigest ? 'text-amber-500' : 'text-blue-500'}`} />
-            <span>{canAccessExecutiveDigest ? 'KPI Scorecard & Digest' : 'My Performance'}</span>
-          </button>
-        </div>
+
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+            <button
+              onClick={() => {
+                setActiveTab('chat')
+                setShowMobileSidebar(false)
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'chat'
+                  ? 'bg-white text-blue-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconChat className="w-3.5 h-3.5" />
+              <span>Team Chat</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('tasks')
+                setShowMobileSidebar(false)
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'tasks'
+                  ? 'bg-white text-blue-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconKanban className="w-3.5 h-3.5" />
+              <span>Kanban & Tasks</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('calendar')
+                setShowMobileSidebar(false)
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'calendar'
+                  ? 'bg-white text-blue-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconCalendar className="w-3.5 h-3.5" />
+              <span>Calendar</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('monitoring')
+                setShowMobileSidebar(false)
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'monitoring'
+                  ? 'bg-white text-blue-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconChart className="w-3.5 h-3.5" />
+              <span>Monitoring</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('scorecard')
+                setShowMobileSidebar(false)
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'scorecard'
+                  ? 'bg-white text-blue-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconSparkles className={`w-3.5 h-3.5 ${canAccessExecutiveDigest ? 'text-amber-500' : 'text-blue-500'}`} />
+              <span>{canAccessExecutiveDigest ? 'KPI Scorecard' : 'Performance'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1231,7 +1246,21 @@ export default function WorkspaceHub({
       {/* ═══════════════════════════════════════════════════ */}
       <div className="flex-1 flex overflow-hidden">
         {/* ── LEFT SIDEBAR: TEAMS & CHANNELS ── */}
-        <div className="w-64 bg-slate-900 text-slate-200 flex flex-col shrink-0 border-r border-slate-800">
+        <div className={`bg-slate-900 text-slate-200 flex flex-col shrink-0 border-r border-slate-800 transition-all ${showMobileSidebar ? 'w-full flex-1' : 'hidden md:flex md:w-64'}`}>
+          {/* Mobile Sidebar Close Bar */}
+          <div className="md:hidden px-3 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">Squads & Channels</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMobileSidebar(false)}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 shadow-2xs"
+            >
+              <span>✕ Close</span>
+            </button>
+          </div>
           {/* Teams Header */}
           <div className="p-3 border-b border-slate-800/80 flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Teams & Squads</span>
@@ -1307,6 +1336,7 @@ export default function WorkspaceHub({
                   onClick={() => {
                     setSelectedChannel(ch)
                     setActiveTab('chat')
+                    setShowMobileSidebar(false)
                   }}
                   className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition-colors pr-7 ${
                     selectedChannel?.id === ch.id
@@ -1351,27 +1381,52 @@ export default function WorkspaceHub({
         </div>
 
         {/* ── CENTER CONTENT (CHAT / KANBAN / MONITORING) ── */}
-        <div className="flex-1 flex flex-col bg-white overflow-hidden">
+        <div className={`flex-1 flex flex-col bg-white overflow-hidden ${showMobileSidebar ? 'hidden md:flex' : 'flex'}`}>
+          {/* Mobile Squad Indicator in non-chat tabs */}
+          {activeTab !== 'chat' && (
+            <div className="md:hidden px-3 py-1.5 bg-slate-100 border-b border-slate-200 flex items-center justify-between text-xs shrink-0">
+              <span className="text-slate-600 truncate max-w-[200px]">Squad: <strong className="text-slate-900">{selectedTeam?.name || 'Company Hub'}</strong></span>
+              <button
+                type="button"
+                onClick={() => setShowMobileSidebar(true)}
+                className="text-blue-600 font-bold text-xs hover:underline flex items-center gap-0.5"
+              >
+                <span>Switch Squad</span>
+                <span>▾</span>
+              </button>
+            </div>
+          )}
           {/* TAB 1: REAL-TIME TEAM CHAT */}
           {activeTab === 'chat' && (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Channel Header Banner */}
-              <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-slate-900 text-sm">#{selectedChannel?.name || 'select-a-channel'}</h3>
-                    {selectedChannel?.is_general && (
-                      <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">General</span>
-                    )}
+              <div className="px-3 py-2 sm:px-5 sm:py-3 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileSidebar(true)}
+                    className="md:hidden flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 shadow-2xs shrink-0"
+                    title="Open Teams & Channels"
+                  >
+                    <IconChat className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Squads</span>
+                  </button>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="font-bold text-slate-900 text-xs sm:text-sm truncate">#{selectedChannel?.name || 'select-a-channel'}</h3>
+                      {selectedChannel?.is_general && (
+                        <span className="text-[9px] sm:text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded-full shrink-0">General</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] sm:text-xs text-slate-500 truncate max-w-[180px] sm:max-w-none">{selectedChannel?.topic || 'Collaborate with your squad in real-time'}</p>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">{selectedChannel?.topic || 'Collaborate with your squad in real-time'}</p>
                 </div>
                 <button
                   onClick={() => setShowRightSidebar(!showRightSidebar)}
-                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-800 bg-white border border-slate-200 px-2 py-1.5 sm:px-2.5 rounded-lg flex items-center gap-1 transition-colors shrink-0"
                 >
                   <IconInfo className="w-3.5 h-3.5" />
-                  <span>{showRightSidebar ? 'Hide Info' : 'Show Info'}</span>
+                  <span className="hidden sm:inline">{showRightSidebar ? 'Hide Info' : 'Show Info'}</span>
                 </button>
               </div>
 
@@ -1417,7 +1472,7 @@ export default function WorkspaceHub({
                         </div>
 
                         {/* Bubble */}
-                        <div className={`max-w-xl space-y-1.5 ${isMe ? 'items-end text-right' : ''}`}>
+                        <div className={`max-w-[85%] sm:max-w-xl space-y-1.5 ${isMe ? 'items-end text-right' : ''}`}>
                           {/* Sender Info & Time */}
                           <div className="flex items-center gap-2 text-xs text-slate-400">
                             <div className="flex items-center gap-1.5">
@@ -1582,7 +1637,7 @@ export default function WorkspaceHub({
                   <div className="flex-1 relative">
                     {/* Mention Autocomplete Dropdown - strictly squad members */}
                     {showMentionMenu && (
-                      <div className="absolute bottom-full mb-2 left-0 w-80 max-h-64 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50 flex flex-col">
+                      <div className="absolute bottom-full mb-2 left-0 right-0 sm:right-auto sm:w-80 max-h-56 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50 flex flex-col">
                         <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
                           <span>Squad Members ({filteredMentionStaff.length})</span>
                           <span className="font-normal text-slate-400 text-[9px]">
@@ -1655,7 +1710,7 @@ export default function WorkspaceHub({
                     <textarea
                       ref={textareaRef}
                       rows={2}
-                      placeholder="Type a message, mention @colleague, or press Ctrl+V to paste screenshot..."
+                      placeholder="Message #${selectedChannel?.name || 'channel'} or tag @ai..."
                       value={inputText}
                       onChange={handleInputChange}
                       onPaste={handlePaste}
