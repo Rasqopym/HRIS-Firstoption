@@ -1267,12 +1267,12 @@ export default function Layout({
         </main>
 
         {/* ── Mobile Bottom Navigation Bar (PWA Touch Bar) ── */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-2 py-1.5 flex items-center justify-around shadow-lg">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-1 py-1.5 flex items-center justify-around shadow-lg">
           {role === 'staff' ? (
             <>
               <button
                 onClick={() => onNavigate('st-dashboard')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
                   page === 'st-dashboard' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1281,7 +1281,7 @@ export default function Layout({
               </button>
               <button
                 onClick={() => onNavigate('st-attendance')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
                   page === 'st-attendance' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1289,17 +1289,17 @@ export default function Layout({
                 <span className="text-[10px]">Clock In</span>
               </button>
               <button
-                onClick={() => onNavigate('st-leave')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
-                  page === 'st-leave' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                onClick={() => onNavigate('st-workspace')}
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
+                  page === 'st-workspace' || page === 'st-tasks' || page === 'st-calendar' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                <IconUmbrella />
-                <span className="text-[10px]">Leave</span>
+                <IconBriefcase />
+                <span className="text-[10px]">Workspace</span>
               </button>
               <button
                 onClick={() => onNavigate('st-payslips')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
                   page === 'st-payslips' || page === 'st-payslip' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1308,7 +1308,7 @@ export default function Layout({
               </button>
               <button
                 onClick={() => setMobileOpen(true)}
-                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500 hover:text-slate-800"
+                className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-slate-500 hover:text-slate-800"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
@@ -1320,7 +1320,7 @@ export default function Layout({
             <>
               <button
                 onClick={() => onNavigate('hr-dashboard')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
                   page === 'hr-dashboard' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1329,7 +1329,7 @@ export default function Layout({
               </button>
               <button
                 onClick={() => onNavigate('hr-directory')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
                   page === 'hr-directory' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1337,8 +1337,17 @@ export default function Layout({
                 <span className="text-[10px]">Staff</span>
               </button>
               <button
+                onClick={() => onNavigate('hr-workspace')}
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
+                  page === 'hr-workspace' || page === 'hr-tasks' || page === 'hr-calendar' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconBriefcase />
+                <span className="text-[10px]">Workspace</span>
+              </button>
+              <button
                 onClick={() => onNavigate('hr-attendance-daily')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
                   page === 'hr-attendance-daily' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1346,17 +1355,8 @@ export default function Layout({
                 <span className="text-[10px]">Attendance</span>
               </button>
               <button
-                onClick={() => onNavigate('hr-leave-mgmt')}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
-                  page === 'hr-leave-mgmt' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <IconUmbrella />
-                <span className="text-[10px]">Leave</span>
-              </button>
-              <button
                 onClick={() => setMobileOpen(true)}
-                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500 hover:text-slate-800"
+                className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-slate-500 hover:text-slate-800"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
@@ -1368,21 +1368,32 @@ export default function Layout({
             <>
               <button
                 onClick={() => onNavigate(role === 'superadmin' ? 'sa-dashboard' : role === 'accountant' ? 'ac-dashboard' : 'au-dashboard')}
-                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-blue-600 font-semibold"
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
+                  page === 'sa-dashboard' || page === 'ac-dashboard' || page === 'au-dashboard' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
               >
                 <IconGrid />
                 <span className="text-[10px]">Dashboard</span>
               </button>
               <button
+                onClick={() => onNavigate(role === 'superadmin' ? 'sa-workspace' : 'workspace')}
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl transition-all ${
+                  page === 'sa-workspace' || page === 'sa-tasks' || page === 'sa-calendar' || page === 'workspace' ? 'text-blue-600 font-semibold' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <IconBriefcase />
+                <span className="text-[10px]">Workspace</span>
+              </button>
+              <button
                 onClick={() => setShowSearch(true)}
-                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500"
+                className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-slate-500"
               >
                 <IconSearch />
                 <span className="text-[10px]">Search</span>
               </button>
               <button
                 onClick={() => setMobileOpen(true)}
-                className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-slate-500"
+                className="flex flex-col items-center gap-0.5 px-2.5 py-1 rounded-xl text-slate-500"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
