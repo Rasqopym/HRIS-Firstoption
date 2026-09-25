@@ -190,7 +190,7 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
           if (user) {
             const { data: sData } = await supabase
               .from('staff')
-              .select('id, staff_code, full_name, job_title, photo_url, bank_name, account_number, department, departments (name)')
+              .select('id, staff_code, full_name, photo_url, bank_name, account_number, department_id, departments (name)')
               .or(`profile_id.eq.${user.id},id.eq.${user.id}`)
               .maybeSingle()
             targetStaff = sData
@@ -199,7 +199,7 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
           if (!targetStaff) {
             const { data: sData } = await supabase
               .from('staff')
-              .select('id, staff_code, full_name, job_title, photo_url, bank_name, account_number, department, departments (name)')
+              .select('id, staff_code, full_name, photo_url, bank_name, account_number, department_id, departments (name)')
               .eq('staff_code', 'FO-0002')
               .maybeSingle()
             targetStaff = sData
@@ -219,7 +219,7 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
               paye_tax: engineResult.paye,
               status: 'pending'
             })
-            setStaff({ ...targetStaff, department: (targetStaff as any)?.departments?.name || targetStaff?.department || 'Sales & Marketing' })
+            setStaff({ ...targetStaff, department: (targetStaff as any)?.departments?.name || 'General Operations' })
             setPeriod({ period_label: `${currentMonthName} ${currentYear}` })
             setLineItems(engineResult.lineItems.map((li: any) => ({
               amount: li.amount,
@@ -238,7 +238,7 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
         // 2. Fetch staff info
         const { data: staffData } = await supabase
           .from('staff')
-          .select('id, staff_code, full_name, job_title, photo_url, bank_name, account_number, department, departments (name)')
+          .select('id, staff_code, full_name, photo_url, bank_name, account_number, department_id, departments (name)')
           .eq('id', payslipData.staff_id)
           .maybeSingle()
 
@@ -249,10 +249,10 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
           .eq('id', payslipData.period_id)
           .maybeSingle()
 
-        const resolvedDepartment = (staffData as any)?.departments?.name || staffData?.department || 'Accounting & Finance'
+        const resolvedDepartment = (staffData as any)?.departments?.name || 'General Operations'
 
         setPayslip(payslipData)
-        setStaff(staffData ? { ...staffData, department: resolvedDepartment } : { full_name: 'Employee', staff_code: 'FO-001', job_title: 'Staff', department: 'Accounting & Finance' })
+        setStaff(staffData ? { ...staffData, department: resolvedDepartment } : { full_name: 'Employee', staff_code: 'FO-001', job_title: 'Staff', department: 'General Operations' })
         setPeriod(periodData || { period_label: 'Current Period' })
 
         // 4. Fetch line items

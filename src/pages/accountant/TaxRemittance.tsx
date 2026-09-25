@@ -298,7 +298,7 @@ export default function TaxRemittance() {
         const staffIds = Array.from(new Set(uniquePayslipsData.map(p => p.staff_id)))
         const { data: staffList } = await supabase
           .from('staff')
-          .select('id, staff_code, full_name, department, departments (name)')
+          .select('id, staff_code, full_name, department_id, departments (name)')
           .in('id', staffIds)
 
         const staffMap = new Map((staffList || []).map(s => [s.id, s]))
@@ -311,7 +311,7 @@ export default function TaxRemittance() {
               id: p.staff_id,
               staff_code: s?.staff_code || 'FO-001',
               full_name: s?.full_name || 'Employee',
-              department_name: (s as any)?.departments?.name || s?.department || 'Accounting & Finance'
+              department_name: (s as any)?.departments?.name || 'General Operations'
             }
           }
         })

@@ -7,9 +7,11 @@ import { requestNotificationPermission, sendLocalNotification, runRoutineReminde
 
 interface LayoutProps {
   role: Role
+  authenticatedRole?: Role
   page: Page
   onNavigate: (p: Page) => void
   onRoleChange: (r: Role) => void
+  onToggleEmployeeView?: () => void
   onLogout: () => void
   onSelectStaff?: (id: string | null) => void
   onSelectPayslip?: (id: string) => void
@@ -186,6 +188,29 @@ function IconUser() {
     </svg>
   )
 }
+function IconBriefcase() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+    </svg>
+  )
+}
+function IconCheckSquare() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 11 12 14 22 4"/>
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+    </svg>
+  )
+}
+function IconActivity() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  )
+}
 
 function navForRole(role: Role): { section?: string; items: NavItem[]; collapsible?: boolean; icon?: React.ReactNode }[] {
   switch (role) {
@@ -193,9 +218,16 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
       return [
         { items: [{ label: 'Dashboard', page: 'sa-dashboard', icon: <IconGrid /> }] },
         {
+          section: 'Workspace', items: [
+            { label: 'Workspaces & Hub', page: 'sa-workspace', icon: <IconBriefcase /> },
+            { label: 'Task Management', page: 'sa-tasks', icon: <IconCheckSquare /> },
+            { label: 'Task Calendar', page: 'sa-calendar', icon: <IconCalendar /> },
+          ],
+        },
+        {
           section: 'Management', items: [
             { label: 'User Management', page: 'sa-users', icon: <IconUsers /> },
-            { label: 'Appraisal & Assessments', page: 'sa-appraisals', icon: <IconClipboardCheck /> },
+            { label: 'Appraisal Framework', page: 'sa-appraisals', icon: <IconClipboardCheck /> },
             { label: 'System Settings', page: 'sa-settings', icon: <IconSettings /> },
           ],
         },
@@ -244,6 +276,14 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
     case 'hr':
       return [
         { items: [{ label: 'Dashboard', page: 'hr-dashboard', icon: <IconGrid /> }] },
+        {
+          section: 'Workspace', items: [
+            { label: 'Workspaces & Hub', page: 'hr-workspace', icon: <IconBriefcase /> },
+            { label: 'Task Board', page: 'hr-tasks', icon: <IconCheckSquare /> },
+            { label: 'Task Calendar', page: 'hr-calendar', icon: <IconCalendar /> },
+            { label: 'Team Monitoring', page: 'hr-team-monitoring', icon: <IconActivity /> },
+          ],
+        },
         {
           section: 'Staff', items: [
             { label: 'Staff Directory', page: 'hr-directory', icon: <IconUsers /> },
@@ -298,6 +338,13 @@ function navForRole(role: Role): { section?: string; items: NavItem[]; collapsib
       return [
         { items: [{ label: 'My Dashboard', page: 'st-dashboard', icon: <IconGrid /> }] },
         {
+          section: 'Workspace', items: [
+            { label: 'Team Hub & Chat', page: 'st-workspace', icon: <IconBriefcase /> },
+            { label: 'My Tasks & Sprints', page: 'st-tasks', icon: <IconCheckSquare /> },
+            { label: 'Task Calendar', page: 'st-calendar', icon: <IconCalendar /> },
+          ],
+        },
+        {
           section: 'My Records', items: [
             { label: 'My Profile', page: 'st-profile', icon: <IconUser /> },
             { label: 'My Payslips', page: 'st-payslips', icon: <IconFileText /> },
@@ -335,7 +382,18 @@ const roleBadgeColors: Record<Role, string> = {
   staff: 'bg-slate-100 text-slate-600',
 }
 
-export default function Layout({ role, page, onNavigate, onRoleChange, onLogout, onSelectStaff, onSelectPayslip, children }: LayoutProps) {
+export default function Layout({ 
+  role, 
+  authenticatedRole,
+  page, 
+  onNavigate, 
+  onRoleChange, 
+  onToggleEmployeeView,
+  onLogout, 
+  onSelectStaff, 
+  onSelectPayslip, 
+  children 
+}: LayoutProps) {
   const { settings: companySettings } = useCompanySettings()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -579,8 +637,54 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
                   read: false,
                 })
               })
+
+              // Fetch workspace tasks assigned to this staff member
+              try {
+                const { data: myTasks } = await supabase
+                  .from('workspace_tasks')
+                  .select('id, title, priority, due_date, status, created_at')
+                  .eq('assignee_id', staffRow.id)
+                  .neq('status', 'done')
+                  .order('created_at', { ascending: false })
+                  .limit(5)
+                ;(myTasks || []).forEach((t: any) => {
+                  items.push({
+                    id: `wstask-${t.id}`,
+                    title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : 'Workspace Task Assigned',
+                    message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                    timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
+                    type: t.priority === 'urgent' ? 'error' : 'info',
+                    read: false,
+                  })
+                })
+              } catch (taskErr) {
+                console.warn('Workspace tasks notification error:', taskErr)
+              }
             }
           }
+        }
+
+        // Workspace Urgent Tasks for Admin/HR
+        if (role === 'superadmin' || role === 'hr') {
+          try {
+            const { data: urgentTasks } = await supabase
+              .from('workspace_tasks')
+              .select('id, title, priority, due_date, status, created_at')
+              .eq('priority', 'urgent')
+              .neq('status', 'done')
+              .order('created_at', { ascending: false })
+              .limit(5)
+            ;(urgentTasks || []).forEach((t: any) => {
+              items.push({
+                id: `urgent-task-${t.id}`,
+                title: '🔥 Urgent Workspace Task Pending',
+                message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
+                type: 'error',
+                read: false,
+              })
+            })
+          } catch (e) {}
         }
 
         setNotifs(items)
@@ -919,8 +1023,15 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
             )}
             <div className={`flex-1 min-w-0 ${collapsed ? 'md:hidden' : 'block'}`}>
               <div className="text-white text-xs font-medium truncate">{currentUser?.name || 'User'}</div>
-              <div className={`inline-block text-xs px-1.5 py-0.5 rounded font-medium mt-0.5 ${roleBadgeColors[role]}`}>
-                {roleLabels[role]}
+              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <div className={`inline-block text-[11px] px-1.5 py-0.5 rounded font-medium ${roleBadgeColors[role]}`}>
+                  {roleLabels[role]}
+                </div>
+                {role === 'staff' && authenticatedRole && authenticatedRole !== 'staff' && (
+                  <span className="inline-block text-[10px] px-1 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-400/30">
+                    Self-Service
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1010,6 +1121,31 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {/* Dual Role / Employee View Toggle */}
+            {authenticatedRole && authenticatedRole !== 'staff' && (
+              <button
+                onClick={onToggleEmployeeView}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-xs ${
+                  role === 'staff'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-105 ring-2 ring-emerald-400/30'
+                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                }`}
+                title={role === 'staff' ? `Switch back to ${roleLabels[authenticatedRole]} Portal` : 'Switch to Staff Self-Service Portal (My Payslips, Attendance, Leave...)'}
+              >
+                {role === 'staff' ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+                    <span>Back to {roleLabels[authenticatedRole]}</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span className="hidden sm:inline">Employee View</span>
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Auditor read-only badge */}
             {role === 'auditor' && (
               <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
@@ -1055,11 +1191,30 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-slate-100 py-1 z-50">
+                <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg shadow-lg border border-slate-100 py-1 z-50">
                   <div className="px-4 py-2 border-b border-slate-100">
                     <div className="text-sm font-medium text-slate-800">{currentUser?.name || 'User'}</div>
                     <div className="text-xs text-slate-500">{currentUser?.email || ''}</div>
                   </div>
+                  
+                  {/* Quick Switch Option in Menu */}
+                  {authenticatedRole && authenticatedRole !== 'staff' && (
+                    <div className="border-b border-slate-100 py-1 bg-slate-50/50">
+                      <button
+                        onClick={() => { onToggleEmployeeView?.(); setShowUserMenu(false) }}
+                        className="w-full text-left px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center justify-between"
+                      >
+                        <span className="flex items-center gap-2">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                          {role === 'staff' ? `Return to ${roleLabels[authenticatedRole]}` : 'Switch to Employee View'}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">
+                          {role === 'staff' ? 'Admin' : 'Self-Service'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="border-t border-slate-100 py-1">
                     <button
                       onClick={() => { onNavigate('profile'); setShowUserMenu(false) }}
@@ -1082,6 +1237,24 @@ export default function Layout({ role, page, onNavigate, onRoleChange, onLogout,
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto relative bg-slate-50/60 pb-16 md:pb-0">
+          {/* Employee View Active Banner */}
+          {role === 'staff' && authenticatedRole && authenticatedRole !== 'staff' && (
+            <div className="bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-950 text-white px-4 py-2 text-xs flex items-center justify-between shadow-xs sticky top-0 z-30 border-b border-blue-500/20">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-none" />
+                <span className="truncate">
+                  Viewing <strong>Employee Self-Service Portal</strong> ({currentUser?.name || 'Staff'}) · Apply for leave, clock in, view personal payslips & appraisal.
+                </span>
+              </div>
+              <button
+                onClick={onToggleEmployeeView}
+                className="flex-none ml-3 px-2.5 py-1 bg-white/15 hover:bg-white/25 rounded text-white text-xs font-semibold transition-colors flex items-center gap-1.5"
+              >
+                <span>Return to {roleLabels[authenticatedRole]}</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          )}
           {children}
 
           {/* Click outside to close menus */}

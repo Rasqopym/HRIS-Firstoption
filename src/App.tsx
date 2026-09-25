@@ -51,6 +51,9 @@ import AppraisalCycles from './pages/hr/appraisal/AppraisalCycles'
 import AppraisalForm from './pages/hr/appraisal/AppraisalForm'
 import AppraisalSummary from './pages/hr/appraisal/AppraisalSummary'
 
+// Workspace & Team Collaboration pages
+import WorkspaceHub from './pages/workspace/WorkspaceHub'
+
 function defaultPage(role: Role): Page {
   switch (role) {
     case 'superadmin': return 'sa-dashboard'
@@ -74,7 +77,10 @@ function getSavedPage(r: Role): Page {
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
-  const [role, setRole] = useState<Role>('superadmin')
+  const [authenticatedRole, setAuthenticatedRole] = useState<Role>('superadmin')
+  const [viewRole, setViewRole] = useState<Role>('superadmin')
+  const role = viewRole
+
   const [page, setPage] = useState<Page>(() => {
     try {
       const hash = window.location.hash.replace('#', '') as Page
@@ -120,7 +126,8 @@ export default function App() {
 
           if (profile) {
             const appRole = dbRoleToApp(profile.role)
-            setRole(appRole)
+            setAuthenticatedRole(appRole)
+            setViewRole(appRole)
             const targetPage = getSavedPage(appRole)
             setPage(targetPage)
             try { window.location.hash = targetPage } catch (e) {}
@@ -139,7 +146,8 @@ export default function App() {
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         setIsLoggedIn(false)
-        setRole('superadmin')
+        setAuthenticatedRole('superadmin')
+        setViewRole('superadmin')
         setPage('sa-dashboard')
         try { window.location.hash = '' } catch (e) {}
       }
@@ -160,7 +168,8 @@ export default function App() {
   }, [])
 
   const handleLogin = (r: Role) => {
-    setRole(r)
+    setAuthenticatedRole(r)
+    setViewRole(r)
     const targetPage = getSavedPage(r)
     setPage(targetPage)
     try {
@@ -171,7 +180,8 @@ export default function App() {
   }
 
   const handleRoleChange = (r: Role) => {
-    setRole(r)
+    setAuthenticatedRole(r)
+    setViewRole(r)
     const targetPage = getSavedPage(r)
     setPage(targetPage)
     try {
@@ -182,10 +192,35 @@ export default function App() {
     handleSelectPayslip(null)
   }
 
+  const handleToggleEmployeeView = () => {
+    if (viewRole === 'staff') {
+      // Return to original administrative role
+      setViewRole(authenticatedRole)
+      const targetPage = getSavedPage(authenticatedRole)
+      setPage(targetPage)
+      try {
+        window.location.hash = targetPage
+        localStorage.setItem(`hris_active_page_${authenticatedRole}`, targetPage)
+      } catch (e) {}
+    } else {
+      // Switch to staff self-service view
+      setViewRole('staff')
+      const targetPage = 'st-dashboard'
+      setPage(targetPage)
+      try {
+        window.location.hash = targetPage
+        localStorage.setItem('hris_active_page_staff', targetPage)
+      } catch (e) {}
+    }
+    handleSelectStaff(null)
+    handleSelectPayslip(null)
+  }
+
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut()
     setIsLoggedIn(false)
-    setRole('superadmin')
+    setAuthenticatedRole('superadmin')
+    setViewRole('superadmin')
     setPage('sa-dashboard')
     try { window.location.hash = '' } catch (e) {}
     handleSelectStaff(null)
@@ -200,11 +235,16 @@ export default function App() {
     } catch (e) {}
   }
 
-  // Resolve current staff ID when logged in as staff
+  const [currentStaffName, setCurrentStaffName] = useState<string>('')
+  const [currentStaffPhoto, setCurrentStaffPhoto] = useState<string | undefined>()
+
+  // Resolve current staff ID, name and photo for all roles
   useEffect(() => {
-    const resolveStaffId = async () => {
-      if (role !== 'staff' || !isLoggedIn) {
+    const resolveIdentity = async () => {
+      if (!isLoggedIn) {
         setCurrentStaffId(null)
+        setCurrentStaffName('')
+        setCurrentStaffPhoto(undefined)
         return
       }
 
@@ -217,7 +257,7 @@ export default function App() {
         // 1. Match by profile_id or id
         const { data: byProfile } = await supabase
           .from('staff')
-          .select('id')
+          .select('id, full_name, photo_url')
           .or(`profile_id.eq.${user.id},id.eq.${user.id}`)
           .maybeSingle()
 
@@ -227,31 +267,44 @@ export default function App() {
         if (!staffData && user.email) {
           const { data: byEmail } = await supabase
             .from('staff')
-            .select('id')
+            .select('id, full_name, photo_url')
             .ilike('email', `%${user.email}%`)
             .maybeSingle()
           staffData = byEmail
         }
 
-        // 3. Fallback to first active staff row
-        if (!staffData) {
-          const { data: anyStaff } = await supabase
-            .from('staff')
-            .select('id')
-            .order('created_at', { ascending: true })
-            .limit(1)
+        // 3. Match profiles table if no staff row
+        let profileName = ''
+        let profilePhoto = ''
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('full_name, photo_url')
+            .eq('id', user.id)
             .maybeSingle()
-          staffData = anyStaff
-        }
+          if (prof) {
+            profileName = prof.full_name
+            profilePhoto = prof.photo_url
+          }
+        } catch {}
 
-        setCurrentStaffId(staffData?.id || null)
+        const finalId = staffData?.id || user.id
+        const defaultRoleName = role === 'superadmin' ? 'Super Admin' : role === 'hr' ? 'HR Manager' : role === 'accountant' ? 'Accountant' : role === 'auditor' ? 'Auditor' : 'Staff Member'
+        const finalName = staffData?.full_name || profileName || user.user_metadata?.full_name || defaultRoleName
+        const finalPhoto = staffData?.photo_url || profilePhoto || undefined
+
+        setCurrentStaffId(finalId)
+        setCurrentStaffName(finalName)
+        setCurrentStaffPhoto(finalPhoto)
       } catch (err) {
-        console.error('Error resolving staff ID:', err)
-        setCurrentStaffId(null)
+        console.error('Error resolving identity:', err)
+        const defaultRoleName = role === 'superadmin' ? 'Super Admin' : role === 'hr' ? 'HR Manager' : 'Staff Member'
+        setCurrentStaffId(role === 'staff' ? null : `user-${role}`)
+        setCurrentStaffName(defaultRoleName)
       }
     }
 
-    resolveStaffId()
+    resolveIdentity()
   }, [role, isLoggedIn])
 
   // Idle session timeout (60 minutes of inactivity)
@@ -330,6 +383,9 @@ export default function App() {
       case 'sa-salary-defaults': return <SalaryDefaults key={page} />
       case 'sa-tax-bands': return <TaxBands key={page} />
       case 'sa-appraisals': return <AppraisalBuilder key={page} onNavigate={navigate} />
+      case 'sa-workspace': return <WorkspaceHub key={page} role="superadmin" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="chat" />
+      case 'sa-tasks': return <WorkspaceHub key={page} role="superadmin" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="tasks" />
+      case 'sa-calendar': return <WorkspaceHub key={page} role="superadmin" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="calendar" />
 
       // HR
       case 'hr-dashboard': return <HRDashboard key={page} onNavigate={navigate} onSelectStaff={setSelectedStaffId} />
@@ -342,6 +398,10 @@ export default function App() {
       case 'hr-holidays': return <PublicHolidays key={page} />
       case 'hr-leave-mgmt': return <LeaveManagement key={page} />
       case 'hr-leave-config': return <LeaveManagement key={page} />
+      case 'hr-workspace': return <WorkspaceHub key={page} role="hr" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="chat" />
+      case 'hr-tasks': return <WorkspaceHub key={page} role="hr" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="tasks" />
+      case 'hr-calendar': return <WorkspaceHub key={page} role="hr" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="calendar" />
+      case 'hr-team-monitoring': return <WorkspaceHub key={page} role="hr" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="monitoring" />
 
       // Accountant
       case 'ac-dashboard': return <ACDashboard key={page} onNavigate={navigate} />
@@ -365,6 +425,15 @@ export default function App() {
       case 'st-attendance': return <AttendanceSelf key={page} />
       case 'st-leave': return <LeaveRequest key={page} />
       case 'st-appraisal': return <MyAppraisal key={page} onNavigate={navigate} />
+      case 'st-workspace': return <WorkspaceHub key={page} role="staff" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="chat" />
+      case 'st-tasks': return <WorkspaceHub key={page} role="staff" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="tasks" />
+      case 'st-calendar': return <WorkspaceHub key={page} role="staff" currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="calendar" />
+
+      // Generic aliases
+      case 'workspace': return <WorkspaceHub key={page} role={role} currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="chat" />
+      case 'tasks': return <WorkspaceHub key={page} role={role} currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="tasks" />
+      case 'calendar': return <WorkspaceHub key={page} role={role} currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="calendar" />
+      case 'team-monitoring': return <WorkspaceHub key={page} role={role} currentStaffId={currentStaffId} currentStaffName={currentStaffName} currentStaffPhoto={currentStaffPhoto} initialTab="monitoring" />
 
       // Performance Appraisal
       case 'hr-appraisal-cycles': return <AppraisalCycles key={page} onNavigate={navigate} />
@@ -395,9 +464,11 @@ export default function App() {
   return (
     <Layout
       role={role}
+      authenticatedRole={authenticatedRole}
       page={page}
       onNavigate={navigate}
       onRoleChange={handleRoleChange}
+      onToggleEmployeeView={handleToggleEmployeeView}
       onLogout={handleLogout}
       onSelectStaff={handleSelectStaff}
       onSelectPayslip={handleSelectPayslip}

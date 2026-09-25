@@ -27,39 +27,95 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch staff with department join
-        const { data: staffData, error: staffError } = await supabase
-          .from('staff')
-          .select('*, departments(name)')
-          .order('full_name', { ascending: true })
-
-        if (staffError) throw staffError
-
-        // Fetch departments for filter
-        const { data: deptData, error: deptError } = await supabase
+        // 1. Fetch departments
+        const { data: deptData } = await supabase
           .from('departments')
           .select('id, name')
           .order('name', { ascending: true })
 
-        if (deptError) throw deptError
+        const depts = deptData || []
+        setDepartments(depts)
 
-        // Map staff data to StaffMember shape
-        const mappedStaff: any[] = staffData?.map(s => ({
-          id: s.id,
-          staffId: s.staff_code,
-          name: s.full_name,
-          email: s.email,
-          department: s.departments?.name || 'Unassigned',
-          jobTitle: s.job_title,
-          status: s.status as StaffStatus,
-          employmentDate: s.date_employed?.split('T')[0] || '',
-          isConfirmed: s.is_confirmed ?? false,
-          confirmationDate: s.confirmation_date?.split('T')[0] || null,
-          photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
-        })) ?? []
+        // 2. Fetch staff with department join
+        const { data: staffData, error: staffError } = await supabase
+          .from('staff')
+          .select('*, departments(name)')
+          .order('created_at', { ascending: true })
+
+        if (staffError) throw staffError
+
+        const rawList: any[] = staffData ? [...staffData] : []
+
+        // 3. Deduplicate staff by email / profile_id / full_name & clean up DB duplicates
+        const seenEmails = new Set<string>()
+        const seenProfileIds = new Set<string>()
+        const seenNames = new Set<string>()
+        const uniqueStaffList: any[] = []
+        const duplicateIdsToDelete: string[] = []
+
+        for (const s of rawList) {
+          const emailKey = (s.email || '').trim().toLowerCase()
+          const profileKey = (s.profile_id || '').trim()
+          const nameKey = (s.full_name || '').trim().toLowerCase()
+
+          const isDuplicate = 
+            (emailKey && seenEmails.has(emailKey)) ||
+            (profileKey && seenProfileIds.has(profileKey)) ||
+            (nameKey && seenNames.has(nameKey) && !emailKey)
+
+          if (isDuplicate) {
+            duplicateIdsToDelete.push(s.id)
+          } else {
+            if (emailKey) seenEmails.add(emailKey)
+            if (profileKey) seenProfileIds.add(profileKey)
+            if (nameKey) seenNames.add(nameKey)
+            uniqueStaffList.push(s)
+          }
+        }
+
+        // Clean up redundant duplicate records in Supabase in background
+        if (duplicateIdsToDelete.length > 0) {
+          try {
+            await supabase
+              .from('staff')
+              .delete()
+              .in('id', duplicateIdsToDelete)
+          } catch (delErr) {
+            console.warn('Duplicate cleanup note:', delErr)
+          }
+        }
+
+        // 4. Map staff data to StaffMember shape
+        const mappedStaff: StaffMember[] = uniqueStaffList.map(s => {
+          let roleTitle = s.job_title
+          if (!roleTitle) {
+            const dName = (s.departments?.name || '').toLowerCase()
+            if (dName.includes('account') || dName.includes('finance')) roleTitle = 'Accountant'
+            else if (dName.includes('human') || dName.includes('hr')) roleTitle = 'HR Specialist'
+            else if (dName.includes('audit')) roleTitle = 'Internal Auditor'
+            else if (dName.includes('admin') || dName.includes('exec')) roleTitle = 'Administrator'
+            else roleTitle = 'Staff Member'
+          }
+
+          return {
+            id: s.id,
+            staffId: s.staff_code || `FO-${String(s.id).slice(0, 4).toUpperCase()}`,
+            name: s.full_name,
+            email: s.email,
+            department: s.departments?.name || 'General Operations',
+            jobTitle: roleTitle,
+            status: (s.status || 'active') as StaffStatus,
+            employmentDate: s.date_employed?.split('T')[0] || '',
+            isConfirmed: s.is_confirmed ?? false,
+            confirmationDate: s.confirmation_date?.split('T')[0] || null,
+            photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
+          }
+        })
+
+        // Sort alphabetically by full name
+        mappedStaff.sort((a, b) => a.name.localeCompare(b.name))
 
         setStaff(mappedStaff)
-        setDepartments(deptData ?? [])
       } catch (err) {
         console.error('Error fetching staff directory data:', err)
       } finally {

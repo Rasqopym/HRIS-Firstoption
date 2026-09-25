@@ -114,10 +114,10 @@ export default function FinancialReports() {
         const staffIds = Array.from(new Set(validPayslips.map(p => p.staff_id)))
         const { data: staffList } = await supabase
           .from('staff')
-          .select('id, department, departments (name)')
+          .select('id, department_id, departments (name)')
           .in('id', staffIds)
 
-        const staffMap = new Map((staffList || []).map(s => [s.id, (s as any)?.departments?.name || s?.department || 'Accounting & Finance']))
+        const staffMap = new Map((staffList || []).map(s => [s.id, (s as any)?.departments?.name || 'General Operations']))
 
         // Get salary components for pension/NHF identification
         const { data: salaryComponents } = await supabase

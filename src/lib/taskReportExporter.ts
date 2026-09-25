@@ -1,0 +1,637 @@
+import * as XLSX from 'xlsx'
+import { jsPDF } from 'jspdf'
+import type { WorkspaceTask, StaffMember } from '../types'
+
+export interface ReportExportOptions {
+  title?: string
+  workspaceName?: string
+  teamName?: string
+  dateRangeLabel?: string
+  staffList?: StaffMember[]
+  generatedBy?: string
+}
+
+const KPI_CATEGORIES = [
+  'Operations, Admin & Compliance',
+  'Logistics, Warehouse & Inventory',
+  'Sales & Customer Acquisition',
+  'Technical & IT Procedures',
+  'HR & People Operations',
+  'Finance & Accounting',
+]
+
+/**
+ * Formats a date string cleanly
+ */
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const d = new Date(dateStr)
+    return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString()
+  } catch {
+    return dateStr
+  }
+}
+
+/**
+ * 1-Click Excel (.xlsx) Multi-Sheet Workbook Exporter
+ */
+export function exportTasksToExcel(tasks: WorkspaceTask[], options: ReportExportOptions = {}) {
+  const {
+    workspaceName = 'General Workspace',
+    teamName,
+    dateRangeLabel = 'All Time',
+    generatedBy = 'HRIS System Admin',
+  } = options
+
+  const wb = XLSX.utils.book_new()
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  // ── SHEET 1: TASK DELIVERABLES ──
+  const taskRows = tasks.map((t, idx) => {
+    const completedChecklist = t.checklist ? t.checklist.filter(c => c.completed).length : 0
+    const totalChecklist = t.checklist ? t.checklist.length : 0
+    const checklistStr = totalChecklist > 0 ? `${completedChecklist}/${totalChecklist}` : 'N/A'
+    const proofCount = (t.comments ? t.comments.filter(c => c.is_proof).length : 0) + (t.image_attachments ? t.image_attachments.length : 0)
+    const actualHours = t.actual_hours || 0
+    const estHours = t.estimated_hours || 0
+    const varianceHours = parseFloat((actualHours - estHours).toFixed(1))
+
+    return {
+      '#': idx + 1,
+      'Task ID': t.id,
+      'Deliverable Title': t.title,
+      'KPI Category': t.kpi_category || 'Operations, Admin & Compliance',
+      'Status': t.status.toUpperCase().replace('_', ' '),
+      'Priority': t.priority.toUpperCase(),
+      'Assignee Name': t.assignee?.name || 'Unassigned',
+      'Assignee Department': t.assignee?.department || 'General',
+      'Due Date': t.due_date || 'None',
+      'Due Time': t.due_time || 'None',
+      'Recurrence': t.recurrence_interval && t.recurrence_interval !== 'none' ? t.recurrence_interval : (t.is_recurring ? 'recurring' : 'none'),
+      'Logged Hours': actualHours,
+      'Budget Hours': estHours,
+      'Variance (Hours)': varianceHours,
+      'Checklist Progress': checklistStr,
+      'Verified Proofs': proofCount,
+      'Created Date': formatDate(t.created_at),
+      'Completed Date': formatDate(t.completed_at),
+      'Description / Scope': t.description || '',
+    }
+  })
+
+  const wsTasks = XLSX.utils.json_to_sheet(taskRows)
+  // Set clean column widths
+  wsTasks['!cols'] = [
+    { wch: 5 },  // #
+    { wch: 15 }, // Task ID
+    { wch: 32 }, // Title
+    { wch: 28 }, // KPI Category
+    { wch: 14 }, // Status
+    { wch: 10 }, // Priority
+    { wch: 20 }, // Assignee
+    { wch: 20 }, // Department
+    { wch: 12 }, // Due Date
+    { wch: 10 }, // Due Time
+    { wch: 12 }, // Recurrence
+    { wch: 12 }, // Logged Hours
+    { wch: 12 }, // Budget Hours
+    { wch: 15 }, // Variance
+    { wch: 16 }, // Checklist
+    { wch: 14 }, // Proofs
+    { wch: 14 }, // Created
+    { wch: 14 }, // Completed
+    { wch: 40 }, // Description
+  ]
+  XLSX.utils.book_append_sheet(wb, wsTasks, 'Task Deliverables')
+
+  // ── SHEET 2: KPI & CATEGORY SUMMARY ──
+  const totalTasks = tasks.length
+  const completedTasks = tasks.filter(t => t.status === 'done').length
+  const inProgressTasks = tasks.filter(t => t.status === 'in_progress' || t.status === 'review').length
+  const pendingTasks = tasks.filter(t => t.status === 'todo').length
+  const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+  const totalActualHours = parseFloat(tasks.reduce((sum, t) => sum + (t.actual_hours || 0), 0).toFixed(1))
+  const totalEstHours = parseFloat(tasks.reduce((sum, t) => sum + (t.estimated_hours || 0), 0).toFixed(1))
+  const totalProofs = tasks.filter(t => (t.comments && t.comments.some(c => c.is_proof)) || (t.image_attachments && t.image_attachments.length > 0)).length
+
+  let overdueCount = 0
+  tasks.forEach(t => {
+    if (t.status === 'done') {
+      if (t.due_date && t.completed_at && t.completed_at.split('T')[0] > t.due_date) overdueCount++
+    } else {
+      if (t.due_date && t.due_date < todayStr) overdueCount++
+    }
+  })
+  const onTimeRate = totalTasks > 0 ? Math.round((Math.max(0, totalTasks - overdueCount) / totalTasks) * 100) : 100
+
+  const summaryData = [
+    ['FIRSTOPTION HRIS — WORKSPACE TASK & KPI REPORT'],
+    ['Generated Date:', new Date().toLocaleString()],
+    ['Scope:', `${workspaceName}${teamName ? ` / ${teamName}` : ''}`],
+    ['Period Filter:', dateRangeLabel],
+    ['Generated By:', generatedBy],
+    [],
+    ['EXECUTIVE METRICS OVERVIEW', 'VALUE'],
+    ['Total Deliverables', totalTasks],
+    ['Completed Tasks', completedTasks],
+    ['In Progress / Review', inProgressTasks],
+    ['Pending (To Do)', pendingTasks],
+    ['Deliverable Completion Rate', `${completionRate}%`],
+    ['On-Time Execution Rate', `${onTimeRate}%`],
+    ['Overdue Deliverables Count', overdueCount],
+    ['Total Hours Logged', totalActualHours],
+    ['Total Budgeted Hours', totalEstHours],
+    ['Verified Milestone Proofs', totalProofs],
+    [],
+    ['KPI CATEGORY BREAKDOWN', 'TOTAL TASKS', 'COMPLETED', 'COMPLETION %', 'LOGGED HOURS', 'BUDGET HOURS'],
+  ]
+
+  KPI_CATEGORIES.forEach(catName => {
+    const catTasks = tasks.filter(t => t.kpi_category === catName)
+    const catTotal = catTasks.length
+    const catDone = catTasks.filter(t => t.status === 'done').length
+    const catRate = catTotal > 0 ? `${Math.round((catDone / catTotal) * 100)}%` : '0%'
+    const catActual = parseFloat(catTasks.reduce((sum, t) => sum + (t.actual_hours || 0), 0).toFixed(1))
+    const catEst = parseFloat(catTasks.reduce((sum, t) => sum + (t.estimated_hours || 0), 0).toFixed(1))
+    summaryData.push([catName, catTotal, catDone, catRate, catActual, catEst])
+  })
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData)
+  wsSummary['!cols'] = [{ wch: 35 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Executive Summary')
+
+  // ── SHEET 3: STAFF PERFORMANCE ──
+  const staffMap: Record<string, { name: string; dept: string; total: number; done: number; hours: number; proofs: number }> = {}
+  tasks.forEach(t => {
+    const sId = t.assignee_id || 'unassigned'
+    const sName = t.assignee?.name || (sId === 'unassigned' ? 'Unassigned' : 'Staff Member')
+    const sDept = t.assignee?.department || 'General'
+    if (!staffMap[sId]) {
+      staffMap[sId] = { name: sName, dept: sDept, total: 0, done: 0, hours: 0, proofs: 0 }
+    }
+    staffMap[sId].total++
+    if (t.status === 'done') staffMap[sId].done++
+    staffMap[sId].hours += t.actual_hours || 0
+    if ((t.comments && t.comments.some(c => c.is_proof)) || (t.image_attachments && t.image_attachments.length > 0)) {
+      staffMap[sId].proofs++
+    }
+  })
+
+  const staffRows = Object.values(staffMap).map((s, idx) => ({
+    '#': idx + 1,
+    'Team Member': s.name,
+    'Department': s.dept,
+    'Assigned Tasks': s.total,
+    'Completed Tasks': s.done,
+    'Completion Rate': s.total > 0 ? `${Math.round((s.done / s.total) * 100)}%` : '0%',
+    'Actual Hours Logged': parseFloat(s.hours.toFixed(1)),
+    'Deliverable Proofs Attached': s.proofs,
+  }))
+
+  const wsStaff = XLSX.utils.json_to_sheet(staffRows)
+  wsStaff['!cols'] = [
+    { wch: 5 },
+    { wch: 25 },
+    { wch: 22 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 20 },
+    { wch: 25 },
+  ]
+  XLSX.utils.book_append_sheet(wb, wsStaff, 'Staff Leaderboard')
+
+  // Export File
+  const filename = `FirstOption_Tasks_Report_${todayStr}.xlsx`
+  XLSX.writeFile(wb, filename)
+}
+
+/**
+ * 1-Click CSV Exporter with UTF-8 BOM
+ */
+export function exportTasksToCsv(tasks: WorkspaceTask[], options: ReportExportOptions = {}) {
+  const todayStr = new Date().toISOString().split('T')[0]
+  const headers = [
+    'Task ID',
+    'Deliverable Title',
+    'KPI Category',
+    'Status',
+    'Priority',
+    'Assignee',
+    'Department',
+    'Due Date',
+    'Due Time',
+    'Logged Hours',
+    'Budget Hours',
+    'Checklist Progress',
+    'Verified Proofs',
+    'Created Date',
+    'Completed Date',
+    'Description',
+  ]
+
+  const rows = tasks.map(t => {
+    const completedChecklist = t.checklist ? t.checklist.filter(c => c.completed).length : 0
+    const totalChecklist = t.checklist ? t.checklist.length : 0
+    const checklistStr = totalChecklist > 0 ? `${completedChecklist}/${totalChecklist}` : 'N/A'
+    const proofCount = (t.comments ? t.comments.filter(c => c.is_proof).length : 0) + (t.image_attachments ? t.image_attachments.length : 0)
+
+    const escapeCsv = (val: any) => {
+      if (val === null || val === undefined) return '""'
+      const str = String(val).replace(/"/g, '""')
+      return `"${str}"`
+    }
+
+    return [
+      escapeCsv(t.id),
+      escapeCsv(t.title),
+      escapeCsv(t.kpi_category || 'Operations, Admin & Compliance'),
+      escapeCsv(t.status.toUpperCase()),
+      escapeCsv(t.priority.toUpperCase()),
+      escapeCsv(t.assignee?.name || 'Unassigned'),
+      escapeCsv(t.assignee?.department || 'General'),
+      escapeCsv(t.due_date || ''),
+      escapeCsv(t.due_time || ''),
+      escapeCsv(t.actual_hours || 0),
+      escapeCsv(t.estimated_hours || 0),
+      escapeCsv(checklistStr),
+      escapeCsv(proofCount),
+      escapeCsv(formatDate(t.created_at)),
+      escapeCsv(formatDate(t.completed_at)),
+      escapeCsv(t.description || ''),
+    ].join(',')
+  })
+
+  const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute('download', `FirstOption_Tasks_Export_${todayStr}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * 1-Click Executive PDF Exporter using jsPDF
+ */
+export function exportTasksToPdf(tasks: WorkspaceTask[], options: ReportExportOptions = {}) {
+  const {
+    workspaceName = 'General Workspace',
+    teamName,
+    dateRangeLabel = 'All Time',
+    generatedBy = 'HRIS System Admin',
+  } = options
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  })
+
+  const todayStr = new Date().toISOString().split('T')[0]
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const pageHeight = doc.internal.pageSize.getHeight()
+
+  // ── HEADER SECTION ──
+  // Navy Header Banner
+  doc.setFillColor(15, 23, 42) // slate-900
+  doc.rect(0, 0, pageWidth, 24, 'F')
+
+  doc.setTextColor(255, 255, 255)
+  doc.setFontSize(14)
+  doc.setFont('helvetica', 'bold')
+  doc.text('FIRSTOPTION HRIS — WORKSPACE TASK & KPI REPORT', 14, 11)
+
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(148, 163, 184) // slate-400
+  doc.text(`Scope: ${workspaceName}${teamName ? ` · Team: ${teamName}` : ''}   |   Period: ${dateRangeLabel}   |   Generated: ${new Date().toLocaleDateString()}   |   By: ${generatedBy}`, 14, 18)
+
+  // ── EXECUTIVE STAT BADGES ──
+  const totalTasks = tasks.length
+  const completedTasks = tasks.filter(t => t.status === 'done').length
+  const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+  const totalActualHours = parseFloat(tasks.reduce((sum, t) => sum + (t.actual_hours || 0), 0).toFixed(1))
+  const totalEstHours = parseFloat(tasks.reduce((sum, t) => sum + (t.estimated_hours || 0), 0).toFixed(1))
+  const totalProofs = tasks.filter(t => (t.comments && t.comments.some(c => c.is_proof)) || (t.image_attachments && t.image_attachments.length > 0)).length
+
+  let overdueCount = 0
+  tasks.forEach(t => {
+    if (t.status === 'done') {
+      if (t.due_date && t.completed_at && t.completed_at.split('T')[0] > t.due_date) overdueCount++
+    } else {
+      if (t.due_date && t.due_date < todayStr) overdueCount++
+    }
+  })
+  const onTimeRate = totalTasks > 0 ? Math.round((Math.max(0, totalTasks - overdueCount) / totalTasks) * 100) : 100
+
+  const cardY = 28
+  const cardWidth = 63
+  const cardHeight = 16
+
+  // Card 1: Deliverables
+  doc.setFillColor(241, 245, 249)
+  doc.roundedRect(14, cardY, cardWidth, cardHeight, 2, 2, 'F')
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(100, 116, 139)
+  doc.text('DELIVERABLES COMPLETED', 18, cardY + 5)
+  doc.setFontSize(11)
+  doc.setTextColor(30, 41, 59)
+  doc.text(`${completedTasks} / ${totalTasks} (${completionRate}%)`, 18, cardY + 12)
+
+  // Card 2: On-Time Rate
+  doc.setFillColor(241, 245, 249)
+  doc.roundedRect(14 + cardWidth + 5, cardY, cardWidth, cardHeight, 2, 2, 'F')
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(100, 116, 139)
+  doc.text('ON-TIME EXECUTION RATE', 14 + cardWidth + 9, cardY + 5)
+  doc.setFontSize(11)
+  doc.setTextColor(onTimeRate >= 80 ? 16 : 180, onTimeRate >= 80 ? 140 : 83, onTimeRate >= 80 ? 70 : 9)
+  doc.text(`${onTimeRate}% (${overdueCount} overdue)`, 14 + cardWidth + 9, cardY + 12)
+
+  // Card 3: Hours Logged
+  doc.setFillColor(241, 245, 249)
+  doc.roundedRect(14 + (cardWidth + 5) * 2, cardY, cardWidth, cardHeight, 2, 2, 'F')
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(100, 116, 139)
+  doc.text('TIME UTILIZATION', 14 + (cardWidth + 5) * 2 + 4, cardY + 5)
+  doc.setFontSize(11)
+  doc.setTextColor(30, 41, 59)
+  doc.text(`${totalActualHours}h logged / ${totalEstHours}h est`, 14 + (cardWidth + 5) * 2 + 4, cardY + 12)
+
+  // Card 4: Verified Proofs
+  doc.setFillColor(241, 245, 249)
+  doc.roundedRect(14 + (cardWidth + 5) * 3, cardY, cardWidth, cardHeight, 2, 2, 'F')
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(100, 116, 139)
+  doc.text('VERIFIED DELIVERABLE PROOFS', 14 + (cardWidth + 5) * 3 + 4, cardY + 5)
+  doc.setFontSize(11)
+  doc.setTextColor(5, 150, 105) // emerald-600
+  doc.text(`${totalProofs} submissions verified`, 14 + (cardWidth + 5) * 3 + 4, cardY + 12)
+
+  // ── TASK DELIVERABLES TABLE ──
+  const startY = 48
+  let currentY = startY
+
+  // Table Column Definitions
+  const cols = [
+    { header: '#', width: 8, align: 'left' },
+    { header: 'Task Deliverable Title', width: 62, align: 'left' },
+    { header: 'KPI Category', width: 50, align: 'left' },
+    { header: 'Assignee', width: 34, align: 'left' },
+    { header: 'Status', width: 22, align: 'center' },
+    { header: 'Priority', width: 18, align: 'center' },
+    { header: 'Due Date', width: 22, align: 'center' },
+    { header: 'Logged/Est', width: 24, align: 'center' },
+    { header: 'Proofs', width: 16, align: 'center' },
+  ]
+
+  const drawTableHeader = (y: number) => {
+    doc.setFillColor(226, 232, 240) // slate-200
+    doc.rect(14, y, pageWidth - 28, 7, 'F')
+    doc.setFontSize(7.5)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(51, 65, 85) // slate-700
+
+    let curX = 16
+    cols.forEach(col => {
+      doc.text(col.header, curX, y + 4.8)
+      curX += col.width
+    })
+  }
+
+  drawTableHeader(currentY)
+  currentY += 7
+
+  doc.setFontSize(7.5)
+  tasks.forEach((t, idx) => {
+    // Check if new page needed
+    if (currentY > pageHeight - 15) {
+      doc.addPage('landscape', 'a4')
+      // Mini header on continuation pages
+      doc.setFillColor(15, 23, 42)
+      doc.rect(0, 0, pageWidth, 12, 'F')
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(255, 255, 255)
+      doc.text(`FIRSTOPTION HRIS — TASK REPORT (Page ${doc.getNumberOfPages()})`, 14, 8)
+
+      currentY = 16
+      drawTableHeader(currentY)
+      currentY += 7
+    }
+
+    // Alternating Row Background
+    if (idx % 2 === 1) {
+      doc.setFillColor(248, 250, 252) // slate-50
+      doc.rect(14, currentY, pageWidth - 28, 6.5, 'F')
+    }
+
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(30, 41, 59)
+
+    let curX = 16
+    // #
+    doc.text(String(idx + 1), curX, currentY + 4.5)
+    curX += cols[0].width
+
+    // Title (truncate if long)
+    const truncatedTitle = t.title.length > 36 ? t.title.substring(0, 34) + '...' : t.title
+    doc.setFont('helvetica', 'bold')
+    doc.text(truncatedTitle, curX, currentY + 4.5)
+    doc.setFont('helvetica', 'normal')
+    curX += cols[1].width
+
+    // KPI Category
+    const truncatedCat = (t.kpi_category || 'Operations').length > 28 ? (t.kpi_category || 'Operations').substring(0, 26) + '...' : (t.kpi_category || 'Operations')
+    doc.text(truncatedCat, curX, currentY + 4.5)
+    curX += cols[2].width
+
+    // Assignee
+    const assigneeName = (t.assignee?.name || 'Unassigned').length > 18 ? (t.assignee?.name || 'Unassigned').substring(0, 16) + '..' : (t.assignee?.name || 'Unassigned')
+    doc.text(assigneeName, curX, currentY + 4.5)
+    curX += cols[3].width
+
+    // Status
+    doc.setFont('helvetica', 'bold')
+    if (t.status === 'done') doc.setTextColor(5, 150, 105)
+    else if (t.status === 'in_progress') doc.setTextColor(37, 99, 235)
+    else if (t.status === 'review') doc.setTextColor(217, 119, 6)
+    else doc.setTextColor(100, 116, 139)
+    doc.text(t.status.toUpperCase().replace('_', ' '), curX, currentY + 4.5)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(30, 41, 59)
+    curX += cols[4].width
+
+    // Priority
+    if (t.priority === 'urgent') doc.setTextColor(220, 38, 38)
+    else if (t.priority === 'high') doc.setTextColor(217, 119, 6)
+    else doc.setTextColor(100, 116, 139)
+    doc.text(t.priority.toUpperCase(), curX, currentY + 4.5)
+    doc.setTextColor(30, 41, 59)
+    curX += cols[5].width
+
+    // Due Date
+    doc.text(t.due_date || '—', curX, currentY + 4.5)
+    curX += cols[6].width
+
+    // Logged / Est Hours
+    doc.text(`${t.actual_hours || 0}h / ${t.estimated_hours || 0}h`, curX, currentY + 4.5)
+    curX += cols[7].width
+
+    // Proofs
+    const proofs = (t.comments ? t.comments.filter(c => c.is_proof).length : 0) + (t.image_attachments ? t.image_attachments.length : 0)
+    if (proofs > 0) {
+      doc.setTextColor(5, 150, 105)
+      doc.text(`✓ ${proofs}`, curX, currentY + 4.5)
+      doc.setTextColor(30, 41, 59)
+    } else {
+      doc.text('—', curX, currentY + 4.5)
+    }
+
+    currentY += 6.5
+  })
+
+  // Footer on last page
+  doc.setFontSize(7)
+  doc.setTextColor(148, 163, 184)
+  doc.text(`FirstOption HRIS · Enterprise Task & KPI Management · Confidential Document · Generated: ${new Date().toISOString()}`, 14, pageHeight - 5)
+
+  // Download PDF
+  doc.save(`FirstOption_Executive_Report_${todayStr}.pdf`)
+}
+
+/**
+ * Opens a dedicated print-optimized window for instantaneous native printing or saving to PDF
+ */
+export function printTaskReport(tasks: WorkspaceTask[], options: ReportExportOptions = {}) {
+  const {
+    workspaceName = 'General Workspace',
+    teamName,
+    dateRangeLabel = 'All Time',
+    generatedBy = 'HRIS System Admin',
+  } = options
+
+  const todayStr = new Date().toLocaleDateString()
+  const total = tasks.length
+  const completed = tasks.filter(t => t.status === 'done').length
+  const rate = total > 0 ? Math.round((completed / total) * 100) : 0
+  const actualHours = parseFloat(tasks.reduce((sum, t) => sum + (t.actual_hours || 0), 0).toFixed(1))
+  const estHours = parseFloat(tasks.reduce((sum, t) => sum + (t.estimated_hours || 0), 0).toFixed(1))
+
+  const printWindow = window.open('', '_blank', 'width=1000,height=800')
+  if (!printWindow) {
+    alert('Please allow popups to open the print-friendly view.')
+    return
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>FirstOption HRIS — Task & KPI Report</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; margin: 24px; font-size: 12px; }
+          .header { border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end; }
+          .title { font-size: 18px; font-weight: 800; color: #0f172a; }
+          .meta { font-size: 11px; color: #64748b; margin-top: 4px; }
+          .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+          .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+          .stat-label { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; }
+          .stat-val { font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 4px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; }
+          th { background: #f1f5f9; text-align: left; padding: 8px; font-weight: 700; border-bottom: 2px solid #cbd5e1; font-size: 10px; text-transform: uppercase; color: #475569; }
+          td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; }
+          tr:nth-child(even) td { background: #f8fafc; }
+          .badge { font-weight: 700; font-size: 9px; padding: 2px 6px; border-radius: 4px; }
+          .badge-done { background: #dcfce7; color: #166534; }
+          .badge-prog { background: #dbeafe; color: #1e40af; }
+          .badge-todo { background: #f1f5f9; color: #475569; }
+          .badge-rev { background: #fef3c7; color: #92400e; }
+          @media print {
+            body { margin: 0; }
+            @page { size: landscape; margin: 10mm; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">FIRSTOPTION HRIS — WORKSPACE TASK & KPI REPORT</div>
+            <div class="meta">Scope: ${workspaceName}${teamName ? ` / ${teamName}` : ''} | Period: ${dateRangeLabel} | Generated: ${todayStr} by ${generatedBy}</div>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat-card">
+            <div class="stat-label">Deliverables Done</div>
+            <div class="stat-val">${completed} / ${total} (${rate}%)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Hours Logged</div>
+            <div class="stat-val">${actualHours}h / ${estHours}h</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Deliverables</div>
+            <div class="stat-val">${total} Tasks</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Status</div>
+            <div class="stat-val">${rate >= 80 ? 'Optimal' : 'Active'}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 25px;">#</th>
+              <th>Task Deliverable</th>
+              <th>KPI Category</th>
+              <th>Assignee</th>
+              <th>Status</th>
+              <th>Priority</th>
+              <th>Due Date</th>
+              <th>Logged/Est</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tasks.map((t, i) => `
+              <tr>
+                <td>${i + 1}</td>
+                <td><strong>${t.title}</strong></td>
+                <td>${t.kpi_category || 'Operations'}</td>
+                <td>${t.assignee?.name || 'Unassigned'}</td>
+                <td>
+                  <span class="badge ${t.status === 'done' ? 'badge-done' : t.status === 'in_progress' ? 'badge-prog' : t.status === 'review' ? 'badge-rev' : 'badge-todo'}">
+                    ${t.status.toUpperCase().replace('_', ' ')}
+                  </span>
+                </td>
+                <td>${t.priority.toUpperCase()}</td>
+                <td>${t.due_date || '—'} ${t.due_time ? `(${t.due_time})` : ''}</td>
+                <td>${t.actual_hours || 0}h / ${t.estimated_hours || 0}h</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+    </html>
+  `
+
+  printWindow.document.open()
+  printWindow.document.write(html)
+  printWindow.document.close()
+}

@@ -68,7 +68,7 @@ export function useCurrentStaff() {
           const { data: byEmail } = await supabase
             .from('staff')
             .select('*, departments(name), profiles(photo_url)')
-            .ilike('email', `%${userEmail}%`)
+            .ilike('email', userEmail.trim())
             .maybeSingle()
 
           staffRow = byEmail
@@ -80,70 +80,90 @@ export function useCurrentStaff() {
           }
         }
 
-        // 3. Try finding staff row by name fuzzy search
-        const firstName = userFullName.trim().split(' ')[0]
-        if (!staffRow && firstName && firstName.length > 2) {
-          const { data: byFirstName } = await supabase
+        // 3. Try finding staff row by name match
+        if (!staffRow && userFullName && userFullName.trim().length > 2) {
+          const { data: byName } = await supabase
             .from('staff')
             .select('*, departments(name), profiles(photo_url)')
-            .ilike('full_name', `%${firstName}%`)
-            .order('created_at', { ascending: false })
-            .limit(1)
+            .ilike('full_name', userFullName.trim())
             .maybeSingle()
 
-          staffRow = byFirstName
-        }
-
-        // 4. Fallback to FO-0002 or first staff record in database
-        if (!staffRow) {
-          const { data: fo0002 } = await supabase
-            .from('staff')
-            .select('*, departments(name), profiles(photo_url)')
-            .eq('staff_code', 'FO-0002')
-            .maybeSingle()
-
-          staffRow = fo0002
-        }
-
-        if (!staffRow) {
-          const { data: anyStaff } = await supabase
-            .from('staff')
-            .select('*, departments(name), profiles(photo_url)')
-            .order('created_at', { ascending: true })
-            .limit(1)
-            .maybeSingle()
-
-          staffRow = anyStaff
-        }
-
-        // 3. Fallback: Synthesize dynamically from authenticated user metadata if no DB row found
-        if (!staffRow) {
-          const resolvedName = userFullName || (userEmail ? userEmail.split('@')[0].replace(/[._-]/g, ' ') : 'Staff Member')
-          staffRow = {
-            id: user?.id || 'new-staff',
-            staff_code: 'FO-' + (user?.id ? user.id.slice(0, 4).toUpperCase() : '0002'),
-            full_name: userEmail.includes('learningcopywriter') ? 'Amara Ike' : resolvedName,
-            job_title: userEmail.includes('learningcopywriter') ? 'Sales Rep' : 'Staff Member',
-            department: userEmail.includes('learningcopywriter') ? 'Sales & Marketing' : 'General Operations',
-            date_employed: userEmail.includes('learningcopywriter') ? '2026-02-08' : new Date().toISOString().slice(0, 10),
-            photo_url: userPhotoUrl,
-            status: 'active',
-            profile_id: user?.id || '',
-            email: userEmail || 'learningcopywriter@gmail.com',
-            phone: userPhone || '+234568789',
-            bank_name: userEmail.includes('learningcopywriter') ? 'Fidelity Bank' : 'Not Specified',
-            account_name: userEmail.includes('learningcopywriter') ? 'Amara Ike' : resolvedName,
-            account_number: userEmail.includes('learningcopywriter') ? '2334566777' : '—',
-            gross_salary: 200000,
-            address: userEmail.includes('learningcopywriter') ? '4, Bolanle, Marraba, Lagos State, Nigeria' : '—',
-            next_of_kin: userEmail.includes('learningcopywriter') ? 'Dan' : '—',
-            next_of_kin_phone: userEmail.includes('learningcopywriter') ? '+2334565647' : '—'
+          staffRow = byName
+          if (staffRow && user) {
+            try {
+              await supabase.from('staff').update({ profile_id: user.id }).eq('id', staffRow.id)
+            } catch (e) {}
           }
         }
 
-        // 4. Resolve department name
-        let deptName = staffRow.department || 'General Operations'
-        if (staffRow.department_id) {
+        // 4. If no staff row exists in DB for this authenticated user, auto-provision or synthesize for THIS user
+        if (!staffRow && user) {
+          const userRole = userProfile?.role || 'staff'
+          const roleTitle = userRole === 'accountant' ? 'Accountant' : userRole === 'hr' ? 'HR Manager' : userRole === 'auditor' ? 'Internal Auditor' : userRole === 'super_admin' ? 'Chief Executive' : 'Staff Member'
+          const deptName = userRole === 'accountant' ? 'Accounting & Finance' : userRole === 'hr' ? 'Human Resources' : userRole === 'auditor' ? 'Audit & Compliance' : 'General Operations'
+          
+          try {
+            // Check if department exists
+            const { data: dept } = await supabase
+              .from('departments')
+              .select('id')
+              .ilike('name', `%${deptName.split(' ')[0]}%`)
+              .limit(1)
+              .maybeSingle()
+
+            const newStaffPayload = {
+              profile_id: user.id,
+              full_name: userFullName || 'Staff Member',
+              email: userEmail || user.email || '',
+              phone: userPhone || '',
+              photo_url: userPhotoUrl || '',
+              status: 'active',
+              department_id: dept?.id || null,
+              gross_salary: userRole === 'accountant' ? 350000 : userRole === 'hr' ? 350000 : userRole === 'super_admin' ? 500000 : 200000,
+              date_employed: new Date().toISOString().slice(0, 10),
+            }
+
+            const { data: insertedStaff } = await supabase
+              .from('staff')
+              .insert(newStaffPayload)
+              .select('*, departments(name), profiles(photo_url)')
+              .maybeSingle()
+
+            if (insertedStaff) {
+              staffRow = insertedStaff
+            }
+          } catch (insertErr) {
+            console.warn('Could not auto-insert staff record, using synthesized staff:', insertErr)
+          }
+
+          if (!staffRow) {
+            const resolvedName = userFullName || (userEmail ? userEmail.split('@')[0].replace(/[._-]/g, ' ') : 'Staff Member')
+            staffRow = {
+              id: user.id,
+              staff_code: 'FO-' + user.id.slice(0, 4).toUpperCase(),
+              full_name: resolvedName,
+              job_title: roleTitle,
+              department: deptName,
+              date_employed: new Date().toISOString().slice(0, 10),
+              photo_url: userPhotoUrl || '',
+              status: 'active',
+              profile_id: user.id,
+              email: userEmail || '',
+              phone: userPhone || '',
+              gross_salary: userRole === 'accountant' ? 350000 : 200000,
+              departments: { name: deptName },
+              profiles: {
+                email: userEmail,
+                phone: userPhone,
+                photo_url: userPhotoUrl
+              }
+            }
+          }
+        }
+
+        // 5. Resolve department name
+        let deptName = staffRow?.department || 'General Operations'
+        if (staffRow?.department_id) {
           const { data: dept } = await supabase
             .from('departments')
             .select('name')
@@ -152,20 +172,22 @@ export function useCurrentStaff() {
           if (dept?.name) deptName = dept.name
         }
 
-        const actualDateEmployed = staffRow.date_employed || staffRow.hire_date || (staffRow.created_at ? staffRow.created_at.slice(0, 10) : '2024-10-01')
+        const actualDateEmployed = staffRow?.date_employed || staffRow?.hire_date || (staffRow?.created_at ? staffRow.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10))
 
-        setStaff({
-          ...staffRow,
-          full_name: staffRow.full_name || userFullName,
-          department: deptName,
-          date_employed: actualDateEmployed,
-          departments: { name: deptName },
-          profiles: {
-            email: userEmail,
-            phone: userPhone,
-            photo_url: staffRow.photo_url || userPhotoUrl
-          }
-        })
+        if (staffRow) {
+          setStaff({
+            ...staffRow,
+            full_name: staffRow.full_name || userFullName || 'Staff Member',
+            department: deptName,
+            date_employed: actualDateEmployed,
+            departments: { name: deptName },
+            profiles: {
+              email: userEmail,
+              phone: userPhone,
+              photo_url: staffRow.photo_url || userPhotoUrl
+            }
+          })
+        }
 
       } catch (err: any) {
         console.error('Error fetching current staff:', err)
