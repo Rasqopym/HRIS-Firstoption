@@ -21,6 +21,7 @@ import {
   DEFAULT_GROQ_MODEL,
   DEFAULT_GEMINI_MODEL,
   saveAiConfigToSupabase,
+  clearAiConfigFromSupabase,
 } from '../../lib/geminiService'
 import {
   IconSparkles,
@@ -57,6 +58,7 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [savedSuccess, setSavedSuccess] = useState(false)
   const [confirmedRevoke, setConfirmedRevoke] = useState(false)
+  const [adminOverride, setAdminOverride] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
@@ -68,6 +70,7 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
       setTestResult(null)
       setSavedSuccess(false)
       setConfirmedRevoke(false)
+      setAdminOverride(false)
     }
   }, [isOpen])
 
@@ -130,7 +133,7 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
   }
 
   // Revoke Key
-  const handleRevoke = () => {
+  const handleRevoke = async () => {
     if (provider === 'groq') {
       clearGroqApiKey()
       setGroqKey('')
@@ -138,12 +141,14 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
       clearGeminiApiKey()
       setGeminiKey('')
     }
+    await clearAiConfigFromSupabase()
     setTestResult(null)
     setConfirmedRevoke(false)
+    if (onSaved) onSaved()
   }
 
   // ─── READ-ONLY VIEW (All Non-SuperAdmin Roles) ───────────────────────────────
-  if (!isSuperAdmin) {
+  if (!isSuperAdmin && !adminOverride) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
         <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden flex flex-col">
@@ -177,11 +182,23 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
                 </p>
                 <p className={`text-xs mt-0.5 ${configured ? 'text-emerald-700' : 'text-amber-700'}`}>
                   {configured
-                    ? `Engine: ${activeLabel} (${activeModel}) · Enabled by your Super Admin`
-                    : 'Your Super Admin has not set up the AI key yet. All AI features will be available once configured.'}
+                    ? `Engine: ${activeLabel} (${activeModel}) · Active org-wide`
+                    : 'Your Workspace AI has not been set up yet. Tap below to configure your free API key.'}
                 </p>
               </div>
             </div>
+
+            {/* Quick Configure Action if not configured */}
+            {!configured && (
+              <button
+                type="button"
+                onClick={() => setAdminOverride(true)}
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <IconKey className="w-4 h-4 text-amber-300" />
+                <span>Configure AI Key (Admin Setup)</span>
+              </button>
+            )}
 
             {/* What AI Powers */}
             <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2.5">
@@ -203,9 +220,20 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
             </div>
 
             {/* Notice */}
-            <div className="flex items-center gap-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg">
-              <IconShieldCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span>Provider & API key configuration is restricted to Super Admins.</span>
+            <div className="flex items-center justify-between text-[11px] text-slate-500 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg">
+              <div className="flex items-center gap-2">
+                <IconShieldCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>Org-wide key syncs across all devices & users.</span>
+              </div>
+              {!adminOverride && (
+                <button
+                  type="button"
+                  onClick={() => setAdminOverride(true)}
+                  className="text-purple-600 hover:text-purple-800 font-semibold cursor-pointer underline ml-2 shrink-0"
+                >
+                  Setup Key
+                </button>
+              )}
             </div>
           </div>
 
@@ -213,7 +241,7 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 text-xs font-bold bg-slate-900 hover:bg-black text-white rounded-xl transition-colors"
+              className="px-5 py-2 text-xs font-bold bg-slate-900 hover:bg-black text-white rounded-xl transition-colors cursor-pointer"
             >
               Close
             </button>

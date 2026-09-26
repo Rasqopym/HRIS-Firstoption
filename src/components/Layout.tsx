@@ -1462,12 +1462,16 @@ export default function Layout({
             <div className="relative">
               <button
                 onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false) }}
-                className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors focus:outline-hidden"
+                title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}` : 'Notifications'}
               >
                 <IconBell />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-mono-data">
-                    {unreadCount}
+                  <span
+                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-gradient-to-r from-red-600 to-rose-600 text-white text-[10px] font-bold leading-none rounded-full flex items-center justify-center ring-2 ring-white shadow-xs pointer-events-none tabular-nums"
+                    aria-label={`${unreadCount} unread notifications`}
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </button>
@@ -1751,9 +1755,13 @@ export default function Layout({
           <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setShowNotifications(false)} />
           <div className="fixed right-0 top-0 h-full w-full sm:w-96 bg-white shadow-2xl z-50 flex flex-col anim-slide-right">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div>
+              <div className="flex items-center gap-2">
                 <h2 className="font-display font-semibold text-slate-800">Notifications & Alerts</h2>
-                <p className="text-xs text-slate-500">{unreadCount} unread</p>
+                {unreadCount > 0 && (
+                  <span className="px-2 py-0.5 text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 rounded-full tabular-nums">
+                    {unreadCount} unread
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>

@@ -193,8 +193,12 @@ export async function getWorkspaces(): Promise<Workspace[]> {
       if (cached) return JSON.parse(cached)
       return DEFAULT_WORKSPACES
     }
-    localStorage.setItem(LOCAL_WORKSPACE_KEY, JSON.stringify(data))
-    return data
+    const cleaned = data.map(ws => ({
+      ...ws,
+      description: ws.description ? ws.description.replace(/<!--AI_CONFIG:[\s\S]*?-->/g, '').trim() : ws.description
+    }))
+    localStorage.setItem(LOCAL_WORKSPACE_KEY, JSON.stringify(cleaned))
+    return cleaned
   } catch {
     const cached = localStorage.getItem(LOCAL_WORKSPACE_KEY)
     return cached ? JSON.parse(cached) : DEFAULT_WORKSPACES

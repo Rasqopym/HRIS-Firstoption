@@ -187,9 +187,9 @@ export function getActiveAiProviderLabel(): string {
 // ── Supabase Sync (shared across all users/devices) ──────────────────────────
 
 /**
- * Save AI config to Supabase `app_settings` table.
- * Called by SuperAdmin when they save the settings modal.
- * All other staff load this on workspace mount so they get the same key.
+ * Save AI config to Supabase (app_settings with workspace ws-main fallback).
+ * Called when SuperAdmin or Admin saves the AI settings modal.
+ * All other staff and mobile devices load this on workspace mount so they inherit the key.
  */
 export async function saveAiConfigToSupabase(cfg: {
   provider: AiProvider
@@ -198,17 +198,61 @@ export async function saveAiConfigToSupabase(cfg: {
   geminiKey: string
   geminiModel: string
 }): Promise<void> {
-  const rows = [
-    { key: 'ai_provider',    value: cfg.provider    },
-    { key: 'ai_groq_key',   value: cfg.groqKey    },
-    { key: 'ai_groq_model', value: cfg.groqModel  },
-    { key: 'ai_gemini_key', value: cfg.geminiKey  },
-    { key: 'ai_gemini_model', value: cfg.geminiModel },
-  ]
-  for (const row of rows) {
+  // 1. Immediately cache in local storage for current user session
+  setAiProvider(cfg.provider)
+  if (cfg.provider === 'groq') {
+    setGroqApiKey(cfg.groqKey)
+    setGroqModel(cfg.groqModel)
+  } else {
+    setGeminiApiKey(cfg.geminiKey)
+    setGeminiModel(cfg.geminiModel)
+  }
+
+  // 2. Try app_settings if available (gracefully catches RLS if anon policy is absent)
+  try {
+    const rows = [
+      { key: 'ai_provider',     value: cfg.provider     },
+      { key: 'ai_groq_key',    value: cfg.groqKey     },
+      { key: 'ai_groq_model',  value: cfg.groqModel   },
+      { key: 'ai_gemini_key',  value: cfg.geminiKey   },
+      { key: 'ai_gemini_model', value: cfg.geminiModel },
+    ]
+    for (const row of rows) {
+      await supabase
+        .from('app_settings')
+        .upsert({ key: row.key, value: row.value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    }
+  } catch (e) {
+    // Continue to workspace storage
+  }
+
+  // 3. Persist org-wide AI configuration in default workspace (ws-main)
+  // This allows all staff & mobile devices to load the key without RLS errors
+  try {
+    const { data: wsData } = await supabase
+      .from('workspaces')
+      .select('id, description')
+      .eq('id', 'ws-main')
+      .maybeSingle()
+
+    const rawDesc = wsData?.description || 'Main corporate workspace for cross-functional company collaboration and operations'
+    const cleanDesc = rawDesc.replace(/<!--AI_CONFIG:[\s\S]*?-->/g, '').trim()
+    const configPayload = JSON.stringify({
+      provider: cfg.provider,
+      groqKey: cfg.groqKey,
+      groqModel: cfg.groqModel,
+      geminiKey: cfg.geminiKey,
+      geminiModel: cfg.geminiModel,
+      updatedAt: new Date().toISOString(),
+    })
+    const newDesc = `${cleanDesc}\n<!--AI_CONFIG:${configPayload}-->`
+
     await supabase
-      .from('app_settings')
-      .upsert({ key: row.key, value: row.value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      .from('workspaces')
+      .update({ description: newDesc, updated_at: new Date().toISOString() })
+      .eq('id', 'ws-main')
+  } catch (e) {
+    console.warn('[AI] Failed to sync config to workspace:', e)
   }
 }
 
@@ -220,26 +264,81 @@ export async function saveAiConfigToSupabase(cfg: {
  */
 export async function loadAiConfigFromSupabase(): Promise<boolean> {
   try {
-    const { data, error } = await supabase
-      .from('app_settings')
-      .select('key, value')
-      .in('key', ['ai_provider', 'ai_groq_key', 'ai_groq_model', 'ai_gemini_key', 'ai_gemini_model'])
+    // 1. First try reading from app_settings
+    try {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', ['ai_provider', 'ai_groq_key', 'ai_groq_model', 'ai_gemini_key', 'ai_gemini_model'])
 
-    if (error || !data || data.length === 0) return false
+      if (!error && data && data.length > 0) {
+        const map: Record<string, string> = {}
+        for (const row of data) map[row.key] = row.value
 
-    const map: Record<string, string> = {}
-    for (const row of data) map[row.key] = row.value
+        if (map['ai_provider'])     setAiProvider(map['ai_provider'] as AiProvider)
+        if (map['ai_groq_key'])     setGroqApiKey(map['ai_groq_key'])
+        if (map['ai_groq_model'])   setGroqModel(map['ai_groq_model'])
+        if (map['ai_gemini_key'])   setGeminiApiKey(map['ai_gemini_key'])
+        if (map['ai_gemini_model']) setGeminiModel(map['ai_gemini_model'])
 
-    if (map['ai_provider'])    setAiProvider(map['ai_provider'] as AiProvider)
-    if (map['ai_groq_key'])    setGroqApiKey(map['ai_groq_key'])
-    if (map['ai_groq_model'])  setGroqModel(map['ai_groq_model'])
-    if (map['ai_gemini_key'])  setGeminiApiKey(map['ai_gemini_key'])
-    if (map['ai_gemini_model']) setGeminiModel(map['ai_gemini_model'])
+        if (isAiConfigured()) return true
+      }
+    } catch {}
+
+    // 2. Check workspace ws-main or default workspace
+    const { data: wsRows, error: wsErr } = await supabase
+      .from('workspaces')
+      .select('id, description, is_default')
+      .or('id.eq.ws-main,is_default.eq.true')
+
+    if (!wsErr && wsRows && wsRows.length > 0) {
+      for (const ws of wsRows) {
+        if (!ws.description) continue
+        const match = ws.description.match(/<!--AI_CONFIG:([\s\S]*?)-->/)
+        if (match && match[1]) {
+          try {
+            const parsed = JSON.parse(match[1])
+            if (parsed.provider)    setAiProvider(parsed.provider as AiProvider)
+            if (parsed.groqKey)     setGroqApiKey(parsed.groqKey)
+            if (parsed.groqModel)   setGroqModel(parsed.groqModel)
+            if (parsed.geminiKey)   setGeminiApiKey(parsed.geminiKey)
+            if (parsed.geminiModel) setGeminiModel(parsed.geminiModel)
+
+            if (isAiConfigured()) return true
+          } catch (pe) {
+            console.warn('[AI] Failed parsing workspace AI config:', pe)
+          }
+        }
+      }
+    }
 
     return isAiConfigured()
   } catch (e) {
     console.warn('[AI] Could not load config from Supabase:', e)
-    return false
+    return isAiConfigured()
+  }
+}
+
+/**
+ * Remove AI configuration from Supabase workspace metadata
+ */
+export async function clearAiConfigFromSupabase(): Promise<void> {
+  try {
+    const { data: wsData } = await supabase
+      .from('workspaces')
+      .select('id, description')
+      .eq('id', 'ws-main')
+      .maybeSingle()
+
+    if (wsData) {
+      const cleanDesc = (wsData.description || '').replace(/<!--AI_CONFIG:[\s\S]*?-->/g, '').trim()
+      await supabase
+        .from('workspaces')
+        .update({ description: cleanDesc, updated_at: new Date().toISOString() })
+        .eq('id', 'ws-main')
+    }
+  } catch (e) {
+    console.warn('[AI] Failed to clear config from workspace:', e)
   }
 }
 
