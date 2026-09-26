@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = 'firstoption-hris-v2';
+const CACHE_NAME = 'hris-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -73,12 +73,12 @@ self.addEventListener('fetch', (event) => {
 
 // Push notification event listener
 self.addEventListener('push', (event) => {
-  let data = { title: 'Firstoption HRIS Alert', body: 'You have a new activity update or task reminder.' };
+  let data = { title: 'HRIS Alert', body: 'You have a new activity update or task reminder.' };
   if (event.data) {
     try {
       data = event.data.json();
     } catch (e) {
-      data = { title: 'Firstoption HRIS Alert', body: event.data.text() };
+      data = { title: 'HRIS Alert', body: event.data.text() };
     }
   }
 

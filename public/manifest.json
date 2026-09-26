@@ -1,6 +1,6 @@
-﻿{
-  "name": "Firstoption HRIS Platform",
-  "short_name": "Firstoption HRIS",
+{
+  "name": "HRIS",
+  "short_name": "HRIS",
   "description": "Comprehensive Human Resource & Workforce Management System",
   "start_url": "/",
   "display": "standalone",

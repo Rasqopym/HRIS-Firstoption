@@ -1,22 +1,96 @@
-﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="180" height="180">
   <defs>
+    <!-- Background Gradient: Deep executive sapphire -->
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f2744" />
-      <stop offset="50%" stop-color="#1e3a5f" />
-      <stop offset="100%" stop-color="#2563eb" />
+      <stop offset="0%" stop-color="#071326" />
+      <stop offset="40%" stop-color="#0f2744" />
+      <stop offset="100%" stop-color="#1e3a8a" />
     </linearGradient>
+
+    <!-- Ambient Radial Glow in the upper center -->
+    <radialGradient id="ambientGlow" cx="50%" cy="25%" r="65%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Shield Face Gradient: Radiant sapphire to royal blue -->
     <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#60a5fa" />
-      <stop offset="100%" stop-color="#2563eb" />
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="30%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
     </linearGradient>
+
+    <!-- Shield Beveled Rim -->
+    <linearGradient id="shieldRim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.65" />
+      <stop offset="45%" stop-color="#93c5fd" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#1e40af" stop-opacity="0.1" />
+    </linearGradient>
+
+    <!-- Letter Gradient -->
+    <linearGradient id="letterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f0f9ff" />
+    </linearGradient>
+
+    <!-- Verification Badge Gradient -->
+    <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+
+    <!-- Drop Shadows -->
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+    <filter id="badgeShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
   </defs>
+
+  <!-- Base Squircle -->
   <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
-  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="4" />
-  <path d="M256 96 C340 96 384 128 384 128 C384 272 256 392 256 416 C256 392 128 272 128 128 C128 128 172 96 256 96 Z" fill="url(#shieldGrad)" />
-  <g fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
-    <path d="M 200 200 L 260 200 L 260 224 L 226 224 L 226 248 L 254 248 L 254 270 L 226 270 L 226 316 L 200 316 Z" fill="#ffffff" />
-    <path d="M 284 200 C 308 200 324 218 324 258 C 324 298 308 316 284 316 C 260 316 244 298 244 258 C 244 218 260 200 284 200 Z M 284 224 C 274 224 268 236 268 258 C 268 280 274 292 284 292 C 294 292 300 280 300 258 C 300 236 294 224 284 224 Z" fill="#93c5fd" />
+  <rect width="512" height="512" rx="112" fill="url(#ambientGlow)" />
+  <rect x="14" y="14" width="484" height="484" rx="100" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="3" />
+
+  <!-- Executive Shield Crest with Drop Shadow -->
+  <g filter="url(#dropShadow)">
+    <path d="M256 86 C344 86 388 120 388 120 C388 276 256 400 256 424 C256 400 124 276 124 120 C124 120 168 86 256 86 Z" 
+          fill="url(#shieldGrad)" />
+    <!-- Inner Rim Stroke for 3D bevel effect -->
+    <path d="M256 92 C338 92 380 124 380 124 C380 270 256 390 256 414 C256 390 132 270 132 124 C132 124 174 92 256 92 Z" 
+          fill="none" stroke="url(#shieldRim)" stroke-width="4" />
   </g>
-  <circle cx="360" cy="360" r="38" fill="#10b981" stroke="#ffffff" stroke-width="6" />
-  <path d="M346 360 L356 370 L376 350" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Workforce / People Nexus (Emblem of Human Resources) -->
+  <g fill="#ffffff">
+    <!-- Center Leader Figure -->
+    <circle cx="256" cy="140" r="19" fill="#ffffff" />
+    <path d="M230 194 C230 174 241 166 256 166 C271 166 282 174 282 194 Z" fill="#ffffff" />
+    
+    <!-- Left Team Member -->
+    <circle cx="208" cy="155" r="13" fill="#bae6fd" opacity="0.9" />
+    <path d="M188 198 C188 183 197 176 208 176 C216 176 222 181 225 188 C220 193 215 198 209 198 Z" fill="#bae6fd" opacity="0.9" />
+    
+    <!-- Right Team Member -->
+    <circle cx="304" cy="155" r="13" fill="#bae6fd" opacity="0.9" />
+    <path d="M303 198 C297 198 292 193 287 188 C290 181 296 176 304 176 C315 176 324 183 324 198 Z" fill="#bae6fd" opacity="0.9" />
+    
+    <!-- Connecting Horizon Platform -->
+    <rect x="180" y="205" width="152" height="3" rx="1.5" fill="#e0f2fe" opacity="0.8" />
+  </g>
+
+  <!-- Bold Vector Letters: H R I S -->
+  <g fill="url(#letterGrad)">
+    <path d="M 171 234 L 184 234 L 184 268 L 202 268 L 202 234 L 215 234 L 215 314 L 202 314 L 202 280 L 184 280 L 184 314 L 171 314 Z" />
+    <path d="M 224 234 L 251 234 C 262 234 268 240 268 254 C 268 265 261 272 250 273 L 268 314 L 253 314 L 238 274 L 237 274 L 237 314 L 224 314 Z M 237 245 L 249 245 C 253 245 255 248 255 254 C 255 260 253 263 249 263 L 237 263 Z" />
+    <path d="M 275 234 L 288 234 L 288 314 L 275 314 Z" />
+    <path d="M 340 247 L 329 251 C 327 246 323 244 317 244 C 310 244 307 248 307 253 C 307 259 311 262 319 265 L 324 267 C 335 272 341 279 341 289 C 341 304 330 314 316 314 C 303 314 295 306 293 295 L 305 292 C 307 299 311 302 317 302 C 323 302 328 298 328 291 C 328 285 323 282 315 278 L 310 276 C 300 271 295 265 295 254 C 295 242 305 234 318 234 C 328 234 337 239 340 247 Z" />
+  </g>
+
+  <!-- Active Enterprise Verification Badge with Emerald Checkmark -->
+  <g filter="url(#badgeShadow)">
+    <circle cx="362" cy="362" r="36" fill="url(#badgeGrad)" stroke="#ffffff" stroke-width="5" />
+    <path d="M350 362 L358 370 L376 352" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
 </svg>
