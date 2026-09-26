@@ -280,7 +280,21 @@ export function extractTaskFromMessage(
     workingTitle = firstSentence.length > 90 ? `${firstSentence.substring(0, 87)}...` : firstSentence
   }
 
-  const isActionable = hasActionDirective || confidenceScore >= 0.35 || !!dueDate || !!dueTime || isRecurring
+  // 7. Conversational exclusion — never treat greetings/chitchat as tasks
+  const CONVERSATIONAL_PATTERNS = /^(?:hello|hi\b|hey\b|good\s+(?:morning|afternoon|evening|day|night)|how\s+are\s+you|how's\s+it|what'?s\s+up|thank(?:s|\s+you)|great|okay|ok\b|noted|sure\b|alright|sounds\s+good|got\s+it|understood|nice|cool|awesome|welcome|bye|see\s+you|take\s+care|congratulations|congrats|happy\s+|good\s+luck|well\s+done|morning|afternoon|evening)/i
+  const isConversational = CONVERSATIONAL_PATTERNS.test(clean.replace(/@\S+\s*/g, '').trim())
+
+  // 8. Final actionability decision — require strong, multi-signal evidence
+  //    A lone @mention is NOT enough (removes tag-and-chat from triggering auto-tasks)
+  //    An action verb alone is NOT enough — it must come with at least one other context signal
+  const isActionable = !isConversational && (
+    // Strong: action verb + at least one of (assignee, due date, due time, recurrence)
+    (hasActionDirective && (!!assigneeName || !!dueDate || !!dueTime || isRecurring)) ||
+    // Very strong confidence across multiple signals (no single-signal shortcut)
+    (confidenceScore >= 0.75 && hasActionDirective) ||
+    // Explicitly scheduled/recurring task
+    (isRecurring && hasActionDirective)
+  )
 
   return {
     isActionable,

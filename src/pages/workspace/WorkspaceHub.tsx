@@ -1459,7 +1459,11 @@ export default function WorkspaceHub({
                     const displayPhoto = isMe
                       ? (currentStaffPhoto || msg.sender?.photo)
                       : (msg.sender?.photo || staffList.find(s => s.id === msg.sender_id)?.photo)
-                    const taskProposal = extractTaskFromMessage(msg.content, staffList.map(s => ({ id: s.id, name: s.name, staffCode: s.staffId })))
+                    // Only extract task proposal for human-sent messages (not AI responses).
+                    // Also only show the badge if action_tasks were actually recorded on send.
+                    const taskProposal = !isAi && (msg.action_tasks?.length ?? 0) > 0
+                      ? extractTaskFromMessage(msg.content, staffList.map(s => ({ id: s.id, name: s.name, staffCode: s.staffId })))
+                      : { isActionable: false, title: '', priority: 'medium' as const, confidenceScore: 0 }
 
                     return (
                       <div key={msg.id} className={`flex gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}>
