@@ -77,6 +77,8 @@ export interface HRISNotification {
   timestamp: string
   read: boolean
   type: 'info' | 'warning' | 'success' | 'error'
+  navigateTo?: Page   // if set, clicking the notification navigates here
+  source?: 'workspace' | 'leave' | 'task' | 'system' // for grouping/icons
 }
 
 // ── Salary Structure ─────────────────────────────────────────────────────────

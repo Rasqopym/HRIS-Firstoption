@@ -682,9 +682,87 @@ export default function Layout({
                 timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
                 type: 'error',
                 read: false,
+                source: 'task',
+                navigateTo: 'sa-workspace' as any,
               })
             })
           } catch (e) {}
+        }
+
+        // ── Workspace @Mention Notifications (all roles) ───────────────────
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser()
+          if (authUser) {
+            // For staff: use their staff table UUID; for admins: use profile auth UUID
+            let mentionId: string | null = null
+            if (role === 'staff') {
+              const { data: sRow } = await supabase
+                .from('staff').select('id').eq('profile_id', authUser.id).maybeSingle()
+              mentionId = sRow?.id || authUser.id
+            } else {
+              mentionId = authUser.id
+            }
+
+            // Only fetch messages newer than last time we checked (max 72 hours back)
+            const cutoff = localStorage.getItem('hris_ws_mentions_seen_at')
+              || new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
+
+            const wsPage: any = role === 'staff' ? 'st-workspace'
+              : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
+
+            const { data: mentionMsgs } = await supabase
+              .from('workspace_chat_messages')
+              .select('id, content, sender_name, channel_id, created_at')
+              .contains('mentions', [mentionId])
+              .gt('created_at', cutoff)
+              .order('created_at', { ascending: false })
+              .limit(15)
+
+            ;(mentionMsgs || []).forEach((m: any) => {
+              const preview = (m.content || '')
+                .replace(/\*\*/g, '').replace(/@\w+/g, '').trim().slice(0, 70)
+              items.push({
+                id: `ws-mention-${m.id}`,
+                title: `💬 ${m.sender_name || 'Someone'} mentioned you`,
+                message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
+                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                type: 'info',
+                read: false,
+                source: 'workspace',
+                navigateTo: wsPage,
+              })
+            })
+
+            // Also surface recent AI responses directed at you (@ai messages you sent)
+            const { data: aiReplies } = await supabase
+              .from('workspace_chat_messages')
+              .select('id, content, created_at')
+              .eq('sender_name', 'Workspace AI Copilot')
+              .contains('mentions', [mentionId])
+              .gt('created_at', cutoff)
+              .order('created_at', { ascending: false })
+              .limit(5)
+
+            ;(aiReplies || []).forEach((m: any) => {
+              const preview = (m.content || '')
+                .replace(/\*\*/g, '').replace(/^⚡\s*/, '').trim().slice(0, 70)
+              items.push({
+                id: `ws-ai-reply-${m.id}`,
+                title: '⚡ Workspace AI replied to you',
+                message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'AI response in workspace',
+                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                type: 'success',
+                read: false,
+                source: 'workspace',
+                navigateTo: wsPage,
+              })
+            })
+
+            // Update seen timestamp so next fetch only shows newer messages
+            localStorage.setItem('hris_ws_mentions_seen_at', new Date().toISOString())
+          }
+        } catch (wsErr) {
+          console.warn('[Notif] Workspace mention fetch error:', wsErr)
         }
 
         setNotifs(items)
@@ -701,7 +779,45 @@ export default function Layout({
 
     fetchNotifications()
     const interval = setInterval(fetchNotifications, 60000) // Periodic 1-minute check for reminders
-    return () => clearInterval(interval)
+
+    // ── Supabase Realtime: instantly surface new @mentions ─────────────────
+    let realtimeChannel: any = null
+    ;(async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (!authUser) return
+
+      realtimeChannel = supabase
+        .channel('ws-mention-realtime')
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'workspace_chat_messages',
+        }, (payload: any) => {
+          const msg = payload.new
+          if (!msg || !Array.isArray(msg.mentions)) return
+          if (!msg.mentions.includes(authUser.id)) return // not for us
+          const wsPage: any = role === 'staff' ? 'st-workspace'
+            : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
+          const preview = (msg.content || '').replace(/\*\*/g, '').replace(/@\w+/g, '').trim().slice(0, 70)
+          const newNotif: HRISNotification = {
+            id: `ws-mention-rt-${msg.id}`,
+            title: `💬 ${msg.sender_name || 'Someone'} mentioned you`,
+            message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
+            timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: 'info',
+            read: false,
+            source: 'workspace',
+            navigateTo: wsPage,
+          }
+          setNotifs(prev => [newNotif, ...prev])
+        })
+        .subscribe()
+    })()
+
+    return () => {
+      clearInterval(interval)
+      if (realtimeChannel) supabase.removeChannel(realtimeChannel)
+    }
   }, [role, page])
 
   useEffect(() => {
@@ -1495,7 +1611,13 @@ export default function Layout({
               {notifs.map(n => (
                 <div
                   key={n.id}
-                  onClick={() => setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))}
+                  onClick={() => {
+                    setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
+                    if (n.navigateTo) {
+                      setShowNotifications(false)
+                      onNavigate(n.navigateTo as any)
+                    }
+                  }}
                   className={`px-5 py-4 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}
                 >
                   <div className="flex items-start gap-3">
@@ -1504,10 +1626,17 @@ export default function Layout({
                       n.type === 'warning' ? 'bg-amber-500' :
                       n.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
                     } ${n.read ? 'opacity-30' : ''}`} />
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className={`text-sm font-medium ${n.read ? 'text-slate-500' : 'text-slate-800'}`}>{n.title}</div>
                       <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{n.message}</div>
-                      <div className="text-xs text-slate-400 mt-1">{n.timestamp}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-slate-400">{n.timestamp}</span>
+                        {n.source === 'workspace' && !n.read && (
+                          <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
+                            Workspace →
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
