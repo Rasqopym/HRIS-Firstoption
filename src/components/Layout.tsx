@@ -641,20 +641,22 @@ export default function Layout({
               // Fetch workspace tasks assigned to this staff member
               try {
                 const { data: myTasks } = await supabase
-                  .from('workspace_tasks')
+                  .from('tasks')
                   .select('id, title, priority, due_date, status, created_at')
                   .eq('assignee_id', staffRow.id)
                   .neq('status', 'done')
                   .order('created_at', { ascending: false })
-                  .limit(5)
+                  .limit(10)
                 ;(myTasks || []).forEach((t: any) => {
                   items.push({
                     id: `wstask-${t.id}`,
-                    title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : 'Workspace Task Assigned',
+                    title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : '📋 Task Assigned to You',
                     message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
                     timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
                     type: t.priority === 'urgent' ? 'error' : 'info',
                     read: false,
+                    source: 'workspace',
+                    navigateTo: 'st-workspace',
                   })
                 })
               } catch (taskErr) {
@@ -668,102 +670,133 @@ export default function Layout({
         if (role === 'superadmin' || role === 'hr') {
           try {
             const { data: urgentTasks } = await supabase
-              .from('workspace_tasks')
+              .from('tasks')
               .select('id, title, priority, due_date, status, created_at')
               .eq('priority', 'urgent')
               .neq('status', 'done')
               .order('created_at', { ascending: false })
               .limit(5)
             ;(urgentTasks || []).forEach((t: any) => {
-              items.push({
-                id: `urgent-task-${t.id}`,
-                title: '🔥 Urgent Workspace Task Pending',
-                message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
-                timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
-                type: 'error',
-                read: false,
-                source: 'task',
-                navigateTo: 'sa-workspace' as any,
-              })
+              if (!items.some(x => x.id === `wstask-${t.id}`)) {
+                items.push({
+                  id: `urgent-task-${t.id}`,
+                  title: '🔥 Urgent Workspace Task Pending',
+                  message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                  timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
+                  type: 'error',
+                  read: false,
+                  source: 'task',
+                  navigateTo: 'sa-workspace' as any,
+                })
+              }
             })
           } catch (e) {}
         }
 
-        // ── Workspace @Mention Notifications (all roles) ───────────────────
+        // ── Workspace Tasks & @Mentions Notifications (All Roles) ───────────
         try {
           const { data: { user: authUser } } = await supabase.auth.getUser()
+          let currentStaffId: string | null = null
           if (authUser) {
-            // For staff: use their staff table UUID; for admins: use profile auth UUID
-            let mentionId: string | null = null
-            if (role === 'staff') {
-              const { data: sRow } = await supabase
-                .from('staff').select('id').eq('profile_id', authUser.id).maybeSingle()
-              mentionId = sRow?.id || authUser.id
-            } else {
-              mentionId = authUser.id
+            const { data: sRow } = await supabase
+              .from('staff').select('id, full_name').eq('profile_id', authUser.id).maybeSingle()
+            currentStaffId = sRow?.id || null
+
+            // If user is not staff role (e.g. HR or Superadmin assigned a task), check tasks assigned to them too
+            if (currentStaffId && role !== 'staff') {
+              const { data: adminTasks } = await supabase
+                .from('tasks')
+                .select('id, title, priority, due_date, status, created_at')
+                .eq('assignee_id', currentStaffId)
+                .neq('status', 'done')
+                .order('created_at', { ascending: false })
+                .limit(5)
+              ;(adminTasks || []).forEach((t: any) => {
+                if (!items.some(x => x.id === `wstask-${t.id}`)) {
+                  items.push({
+                    id: `wstask-${t.id}`,
+                    title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : '📋 Task Assigned to You',
+                    message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                    timestamp: t.due_date || new Date(t.created_at).toLocaleDateString(),
+                    type: t.priority === 'urgent' ? 'error' : 'info',
+                    read: false,
+                    source: 'workspace',
+                    navigateTo: role === 'hr' ? 'hr-workspace' : 'sa-workspace',
+                  })
+                }
+              })
             }
 
-            // Only fetch messages newer than last time we checked (max 72 hours back)
-            const cutoff = localStorage.getItem('hris_ws_mentions_seen_at')
-              || new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
+            // Local cache fallback for tasks (ensures instant task notifications even before DB sync)
+            if (currentStaffId) {
+              try {
+                const cachedTasks = JSON.parse(localStorage.getItem('hris_workspace_tasks_cache') || '[]')
+                const wsPage: any = role === 'staff' ? 'st-workspace' : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
+                cachedTasks
+                  .filter((t: any) => (t.assignee_id === currentStaffId || t.assignee?.id === currentStaffId) && t.status !== 'done')
+                  .slice(0, 10)
+                  .forEach((t: any) => {
+                    const tid = `wstask-${t.id}`
+                    if (!items.some(x => x.id === tid)) {
+                      items.push({
+                        id: tid,
+                        title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : '📋 Task Assigned to You',
+                        message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                        timestamp: t.due_date || new Date(t.created_at || Date.now()).toLocaleDateString(),
+                        type: t.priority === 'urgent' ? 'error' : 'info',
+                        read: false,
+                        source: 'workspace',
+                        navigateTo: wsPage,
+                      })
+                    }
+                  })
+              } catch {}
+            }
 
-            const wsPage: any = role === 'staff' ? 'st-workspace'
-              : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
+            // ── Chat @Mentions from chat_messages table ──
+            const targetMentionIds = [authUser.id, currentStaffId].filter(Boolean) as string[]
+            const wsPage: any = role === 'staff' ? 'st-workspace' : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
 
-            const { data: mentionMsgs } = await supabase
-              .from('workspace_chat_messages')
-              .select('id, content, sender_name, channel_id, created_at')
-              .contains('mentions', [mentionId])
-              .gt('created_at', cutoff)
-              .order('created_at', { ascending: false })
-              .limit(15)
+            for (const mId of targetMentionIds) {
+              const { data: mentionMsgs } = await supabase
+                .from('chat_messages')
+                .select('id, content, sender_id, channel_id, created_at, sender:sender_id(full_name)')
+                .contains('mentions', [mId])
+                .order('created_at', { ascending: false })
+                .limit(10)
 
-            ;(mentionMsgs || []).forEach((m: any) => {
-              const preview = (m.content || '')
-                .replace(/\*\*/g, '').replace(/@\w+/g, '').trim().slice(0, 70)
-              items.push({
-                id: `ws-mention-${m.id}`,
-                title: `💬 ${m.sender_name || 'Someone'} mentioned you`,
-                message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
-                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                type: 'info',
-                read: false,
-                source: 'workspace',
-                navigateTo: wsPage,
+              ;(mentionMsgs || []).forEach((m: any) => {
+                const msgId = `ws-mention-${m.id}`
+                if (!items.some(x => x.id === msgId)) {
+                  const senderName = m.sender?.full_name || 'A team member'
+                  const preview = (m.content || '').replace(/\*\*/g, '').replace(/@\S+/g, '').trim().slice(0, 70)
+                  items.push({
+                    id: msgId,
+                    title: `💬 ${senderName} mentioned you`,
+                    message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
+                    timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    type: 'info',
+                    read: false,
+                    source: 'workspace',
+                    navigateTo: wsPage,
+                  })
+                }
               })
-            })
-
-            // Also surface recent AI responses directed at you (@ai messages you sent)
-            const { data: aiReplies } = await supabase
-              .from('workspace_chat_messages')
-              .select('id, content, created_at')
-              .eq('sender_name', 'Workspace AI Copilot')
-              .contains('mentions', [mentionId])
-              .gt('created_at', cutoff)
-              .order('created_at', { ascending: false })
-              .limit(5)
-
-            ;(aiReplies || []).forEach((m: any) => {
-              const preview = (m.content || '')
-                .replace(/\*\*/g, '').replace(/^⚡\s*/, '').trim().slice(0, 70)
-              items.push({
-                id: `ws-ai-reply-${m.id}`,
-                title: '⚡ Workspace AI replied to you',
-                message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'AI response in workspace',
-                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                type: 'success',
-                read: false,
-                source: 'workspace',
-                navigateTo: wsPage,
-              })
-            })
-
-            // Update seen timestamp so next fetch only shows newer messages
-            localStorage.setItem('hris_ws_mentions_seen_at', new Date().toISOString())
+            }
           }
         } catch (wsErr) {
-          console.warn('[Notif] Workspace mention fetch error:', wsErr)
+          console.warn('[Notif] Workspace task/mention fetch error:', wsErr)
         }
+
+        // Apply read status persisted in localStorage
+        try {
+          const readIds: string[] = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
+          if (readIds.length > 0) {
+            items.forEach(it => {
+              if (readIds.includes(it.id)) it.read = true
+            })
+          }
+        } catch {}
 
         setNotifs(items)
         localStorage.setItem('hris_pending_actions_count', String(items.filter(i => !i.read).length))
@@ -780,28 +813,53 @@ export default function Layout({
     fetchNotifications()
     const interval = setInterval(fetchNotifications, 60000) // Periodic 1-minute check for reminders
 
-    // ── Supabase Realtime: instantly surface new @mentions ─────────────────
+    // ── Supabase Realtime: instantly surface new tasks & @mentions ─────────
     let realtimeChannel: any = null
     ;(async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) return
 
+      let staffId: string | null = null
+      const { data: sRow } = await supabase
+        .from('staff').select('id').eq('profile_id', authUser.id).maybeSingle()
+      staffId = sRow?.id || null
+
+      const wsPage: any = role === 'staff' ? 'st-workspace' : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
+
       realtimeChannel = supabase
-        .channel('ws-mention-realtime')
+        .channel('workspace-topbar-realtime')
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
-          table: 'workspace_chat_messages',
+          table: 'tasks',
+        }, (payload: any) => {
+          const t = payload.new
+          if (!t || (t.assignee_id !== staffId && t.assignee_id !== authUser.id)) return
+          const newNotif: HRISNotification = {
+            id: `wstask-${t.id}`,
+            title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : '📋 Task Assigned to You',
+            message: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+            timestamp: t.due_date || new Date().toLocaleDateString(),
+            type: t.priority === 'urgent' ? 'error' : 'info',
+            read: false,
+            source: 'workspace',
+            navigateTo: wsPage,
+          }
+          setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+        })
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
         }, (payload: any) => {
           const msg = payload.new
           if (!msg || !Array.isArray(msg.mentions)) return
-          if (!msg.mentions.includes(authUser.id)) return // not for us
-          const wsPage: any = role === 'staff' ? 'st-workspace'
-            : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
-          const preview = (msg.content || '').replace(/\*\*/g, '').replace(/@\w+/g, '').trim().slice(0, 70)
+          const isTagged = msg.mentions.includes(authUser.id) || (staffId && msg.mentions.includes(staffId))
+          if (!isTagged) return
+          const preview = (msg.content || '').replace(/\*\*/g, '').replace(/@\S+/g, '').trim().slice(0, 70)
           const newNotif: HRISNotification = {
             id: `ws-mention-rt-${msg.id}`,
-            title: `💬 ${msg.sender_name || 'Someone'} mentioned you`,
+            title: '💬 You were mentioned in chat',
             message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
             timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             type: 'info',
@@ -809,7 +867,7 @@ export default function Layout({
             source: 'workspace',
             navigateTo: wsPage,
           }
-          setNotifs(prev => [newNotif, ...prev])
+          setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
         })
         .subscribe()
     })()
@@ -968,7 +1026,17 @@ export default function Layout({
     'profile': 'My Profile',
   }
 
-  const markAllRead = () => setNotifs(n => n.map(x => ({ ...x, read: true })))
+  const markAllRead = () => {
+    setNotifs(n => {
+      const readIds = n.map(x => x.id)
+      try {
+        const stored = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
+        const merged = Array.from(new Set([...stored, ...readIds]))
+        localStorage.setItem('hris_read_notif_ids', JSON.stringify(merged))
+      } catch {}
+      return n.map(x => ({ ...x, read: true }))
+    })
+  }
 
   return (
     <div className="flex h-screen bg-slate-50/80 overflow-hidden">
@@ -1613,6 +1681,12 @@ export default function Layout({
                   key={n.id}
                   onClick={() => {
                     setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
+                    try {
+                      const stored = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
+                      if (!stored.includes(n.id)) {
+                        localStorage.setItem('hris_read_notif_ids', JSON.stringify([...stored, n.id]))
+                      }
+                    } catch {}
                     if (n.navigateTo) {
                       setShowNotifications(false)
                       onNavigate(n.navigateTo as any)
