@@ -125,6 +125,8 @@ export default function WorkspaceHub({
   const [activeLightboxImage, setActiveLightboxImage] = useState<string | null>(null)
   const [showGeminiSettingsModal, setShowGeminiSettingsModal] = useState(false)
   const [aiThinking, setAiThinking] = useState(false)
+  // Reactive state for AI config — updated after Supabase load so badge re-renders
+  const [aiConfigured, setAiConfigured] = useState(false)
 
   // Interactive @ Mention Autocomplete States
   const [showMentionMenu, setShowMentionMenu] = useState(false)
@@ -180,8 +182,11 @@ export default function WorkspaceHub({
   // 1. Initial Load: Workspaces & Staff Directory + AI Config from Supabase
   useEffect(() => {
     loadInitialData()
-    // Load AI config from Supabase so all roles inherit SuperAdmin-configured key
-    loadAiConfigFromSupabase()
+    // Load AI config from Supabase so all roles inherit SuperAdmin-configured key.
+    // .then() updates React state so the badge re-renders immediately after load.
+    loadAiConfigFromSupabase().then(loaded => {
+      setAiConfigured(loaded || isGeminiConfigured())
+    })
   }, [])
 
   const loadInitialData = async () => {
@@ -1150,9 +1155,9 @@ export default function WorkspaceHub({
           ) : (
             <button
               onClick={() => setShowGeminiSettingsModal(true)}
-              title={isGeminiConfigured() ? 'Workspace AI is active' : 'AI not configured — contact your Super Admin'}
+              title={aiConfigured ? 'Workspace AI is active' : 'AI not configured — contact your Super Admin'}
               className={`px-2.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer border shrink-0 ${
-                isGeminiConfigured()
+                aiConfigured
                   ? getAiProvider() === 'groq'
                     ? 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100'
                     : 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100'
@@ -1160,11 +1165,11 @@ export default function WorkspaceHub({
               }`}
             >
               {getAiProvider() === 'groq' ? (
-                <IconZap className={`w-3.5 h-3.5 ${isGeminiConfigured() ? 'text-orange-500' : 'text-slate-400'}`} />
+                <IconZap className={`w-3.5 h-3.5 ${aiConfigured ? 'text-orange-500' : 'text-slate-400'}`} />
               ) : (
-                <IconSparkles className={`w-3.5 h-3.5 ${isGeminiConfigured() ? 'text-purple-500' : 'text-slate-400'}`} />
+                <IconSparkles className={`w-3.5 h-3.5 ${aiConfigured ? 'text-purple-500' : 'text-slate-400'}`} />
               )}
-              <span>{isGeminiConfigured() ? 'AI Active' : 'AI Off'}</span>
+              <span>{aiConfigured ? 'AI Active' : 'AI Off'}</span>
             </button>
           )}
 
@@ -2620,6 +2625,7 @@ export default function WorkspaceHub({
       <GeminiSettingsModal
         isOpen={showGeminiSettingsModal}
         onClose={() => setShowGeminiSettingsModal(false)}
+        onSaved={() => setAiConfigured(isGeminiConfigured())}
         isSuperAdmin={role === 'superadmin'}
       />
 
