@@ -64,6 +64,7 @@ import {
   IconSparkles,
   IconBuilding,
   IconBell,
+  IconLock,
 } from '../../components/icons/ClassicIcons'
 import TaskBoard from './TaskBoard'
 import GeminiSettingsModal from '../../components/workspace/GeminiSettingsModal'
@@ -162,20 +163,31 @@ export default function WorkspaceHub({
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
   // ── Role-Based Access Control (RBAC) ──
-  const isSuperOrHr = role === 'superadmin' || role === 'hr'
+  // Superadmin is the SOLE supreme governor of all workspaces and squads.
+  // HR is NOT automatically an admin unless Superadmin explicitly grants them the 'admin' role.
+  const isSuperAdmin = role === 'superadmin'
+
   const isWorkspaceAdmin = useMemo(() => {
-    if (isSuperOrHr) return true
+    if (isSuperAdmin) return true
     return workspaceMembers.some(
       m => m.staff_id === currentStaffId && (m.role === 'admin' || m.role === 'lead')
     )
-  }, [isSuperOrHr, workspaceMembers, currentStaffId])
+  }, [isSuperAdmin, workspaceMembers, currentStaffId])
 
   const isSquadLead = useMemo(() => {
-    if (isWorkspaceAdmin) return true
+    if (isSuperAdmin || isWorkspaceAdmin) return true
     return teamMembers.some(
       m => m.staff_id === currentStaffId && m.role === 'lead'
     )
-  }, [isWorkspaceAdmin, teamMembers, currentStaffId])
+  }, [isSuperAdmin, isWorkspaceAdmin, teamMembers, currentStaffId])
+
+  // Squad Membership Gate:
+  // Superadmin & appointed Workspace Admins can govern all squads.
+  // All other staff (including HR) must be an assigned member in team_members to view or post.
+  const isSquadMember = useMemo(() => {
+    if (isSuperAdmin || isWorkspaceAdmin) return true
+    return teamMembers.some(m => m.staff_id === currentStaffId)
+  }, [isSuperAdmin, isWorkspaceAdmin, teamMembers, currentStaffId])
 
   const canAccessExecutiveDigest = isWorkspaceAdmin || isSquadLead
 
@@ -327,9 +339,9 @@ export default function WorkspaceHub({
     }
   }
 
-  // 4. Load Messages & Subscribe to Realtime when Channel changes
+  // 4. Load Messages & Subscribe to Realtime when Channel changes (Gated by Squad Membership)
   useEffect(() => {
-    if (selectedChannel) {
+    if (selectedChannel && isSquadMember) {
       loadMessages(selectedChannel.id)
 
       // Single unified Realtime subscription per channel
@@ -375,8 +387,10 @@ export default function WorkspaceHub({
       return () => {
         supabase.removeChannel(channelSub)
       }
+    } else {
+      setMessages([])
     }
-  }, [selectedChannel])
+  }, [selectedChannel, isSquadMember])
 
   const loadMessages = async (chId: string) => {
     setLoadingMessages(true)
@@ -622,6 +636,10 @@ export default function WorkspaceHub({
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!isSquadMember) {
+      alert('You must be an assigned member of this squad to send messages.')
+      return
+    }
     if ((!inputText.trim() && attachments.length === 0) || !selectedChannel) return
 
     const senderId = currentStaffId || 'user-current'
@@ -877,9 +895,13 @@ export default function WorkspaceHub({
     alert(`✓ Task created successfully and scheduled on calendar: "${created.title}" (Due: ${created.due_date})`)
   }
 
-  // Workspace Member Handlers
+  // Workspace Member Handlers (Governed Exclusively by Superadmin)
   const handleAddWorkspaceMember = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!isSuperAdmin) {
+      alert('Only the Superadmin can add members and assign workspace roles.')
+      return
+    }
     if (!selectedWorkspace || !selectedStaffToAdd) return
     const staff = staffList.find(s => s.id === selectedStaffToAdd)
     const newMember = await addWorkspaceMember(
@@ -897,6 +919,10 @@ export default function WorkspaceHub({
 
   const handleUpdateWorkspaceRole = async (staffId: string, newRole: 'admin' | 'lead' | 'member' | 'viewer') => {
     if (!selectedWorkspace) return
+    if (!isSuperAdmin) {
+      alert('Only the Superadmin can change workspace roles or appoint admins.')
+      return
+    }
     await updateWorkspaceMemberRole(selectedWorkspace.id, staffId, newRole)
     setWorkspaceMembers(prev =>
       prev.map(m => m.staff_id === staffId ? { ...m, role: newRole } : m)
@@ -905,15 +931,23 @@ export default function WorkspaceHub({
 
   const handleRemoveWorkspaceMember = async (staffId: string) => {
     if (!selectedWorkspace) return
+    if (!isSuperAdmin) {
+      alert('Only the Superadmin can remove members from the workspace.')
+      return
+    }
     if (confirm('Are you sure you want to remove this member from the workspace?')) {
       await removeWorkspaceMember(selectedWorkspace.id, staffId)
       setWorkspaceMembers(prev => prev.filter(m => m.staff_id !== staffId))
     }
   }
 
-  // Team Member Handlers
+  // Team / Squad Member Handlers (Superadmin, Workspace Admin, or Squad Lead)
   const handleAddTeamMember = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!isWorkspaceAdmin && !isSquadLead) {
+      alert('You do not have permission to add squad members.')
+      return
+    }
     if (!selectedTeam || !selectedTeamStaffToAdd) return
     const staff = staffList.find(s => s.id === selectedTeamStaffToAdd)
     const newMember = await addTeamMember(
@@ -931,6 +965,10 @@ export default function WorkspaceHub({
 
   const handleUpdateTeamRole = async (staffId: string, newRole: 'lead' | 'member') => {
     if (!selectedTeam) return
+    if (!isWorkspaceAdmin && !isSquadLead) {
+      alert('You do not have permission to update squad roles.')
+      return
+    }
     await updateTeamMemberRole(selectedTeam.id, staffId, newRole)
     setTeamMembers(prev =>
       prev.map(m => m.staff_id === staffId ? { ...m, role: newRole } : m)
@@ -939,6 +977,10 @@ export default function WorkspaceHub({
 
   const handleRemoveTeamMember = async (staffId: string) => {
     if (!selectedTeam) return
+    if (!isWorkspaceAdmin && !isSquadLead) {
+      alert('You do not have permission to remove squad members.')
+      return
+    }
     if (confirm('Are you sure you want to remove this member from this squad?')) {
       await removeTeamMember(selectedTeam.id, staffId)
       setTeamMembers(prev => prev.filter(m => m.staff_id !== staffId))
@@ -1084,7 +1126,7 @@ export default function WorkspaceHub({
                 <option key={w.id} value={w.id}>{w.name}</option>
               ))}
             </select>
-            {(role === 'superadmin' || role === 'hr') && (
+            {isSuperAdmin && (
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => setShowNewWorkspaceModal(true)}
@@ -1272,7 +1314,7 @@ export default function WorkspaceHub({
           <div className="p-3 border-b border-slate-800/80 flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Teams & Squads</span>
             <div className="flex items-center gap-1.5">
-              {selectedTeam && (
+              {selectedTeam && isWorkspaceAdmin && (
                 <button
                   onClick={() => setShowTeamMembersModal(true)}
                   title={`Manage squad members and leads in ${selectedTeam.name}`}
@@ -1282,10 +1324,10 @@ export default function WorkspaceHub({
                   <span>Leads</span>
                 </button>
               )}
-              {(role === 'superadmin' || role === 'hr') && (
+              {isWorkspaceAdmin && (
                 <button
                   onClick={() => setShowNewTeamModal(true)}
-                  title="Create Team"
+                  title="Create Squad (Superadmin or Workspace Admin)"
                   className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold"
                 >
                   +
@@ -1296,43 +1338,51 @@ export default function WorkspaceHub({
 
           {/* Teams List */}
           <div className="p-2 space-y-1 overflow-y-auto max-h-44 border-b border-slate-800/60">
-            {teams.map(t => (
-              <div key={t.id} className="group/team relative flex items-center">
-                <button
-                  onClick={() => setSelectedTeam(t)}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors pr-7 ${
-                    selectedTeam?.id === t.id
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
-                  <span className="truncate">{t.name}</span>
-                </button>
-                {(role === 'superadmin' || role === 'hr') && (
+            {teams.map(t => {
+              const isSelected = selectedTeam?.id === t.id
+              return (
+                <div key={t.id} className="group/team relative flex items-center">
                   <button
-                    type="button"
-                    onClick={(e) => handleDeleteTeam(t.id, t.name, e)}
-                    title={`Delete squad "${t.name}"`}
-                    className="absolute right-1.5 opacity-0 group-hover/team:opacity-100 p-1 text-slate-400 hover:text-red-400 hover:bg-slate-700/50 rounded transition-all"
+                    onClick={() => setSelectedTeam(t)}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors pr-7 ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
                   >
-                    <IconTrash className="w-3 h-3" />
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
+                    <span className="truncate">{t.name}</span>
+                    {!isSuperAdmin && !isWorkspaceAdmin && (
+                      <IconLock className="w-3 h-3 text-slate-500 shrink-0 ml-auto mr-1 opacity-70" />
+                    )}
                   </button>
-                )}
-              </div>
-            ))}
+                  {isWorkspaceAdmin && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteTeam(t.id, t.name, e)}
+                      title={`Delete squad "${t.name}"`}
+                      className="absolute right-1.5 opacity-0 group-hover/team:opacity-100 p-1 text-slate-400 hover:text-red-400 hover:bg-slate-700/50 rounded transition-all"
+                    >
+                      <IconTrash className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           {/* Channels Header */}
           <div className="p-3 border-b border-slate-800/80 flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Channels</span>
-            <button
-              onClick={() => setShowNewChannelModal(true)}
-              title="Add Channel"
-              className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold"
-            >
-              +
-            </button>
+            {(isWorkspaceAdmin || isSquadLead) && (
+              <button
+                onClick={() => setShowNewChannelModal(true)}
+                title="Add Channel"
+                className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold"
+              >
+                +
+              </button>
+            )}
           </div>
 
           {/* Channels List */}
@@ -1359,7 +1409,7 @@ export default function WorkspaceHub({
                     <span className="text-[9px] bg-slate-700 text-slate-300 px-1 py-0.2 rounded shrink-0">main</span>
                   )}
                 </button>
-                {(role === 'superadmin' || role === 'hr') && (
+                {isWorkspaceAdmin && (
                   <button
                     type="button"
                     onClick={(e) => handleDeleteChannel(ch.id, ch.name, ch.is_general, e)}
@@ -1439,7 +1489,24 @@ export default function WorkspaceHub({
 
               {/* Chat Feed */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {loadingMessages ? (
+                {!isSquadMember ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4 max-w-md mx-auto">
+                    <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
+                      <IconLock className="w-8 h-8 text-amber-600" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h4 className="font-bold text-slate-800 text-base">Squad Access Restricted</h4>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        This squad is private. You are not currently an assigned member of <span className="font-bold text-slate-800">"{selectedTeam?.name || 'this squad'}"</span>.
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {teamMembers.length === 0
+                          ? 'This squad currently has 0 members. Only the Superadmin (or appointed Workspace Admin) can assign members and govern access.'
+                          : 'Only assigned squad members and the Superadmin can view conversations and collaborate here.'}
+                      </p>
+                    </div>
+                  </div>
+                ) : loadingMessages ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                   </div>
@@ -1585,8 +1652,14 @@ export default function WorkspaceHub({
                 </div>
               )}
 
-              {/* Chat Input Box with Clipboard Screenshot Paste Support */}
-              <div className="p-3 bg-white border-t border-slate-200 space-y-2">
+              {/* Chat Input Box (Gated by Squad Membership) */}
+              {!isSquadMember ? (
+                <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-center gap-2 text-xs text-slate-500 font-medium">
+                  <IconLock className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>You must be an assigned member of this squad to participate in chat.</span>
+                </div>
+              ) : (
+                <div className="p-3 bg-white border-t border-slate-200 space-y-2">
                 {/* Pending Attachment Previews */}
                 {attachments.length > 0 && (
                   <div className="flex flex-wrap gap-2 pb-1">
@@ -1771,76 +1844,145 @@ export default function WorkspaceHub({
                   </button>
                 </form>
               </div>
+              )}
             </div>
           )}
 
           {/* TAB 2: KANBAN & TASK MANAGEMENT */}
           {activeTab === 'tasks' && (
             <div className="flex-1 overflow-y-auto p-4 bg-slate-50/60">
-              <TaskBoard
-                workspaceId={selectedWorkspace?.id}
-                teamId={selectedTeam?.id}
-                workspaceName={selectedWorkspace?.name}
-                teamName={selectedTeam?.name}
-                staffList={staffList}
-                currentStaffId={currentStaffId}
-                currentStaffName={currentStaffName}
-                canAccessExecutiveDigest={canAccessExecutiveDigest}
-                initialView="kanban"
-                onPostDigestToChat={handlePostDigestToChat}
-              />
+              {!isSquadMember ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4 max-w-md mx-auto">
+                  <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
+                    <IconLock className="w-8 h-8 text-amber-600" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="font-bold text-slate-800 text-base">Squad Access Restricted</h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      You are not currently an assigned member of <span className="font-bold text-slate-800">"{selectedTeam?.name || 'this squad'}"</span>.
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Task boards and workflows are private to assigned squad members and the Superadmin.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <TaskBoard
+                  workspaceId={selectedWorkspace?.id}
+                  teamId={selectedTeam?.id}
+                  workspaceName={selectedWorkspace?.name}
+                  teamName={selectedTeam?.name}
+                  staffList={staffList}
+                  currentStaffId={currentStaffId}
+                  currentStaffName={currentStaffName}
+                  canAccessExecutiveDigest={canAccessExecutiveDigest}
+                  initialView="kanban"
+                  onPostDigestToChat={handlePostDigestToChat}
+                />
+              )}
             </div>
           )}
 
           {/* TAB 3: TASK CALENDAR & DUE SCHEDULE */}
           {activeTab === 'calendar' && (
             <div className="flex-1 overflow-y-auto p-4 bg-slate-50/60">
-              <TaskBoard
-                workspaceId={selectedWorkspace?.id}
-                teamId={selectedTeam?.id}
-                workspaceName={selectedWorkspace?.name}
-                teamName={selectedTeam?.name}
-                staffList={staffList}
-                currentStaffId={currentStaffId}
-                currentStaffName={currentStaffName}
-                canAccessExecutiveDigest={canAccessExecutiveDigest}
-                initialView="calendar"
-                onPostDigestToChat={handlePostDigestToChat}
-              />
+              {!isSquadMember ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4 max-w-md mx-auto">
+                  <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
+                    <IconLock className="w-8 h-8 text-amber-600" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="font-bold text-slate-800 text-base">Squad Access Restricted</h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      You are not currently an assigned member of <span className="font-bold text-slate-800">"{selectedTeam?.name || 'this squad'}"</span>.
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Task calendars are private to assigned squad members and the Superadmin.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <TaskBoard
+                  workspaceId={selectedWorkspace?.id}
+                  teamId={selectedTeam?.id}
+                  workspaceName={selectedWorkspace?.name}
+                  teamName={selectedTeam?.name}
+                  staffList={staffList}
+                  currentStaffId={currentStaffId}
+                  currentStaffName={currentStaffName}
+                  canAccessExecutiveDigest={canAccessExecutiveDigest}
+                  initialView="calendar"
+                  onPostDigestToChat={handlePostDigestToChat}
+                />
+              )}
             </div>
           )}
 
           {/* TAB 4: VELOCITY & DAILY STANDUPS MONITORING */}
           {activeTab === 'monitoring' && (
             <div className="flex-1 overflow-y-auto p-4 bg-slate-50/60">
-              <TeamMonitoring
-                workspaceId={selectedWorkspace?.id}
-                teamId={selectedTeam?.id}
-                staffList={staffList}
-                currentStaffId={currentStaffId}
-                currentStaffName={currentStaffName}
-                canAccessExecutiveDigest={canAccessExecutiveDigest}
-                squadName={selectedTeam?.name}
-                onPostDigestToChat={handlePostDigestToChat}
-              />
+              {!isSquadMember ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4 max-w-md mx-auto">
+                  <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
+                    <IconLock className="w-8 h-8 text-amber-600" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="font-bold text-slate-800 text-base">Squad Access Restricted</h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      You are not currently an assigned member of <span className="font-bold text-slate-800">"{selectedTeam?.name || 'this squad'}"</span>.
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Standups and velocity monitoring are private to assigned squad members and the Superadmin.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <TeamMonitoring
+                  workspaceId={selectedWorkspace?.id}
+                  teamId={selectedTeam?.id}
+                  staffList={staffList}
+                  currentStaffId={currentStaffId}
+                  currentStaffName={currentStaffName}
+                  canAccessExecutiveDigest={canAccessExecutiveDigest}
+                  squadName={selectedTeam?.name}
+                  onPostDigestToChat={handlePostDigestToChat}
+                />
+              )}
             </div>
           )}
 
           {/* TAB 5: WEEKLY KPI SCORECARD & PERFORMANCE DIGEST */}
           {activeTab === 'scorecard' && (
             <div className="flex-1 overflow-y-auto p-4 bg-slate-50/60">
-              <TaskBoard
-                workspaceId={selectedWorkspace?.id}
-                teamId={selectedTeam?.id}
-                workspaceName={selectedWorkspace?.name}
-                teamName={selectedTeam?.name}
-                staffList={staffList}
-                currentStaffId={currentStaffId}
-                currentStaffName={currentStaffName}
-                canAccessExecutiveDigest={canAccessExecutiveDigest}
-                initialView="scorecard"
-                onPostDigestToChat={handlePostDigestToChat}
-              />
+              {!isSquadMember ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4 max-w-md mx-auto">
+                  <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
+                    <IconLock className="w-8 h-8 text-amber-600" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h4 className="font-bold text-slate-800 text-base">Squad Access Restricted</h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      You are not currently an assigned member of <span className="font-bold text-slate-800">"{selectedTeam?.name || 'this squad'}"</span>.
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Scorecards and performance digests are private to assigned squad members and the Superadmin.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <TaskBoard
+                  workspaceId={selectedWorkspace?.id}
+                  teamId={selectedTeam?.id}
+                  workspaceName={selectedWorkspace?.name}
+                  teamName={selectedTeam?.name}
+                  staffList={staffList}
+                  currentStaffId={currentStaffId}
+                  currentStaffName={currentStaffName}
+                  canAccessExecutiveDigest={canAccessExecutiveDigest}
+                  initialView="scorecard"
+                  onPostDigestToChat={handlePostDigestToChat}
+                />
+              )}
             </div>
           )}
         </div>
@@ -1873,12 +2015,14 @@ export default function WorkspaceHub({
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                   Squad Members ({teamMembers.length})
                 </span>
-                <button
-                  onClick={() => setShowTeamMembersModal(true)}
-                  className="text-[10px] font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors"
-                >
-                  Manage
-                </button>
+                {(isWorkspaceAdmin || isSquadLead) && (
+                  <button
+                    onClick={() => setShowTeamMembersModal(true)}
+                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded transition-colors"
+                  >
+                    Manage
+                  </button>
+                )}
               </div>
               <div className="space-y-1.5 max-h-56 overflow-y-auto">
                 {teamMembers.length === 0 ? (
@@ -2263,56 +2407,63 @@ export default function WorkspaceHub({
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6">
-              {/* Add New Member Section */}
-              <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-blue-900 mb-2 flex items-center gap-1.5">
-                  <IconPlus className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Add New Member to Workspace</span>
-                </h4>
-                <form onSubmit={handleAddWorkspaceMember} className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
-                  <div className="sm:col-span-6">
-                    <select
-                      value={selectedStaffToAdd}
-                      onChange={e => setSelectedStaffToAdd(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
-                    >
-                      <option value="">-- Select Staff from Directory --</option>
-                      {staffList
-                        .filter(s => !workspaceMembers.some(m => m.staff_id === s.id))
-                        .map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} ({s.staffId}) — {s.department}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
+              {/* Add New Member Section (Superadmin Only) */}
+              {isSuperAdmin ? (
+                <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-blue-900 mb-2 flex items-center gap-1.5">
+                    <IconPlus className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Add New Member & Assign Role</span>
+                  </h4>
+                  <form onSubmit={handleAddWorkspaceMember} className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
+                    <div className="sm:col-span-6">
+                      <select
+                        value={selectedStaffToAdd}
+                        onChange={e => setSelectedStaffToAdd(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
+                      >
+                        <option value="">-- Select Staff from Directory --</option>
+                        {staffList
+                          .filter(s => !workspaceMembers.some(m => m.staff_id === s.id))
+                          .map(s => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} ({s.staffId}) — {s.department}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
 
-                  <div className="sm:col-span-4">
-                    <select
-                      value={selectedRoleToAdd}
-                      onChange={e => setSelectedRoleToAdd(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
-                    >
-                      <option value="admin">Workspace Admin</option>
-                      <option value="lead">Workspace Lead</option>
-                      <option value="member">Standard Member</option>
-                      <option value="viewer">Read-Only Viewer</option>
-                    </select>
-                  </div>
+                    <div className="sm:col-span-4">
+                      <select
+                        value={selectedRoleToAdd}
+                        onChange={e => setSelectedRoleToAdd(e.target.value as any)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
+                      >
+                        <option value="admin">Workspace Admin (Can govern squads)</option>
+                        <option value="lead">Workspace Lead</option>
+                        <option value="member">Standard Member</option>
+                        <option value="viewer">Read-Only Viewer</option>
+                      </select>
+                    </div>
 
-                  <div className="sm:col-span-2">
-                    <button
-                      type="submit"
-                      disabled={!selectedStaffToAdd}
-                      className="w-full h-full py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1"
-                    >
-                      <IconPlus className="w-3.5 h-3.5" />
-                      <span>Add</span>
-                    </button>
-                  </div>
-                </form>
-              </div>
+                    <div className="sm:col-span-2">
+                      <button
+                        type="submit"
+                        disabled={!selectedStaffToAdd}
+                        className="w-full h-full py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1"
+                      >
+                        <IconPlus className="w-3.5 h-3.5" />
+                        <span>Add</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-2 text-xs text-slate-600">
+                  <IconLock className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>Workspace administration and admin role delegation are governed exclusively by the Superadmin.</span>
+                </div>
+              )}
 
               {/* Members List & Role Controls */}
               <div className="space-y-3">
@@ -2375,25 +2526,39 @@ export default function WorkspaceHub({
                               </div>
 
                               <div className="flex items-center gap-2 shrink-0">
-                                <select
-                                  value={m.role}
-                                  onChange={e => handleUpdateWorkspaceRole(m.staff_id, e.target.value as any)}
-                                  className="text-xs font-semibold px-2 py-1 bg-slate-100 border border-slate-300 rounded-lg outline-none cursor-pointer hover:border-slate-400"
-                                >
-                                  <option value="admin">Admin</option>
-                                  <option value="lead">Lead</option>
-                                  <option value="member">Member</option>
-                                  <option value="viewer">Viewer</option>
-                                </select>
+                                {isSuperAdmin ? (
+                                  <>
+                                    <select
+                                      value={m.role}
+                                      onChange={e => handleUpdateWorkspaceRole(m.staff_id, e.target.value as any)}
+                                      className="text-xs font-semibold px-2 py-1 bg-slate-100 border border-slate-300 rounded-lg outline-none cursor-pointer hover:border-slate-400"
+                                    >
+                                      <option value="admin">Admin</option>
+                                      <option value="lead">Lead</option>
+                                      <option value="member">Member</option>
+                                      <option value="viewer">Viewer</option>
+                                    </select>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveWorkspaceMember(m.staff_id)}
-                                  title="Remove from workspace"
-                                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center text-sm font-bold transition-colors"
-                                >
-                                  ✕
-                                </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveWorkspaceMember(m.staff_id)}
+                                      title="Remove from workspace"
+                                      className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center text-sm font-bold transition-colors"
+                                    >
+                                      ✕
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                                    m.role === 'admin'
+                                      ? 'bg-purple-100 text-purple-800'
+                                      : m.role === 'lead'
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : 'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    {m.role}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           )
@@ -2492,54 +2657,61 @@ export default function WorkspaceHub({
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6">
-              {/* Add New Squad Member */}
-              <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900 mb-2 flex items-center gap-1.5">
-                  <IconPlus className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Add Staff to Squad</span>
-                </h4>
-                <form onSubmit={handleAddTeamMember} className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
-                  <div className="sm:col-span-6">
-                    <select
-                      value={selectedTeamStaffToAdd}
-                      onChange={e => setSelectedTeamStaffToAdd(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
-                    >
-                      <option value="">-- Select Staff --</option>
-                      {staffList
-                        .filter(s => !teamMembers.some(m => m.staff_id === s.id))
-                        .map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} ({s.staffId}) — {s.department}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
+              {/* Add New Squad Member (Admin or Lead Only) */}
+              {(isWorkspaceAdmin || isSquadLead) ? (
+                <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900 mb-2 flex items-center gap-1.5">
+                    <IconPlus className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Add Staff to Squad</span>
+                  </h4>
+                  <form onSubmit={handleAddTeamMember} className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
+                    <div className="sm:col-span-6">
+                      <select
+                        value={selectedTeamStaffToAdd}
+                        onChange={e => setSelectedTeamStaffToAdd(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+                      >
+                        <option value="">-- Select Staff --</option>
+                        {staffList
+                          .filter(s => !teamMembers.some(m => m.staff_id === s.id))
+                          .map(s => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} ({s.staffId}) — {s.department}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
 
-                  <div className="sm:col-span-4">
-                    <select
-                      value={selectedTeamRoleToAdd}
-                      onChange={e => setSelectedTeamRoleToAdd(e.target.value as any)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
-                    >
-                      <option value="lead">Squad Lead / Manager</option>
-                      <option value="member">Squad Member</option>
-                    </select>
-                  </div>
+                    <div className="sm:col-span-4">
+                      <select
+                        value={selectedTeamRoleToAdd}
+                        onChange={e => setSelectedTeamRoleToAdd(e.target.value as any)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
+                      >
+                        <option value="lead">Squad Lead / Manager</option>
+                        <option value="member">Squad Member</option>
+                      </select>
+                    </div>
 
-                  <div className="sm:col-span-2">
-                    <button
-                      type="submit"
-                      disabled={!selectedTeamStaffToAdd}
-                      className="w-full h-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1"
-                    >
-                      <IconPlus className="w-3.5 h-3.5" />
-                      <span>Add</span>
-                    </button>
-                  </div>
-                </form>
-              </div>
+                    <div className="sm:col-span-2">
+                      <button
+                        type="submit"
+                        disabled={!selectedTeamStaffToAdd}
+                        className="w-full h-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1"
+                      >
+                        <IconPlus className="w-3.5 h-3.5" />
+                        <span>Add</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-2 text-xs text-slate-600">
+                  <IconLock className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>Only the Superadmin, Workspace Admin, or appointed Squad Leads can add members to this squad.</span>
+                </div>
+              )}
 
               {/* Squad Members List */}
               <div className="space-y-3">
@@ -2581,23 +2753,33 @@ export default function WorkspaceHub({
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
-                              <select
-                                value={tm.role}
-                                onChange={e => handleUpdateTeamRole(tm.staff_id, e.target.value as any)}
-                                className="text-xs font-semibold px-2 py-1 bg-slate-100 border border-slate-300 rounded-lg outline-none cursor-pointer hover:border-slate-400"
-                              >
-                                <option value="lead">Squad Lead</option>
-                                <option value="member">Squad Member</option>
-                              </select>
+                              {(isWorkspaceAdmin || isSquadLead) ? (
+                                <>
+                                  <select
+                                    value={tm.role}
+                                    onChange={e => handleUpdateTeamRole(tm.staff_id, e.target.value as any)}
+                                    className="text-xs font-semibold px-2 py-1 bg-slate-100 border border-slate-300 rounded-lg outline-none cursor-pointer hover:border-slate-400"
+                                  >
+                                    <option value="lead">Squad Lead</option>
+                                    <option value="member">Squad Member</option>
+                                  </select>
 
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveTeamMember(tm.staff_id)}
-                                title="Remove from squad"
-                                className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center text-sm font-bold transition-colors"
-                              >
-                                ✕
-                              </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveTeamMember(tm.staff_id)}
+                                    title="Remove from squad"
+                                    className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center text-sm font-bold transition-colors"
+                                  >
+                                    ✕
+                                  </button>
+                                </>
+                              ) : (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                                  tm.role === 'lead' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {tm.role === 'lead' ? 'Lead' : 'Member'}
+                                </span>
+                              )}
                             </div>
                           </div>
                         )
