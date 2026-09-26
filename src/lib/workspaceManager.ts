@@ -492,8 +492,9 @@ export async function getChannelMessages(channelId: string, limit: number = 50):
 
 export async function sendChatMessage(msg: {
   channel_id: string
-  sender_id: string
-  content: string
+  sender_id?: string | null
+  content?: string
+  message?: string
   parent_id?: string | null
   attachments?: CompressedImageAttachment[]
   mentions?: string[]
@@ -502,10 +503,13 @@ export async function sendChatMessage(msg: {
   sender_photo?: string
 }): Promise<ChatMessage> {
   const localId = `msg-${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+  const textContent = (msg.content ?? msg.message ?? '').trim()
+  const resolvedSenderId = msg.sender_id || 'user-current'
+
   const payload = {
     channel_id: msg.channel_id,
-    sender_id: msg.sender_id,
-    content: msg.content,
+    sender_id: resolvedSenderId,
+    content: textContent,
     parent_id: msg.parent_id || null,
     attachments: msg.attachments || [],
     reactions: {},
@@ -518,10 +522,14 @@ export async function sendChatMessage(msg: {
   let finalId = localId
 
   try {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(msg.sender_id)
+    const isUuid = msg.sender_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(msg.sender_id)
+    // The database column chat_messages.sender_id is a UUID NOT NULL.
+    // When sender_id is not a UUID (e.g. 'gemini-ai', 'user-superadmin', or undefined),
+    // we use the system admin staff UUID so the insert succeeds without violating NOT NULL or UUID syntax.
+    const fallbackSenderUuid = 'cdcaa32a-ea56-4e20-b6bc-adfa20722c25'
     const dbPayload = {
       ...payload,
-      sender_id: isUuid ? msg.sender_id : null,
+      sender_id: isUuid ? msg.sender_id : fallbackSenderUuid,
     }
 
     const { data, error } = await supabase

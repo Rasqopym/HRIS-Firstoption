@@ -1082,23 +1082,48 @@ export default function WorkspaceHub({
     }
   }
 
-  // Scorecard Digest to Chat
+  // Scorecard / Standup Digest to Chat
   const handlePostDigestToChat = async (digestText: string) => {
-    if (!selectedChannel) {
-      alert('Please select a squad channel to post the digest into.')
+    if (!digestText || !digestText.trim()) {
+      alert('The executive digest is empty.')
       return
     }
+    const targetChannel = selectedChannel || channels[0]
+    if (!targetChannel) {
+      alert('Please select or create a squad channel to post the digest into.')
+      return
+    }
+    if (!selectedChannel) {
+      setSelectedChannel(targetChannel)
+    }
+
     try {
-      await sendChatMessage({
-        channel_id: selectedChannel.id,
-        sender_id: currentStaffId || undefined,
-        sender_name: currentStaffName,
-        message: digestText,
+      const senderId = currentStaffId || 'cdcaa32a-ea56-4e20-b6bc-adfa20722c25'
+      const senderName = (currentStaffName && currentStaffName !== 'Current Staff' && currentStaffName !== 'Team Member')
+        ? currentStaffName
+        : (role === 'superadmin' ? 'HRIS Admin' : role === 'hr' ? 'HR Manager' : 'Staff Member')
+      const senderPhoto = currentStaffPhoto
+
+      const newMsg = await sendChatMessage({
+        channel_id: targetChannel.id,
+        sender_id: senderId,
+        content: digestText.trim(),
+        sender_name: senderName,
+        sender_photo: senderPhoto,
       })
+
+      // Immediately append to local React messages state so it renders instantly
+      setMessages(prev => {
+        if (prev.some(m => m.id === newMsg.id)) return prev
+        return [...prev, newMsg]
+      })
+
       // Switch back to chat tab so the user sees the posted digest!
       setActiveTab('chat')
-    } catch (err) {
+      scrollToBottom()
+    } catch (err: any) {
       console.error('Failed to post digest to chat:', err)
+      alert(`Could not post digest to chat: ${err?.message || 'Unknown error'}`)
     }
   }
 
