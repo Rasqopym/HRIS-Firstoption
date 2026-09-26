@@ -282,19 +282,19 @@ export function extractTaskFromMessage(
 
   // 7. Conversational exclusion — never treat greetings/chitchat as tasks
   const CONVERSATIONAL_PATTERNS = /^(?:hello|hi\b|hey\b|good\s+(?:morning|afternoon|evening|day|night)|how\s+are\s+you|how's\s+it|what'?s\s+up|thank(?:s|\s+you)|great|okay|ok\b|noted|sure\b|alright|sounds\s+good|got\s+it|understood|nice|cool|awesome|welcome|bye|see\s+you|take\s+care|congratulations|congrats|happy\s+|good\s+luck|well\s+done|morning|afternoon|evening)/i
-  const isConversational = CONVERSATIONAL_PATTERNS.test(clean.replace(/@\S+\s*/g, '').trim())
+  const isConversational = CONVERSATIONAL_PATTERNS.test(workingTitle.trim()) ||
+    CONVERSATIONAL_PATTERNS.test(clean.replace(/@[\w\s.-]+(?:\s+|$)/g, '').trim())
 
-  // 8. Final actionability decision — require strong, multi-signal evidence
-  //    A lone @mention is NOT enough (removes tag-and-chat from triggering auto-tasks)
-  //    An action verb alone is NOT enough — it must come with at least one other context signal
-  const isActionable = !isConversational && (
-    // Strong: action verb + at least one of (assignee, due date, due time, recurrence)
-    (hasActionDirective && (!!assigneeName || !!dueDate || !!dueTime || isRecurring)) ||
-    // Very strong confidence across multiple signals (no single-signal shortcut)
-    (confidenceScore >= 0.75 && hasActionDirective) ||
-    // Explicitly scheduled/recurring task
-    (isRecurring && hasActionDirective)
-  )
+  // 8. Final actionability decision — strictly require:
+  //    1. Not conversational
+  //    2. MUST have an explicit action directive / verb (e.g. create, review, schedule, prepare, etc.)
+  //    3. Title must be at least 5 characters (prevents single-word or tiny fragments)
+  //    4. Must have an assignee, due date/time, recurrence, or very high confidence
+  const isActionable = !isConversational &&
+    hasActionDirective &&
+    workingTitle.trim().length >= 5 && (
+      !!assigneeName || !!dueDate || !!dueTime || isRecurring || confidenceScore >= 0.75
+    )
 
   return {
     isActionable,
