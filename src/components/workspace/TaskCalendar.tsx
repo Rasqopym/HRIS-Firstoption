@@ -211,22 +211,22 @@ export default function TaskCalendar({
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
       {/* ── TOP CALENDAR HEADER BAR ── */}
-      <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-2.5 sm:gap-3">
         {/* Navigation & Current Month/Year */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="flex items-center justify-between sm:justify-start gap-2.5 sm:gap-3 w-full md:w-auto">
+          <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden shrink-0">
             <button
               type="button"
               onClick={handlePrev}
               title="Previous"
-              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+              className="p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
             >
               <IconChevronLeft className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={handleToday}
-              className="px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 border-x border-slate-200 transition-colors"
+              className="px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 border-x border-slate-200 transition-colors"
             >
               Today
             </button>
@@ -234,53 +234,54 @@ export default function TaskCalendar({
               type="button"
               onClick={handleNext}
               title="Next"
-              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+              className="p-1.5 sm:p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
             >
               <IconChevronRight className="w-4 h-4" />
             </button>
           </div>
 
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <IconCalendar className="w-5 h-5 text-blue-600" />
-            <span>
+          <h3 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-1.5 sm:gap-2 truncate">
+            <IconCalendar className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 shrink-0" />
+            <span className="truncate">
               {monthNames[month]} {year}
             </span>
           </h3>
         </div>
 
         {/* Filters & Subview Switcher */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Priority filter */}
-          <select
-            value={priorityFilter}
-            onChange={e => setPriorityFilter(e.target.value)}
-            className="text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none"
-          >
-            <option value="all">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full md:w-auto">
+          {/* Filters 2-column grid on mobile */}
+          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center">
+            <select
+              value={priorityFilter}
+              onChange={e => setPriorityFilter(e.target.value)}
+              className="w-full sm:w-auto text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none"
+            >
+              <option value="all">All Priorities</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
 
-          {/* Status filter */}
-          <select
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none"
-          >
-            <option value="all">All Statuses</option>
-            <option value="todo">To Do</option>
-            <option value="in_progress">In Progress</option>
-            <option value="review">Under Review</option>
-            <option value="done">Completed</option>
-          </select>
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="w-full sm:w-auto text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none"
+            >
+              <option value="all">All Statuses</option>
+              <option value="todo">To Do</option>
+              <option value="in_progress">In Progress</option>
+              <option value="review">Under Review</option>
+              <option value="done">Completed</option>
+            </select>
+          </div>
 
-          {/* Subview Switcher */}
-          <div className="flex items-center bg-slate-200/80 p-0.5 rounded-lg border border-slate-300">
+          {/* Subview Switcher: equal widths on mobile */}
+          <div className="grid grid-cols-3 sm:flex items-center bg-slate-200/80 p-0.5 rounded-lg border border-slate-300 w-full sm:w-auto">
             <button
               onClick={() => setCalendarView('month')}
-              className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+              className={`px-3 py-1 text-xs font-bold rounded-md transition-all text-center ${
                 calendarView === 'month'
                   ? 'bg-white text-blue-600 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -290,7 +291,7 @@ export default function TaskCalendar({
             </button>
             <button
               onClick={() => setCalendarView('week')}
-              className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+              className={`px-3 py-1 text-xs font-bold rounded-md transition-all text-center ${
                 calendarView === 'week'
                   ? 'bg-white text-blue-600 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -300,7 +301,7 @@ export default function TaskCalendar({
             </button>
             <button
               onClick={() => setCalendarView('agenda')}
-              className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+              className={`px-3 py-1 text-xs font-bold rounded-md transition-all text-center ${
                 calendarView === 'agenda'
                   ? 'bg-white text-blue-600 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -316,9 +317,12 @@ export default function TaskCalendar({
       {calendarView === 'month' && (
         <div className="flex flex-col">
           {/* Weekday Labels */}
-          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/70 text-center py-2 text-xs font-bold text-slate-600 uppercase tracking-wider">
+          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/70 text-center py-1.5 sm:py-2 text-[10px] sm:text-xs font-bold text-slate-600 uppercase tracking-wider">
             {dayNames.map(day => (
-              <div key={day}>{day}</div>
+              <div key={day}>
+                <span className="hidden sm:inline">{day}</span>
+                <span className="sm:hidden inline">{day.charAt(0)}</span>
+              </div>
             ))}
           </div>
 
@@ -330,14 +334,20 @@ export default function TaskCalendar({
               return (
                 <div
                   key={idx}
-                  className={`min-h-[120px] p-2 border-r border-b border-slate-200 transition-colors flex flex-col group relative ${
+                  onClick={() => {
+                    if (window.innerWidth < 640 && dayTasks.length > 0) {
+                      setCurrentDate(new Date(cell.dateStr))
+                      setCalendarView('agenda')
+                    }
+                  }}
+                  className={`min-h-[58px] sm:min-h-[120px] p-1 sm:p-2 border-r border-b border-slate-200 transition-colors flex flex-col group relative ${
                     cell.isCurrentMonth ? 'bg-white' : 'bg-slate-50/50 text-slate-400'
                   } ${cell.isToday ? 'bg-blue-50/30' : ''}`}
                 >
                   {/* Cell Header: Day Number + Quick Add Task Button */}
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-0.5 sm:mb-1">
                     <span
-                      className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center ${
+                      className={`text-[10px] sm:text-xs font-bold rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center ${
                         cell.isToday
                           ? 'bg-blue-600 text-white font-extrabold shadow-xs'
                           : cell.isCurrentMonth
@@ -351,15 +361,35 @@ export default function TaskCalendar({
                     <button
                       type="button"
                       title={`Create task on ${cell.dateStr}`}
-                      onClick={() => onCreateTaskOnDate(cell.dateStr)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onCreateTaskOnDate(cell.dateStr)
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 sm:p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded"
                     >
-                      <IconPlus className="w-3.5 h-3.5" />
+                      <IconPlus className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </button>
                   </div>
 
-                  {/* Tasks in this Day Cell */}
-                  <div className="space-y-1.5 flex-1 overflow-hidden">
+                  {/* Mobile Compact Indicators (< sm) */}
+                  <div className="sm:hidden flex flex-wrap gap-1 mt-0.5 items-center justify-center">
+                    {dayTasks.slice(0, 3).map((t, tIdx) => (
+                      <span
+                        key={tIdx}
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          t.priority === 'urgent' ? 'bg-red-500' :
+                          t.priority === 'high' ? 'bg-amber-500' :
+                          t.priority === 'medium' ? 'bg-blue-500' : 'bg-slate-400'
+                        }`}
+                      />
+                    ))}
+                    {dayTasks.length > 3 && (
+                      <span className="text-[8px] font-bold text-slate-500">+{dayTasks.length - 3}</span>
+                    )}
+                  </div>
+
+                  {/* Desktop Tasks in this Day Cell (>= sm) */}
+                  <div className="hidden sm:block space-y-1.5 flex-1 overflow-hidden">
                     {dayTasks.slice(0, 3).map(task => {
                       const theme = PRIORITY_THEMES[task.priority]
                       const isDone = task.status === 'done'
@@ -423,7 +453,8 @@ export default function TaskCalendar({
 
       {/* ── 2. WEEK VIEW ── */}
       {calendarView === 'week' && (
-        <div className="grid grid-cols-7 divide-x divide-slate-200 min-h-[500px]">
+        <div className="overflow-x-auto">
+          <div className="grid grid-cols-7 divide-x divide-slate-200 min-w-[700px] min-h-[500px]">
           {generateWeekDays().map((dayObj, i) => {
             const dayTasks = tasksByDate[dayObj.dateStr] || []
 
@@ -510,6 +541,7 @@ export default function TaskCalendar({
               </div>
             )
           })}
+          </div>
         </div>
       )}
 

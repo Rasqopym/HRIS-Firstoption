@@ -577,105 +577,110 @@ export default function TaskBoard({
   return (
     <div className="space-y-4">
       {/* Top Filter Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1">
+      <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-xs space-y-3">
+        {/* Row 1: Search, Priority & Assignee filters */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
           {/* Search */}
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <div className="relative flex-1">
             <svg className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input
               type="text"
               placeholder="Search tasks or assignees..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50/50"
+              className="w-full pl-9 pr-3 py-1.5 text-xs sm:text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50/50"
             />
           </div>
 
-          {/* Priority Filter */}
-          <select
-            value={filterPriority}
-            onChange={e => setFilterPriority(e.target.value)}
-            className="text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-2 bg-white text-slate-700 outline-none"
-          >
-            <option value="all">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
+          {/* Priority & Assignee Filters: 2 equal columns on mobile, auto width on md+ */}
+          <div className="grid grid-cols-2 md:flex items-center gap-2">
+            <select
+              value={filterPriority}
+              onChange={e => setFilterPriority(e.target.value)}
+              className="w-full md:w-auto text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none"
+            >
+              <option value="all">All Priorities</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
 
-          {/* Assignee Filter */}
-          <select
-            value={filterAssignee}
-            onChange={e => setFilterAssignee(e.target.value)}
-            className="text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-2 bg-white text-slate-700 outline-none"
-          >
-            <option value="all">All Assignees</option>
-            {staffList.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-
-          {/* View Mode Toggle */}
-          <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-slate-100 p-0.5 ml-auto md:ml-0">
-            <button
-              onClick={() => setViewMode('kanban')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors ${
-                viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
+            <select
+              value={filterAssignee}
+              onChange={e => setFilterAssignee(e.target.value)}
+              className="w-full md:w-auto text-xs font-medium border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none truncate"
             >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg>
-              Board
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors ${
-                viewMode === 'list' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-              List
-            </button>
-            <button
-              onClick={() => setViewMode('calendar')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors ${
-                viewMode === 'calendar' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <IconCalendar className="w-3.5 h-3.5" />
-              Calendar
-            </button>
-            <button
-              onClick={() => setViewMode('scorecard')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors ${
-                viewMode === 'scorecard' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <IconChart className="w-3.5 h-3.5" />
-              <span>{canAccessExecutiveDigest ? 'Scorecard' : 'My Scorecard'}</span>
-            </button>
+              <option value="all">All Assignees</option>
+              {staffList.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Action Buttons: Export Report & Create Task */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowReportModal(true)}
-            title="1-Click PDF / Excel Task Report Generator"
-            className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold px-3 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-          >
-            <IconFileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            <span className="hidden sm:inline">Export Report</span>
-          </button>
+        {/* Row 2: View Mode Switcher & Actions */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1 sm:pt-0">
+          {/* View Mode Toggle: horizontally scrollable, full width on mobile */}
+          <div className="flex items-center border border-slate-200 rounded-lg overflow-x-auto no-scrollbar bg-slate-100 p-0.5">
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`flex-1 sm:flex-none justify-center px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                viewMode === 'kanban' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg>
+              <span>Board</span>
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex-1 sm:flex-none justify-center px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                viewMode === 'list' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              <span>List</span>
+            </button>
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`flex-1 sm:flex-none justify-center px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                viewMode === 'calendar' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconCalendar className="w-3.5 h-3.5 shrink-0" />
+              <span>Calendar</span>
+            </button>
+            <button
+              onClick={() => setViewMode('scorecard')}
+              className={`flex-1 sm:flex-none justify-center px-2.5 py-1 text-xs font-semibold rounded flex items-center gap-1 transition-colors whitespace-nowrap ${
+                viewMode === 'scorecard' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <IconChart className="w-3.5 h-3.5 shrink-0" />
+              <span>Scorecard</span>
+            </button>
+          </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm shrink-0 cursor-pointer"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Create Task
-          </button>
+          {/* Action Buttons: Export Report & Create Task */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowReportModal(true)}
+              title="1-Click PDF / Excel Task Report Generator"
+              className="flex-1 sm:flex-none bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+            >
+              <IconFileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>Report</span>
+            </button>
+
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-xs shrink-0 cursor-pointer"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Create Task</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -685,7 +690,7 @@ export default function TaskBoard({
           {COLUMNS.map(col => {
             const colTasks = filteredTasks.filter(t => t.status === col.key)
             return (
-              <div key={col.key} className={`rounded-xl border ${col.border} ${col.bg} p-3 space-y-3 flex flex-col min-h-[500px]`}>
+              <div key={col.key} className={`rounded-xl border ${col.border} ${col.bg} p-3 space-y-3 flex flex-col min-h-[160px] md:min-h-[500px]`}>
                 {/* Column Header */}
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
@@ -1135,10 +1140,10 @@ export default function TaskBoard({
 
       {/* ── CREATE TASK MODAL ── */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
           <div
             onPaste={handlePasteImage}
-            className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100 p-6 space-y-5"
+            className="bg-white rounded-2xl max-w-xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100 p-4 sm:p-6 space-y-4 sm:space-y-5"
           >
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
@@ -1466,8 +1471,8 @@ export default function TaskBoard({
 
       {/* ── TASK DETAILS MODAL ── */}
       {selectedTask && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100 p-6 space-y-5">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100 p-4 sm:p-6 space-y-4 sm:space-y-5">
             {/* Header */}
             <div className="flex items-start justify-between border-b border-slate-100 pb-3 gap-3">
               <div className="space-y-1">
@@ -2332,8 +2337,8 @@ export default function TaskBoard({
 
       {/* ── MANUAL LOG TIME MODAL ── */}
       {showManualLogModal && selectedTask && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 p-6 space-y-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
