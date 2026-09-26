@@ -451,46 +451,46 @@ export default function GeminiSettingsModal({ isOpen, onClose, onSaved, isSuperA
                   <button
                     type="button"
                     onClick={() => {
-                      setLocalGroqModel('llama-3.1-8b-instant')
+                      setLocalGroqModel('openai/gpt-oss-20b')
                       setTestResult(null)
                     }}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      groqModel === 'llama-3.1-8b-instant'
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      groqModel === 'openai/gpt-oss-20b'
                         ? 'border-orange-500 bg-orange-50/60 ring-2 ring-orange-500/20 shadow-xs'
                         : 'border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     <div className="font-bold text-xs text-slate-900 flex items-center justify-between">
-                      <span>Llama 3.1 8B</span>
+                      <span>GPT-OSS 20B</span>
                       <span className="text-[9px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded">
-                        Recommended
+                        Active & Fast
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1 leading-snug">
-                      <strong>Universal Free Access</strong> · 800+ tokens/sec. Instant answers, task generation, and thread summaries.
+                      <strong>Universal Access</strong> · 800+ tokens/sec. Instant answers, task generation, and thread summaries.
                     </p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
-                      setLocalGroqModel('llama-3.3-70b-versatile')
+                      setLocalGroqModel('openai/gpt-oss-120b')
                       setTestResult(null)
                     }}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      groqModel === 'llama-3.3-70b-versatile'
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      groqModel === 'openai/gpt-oss-120b'
                         ? 'border-orange-500 bg-orange-50/60 ring-2 ring-orange-500/20 shadow-xs'
                         : 'border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     <div className="font-bold text-xs text-slate-900 flex items-center justify-between">
-                      <span>Llama 3.3 70B</span>
-                      <span className="text-[9px] bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded">
-                        Tier 1+
+                      <span>GPT-OSS 120B</span>
+                      <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">
+                        Deep Reasoning
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1 leading-snug">
-                      Flagship 70B reasoning model. (Requires verified or tiered Groq account).
+                      Flagship 120B parameter model for complex executive digests and deep reasoning.
                     </p>
                   </button>
                 </div>

@@ -20,7 +20,7 @@ export const DEFAULT_AI_PROVIDER: AiProvider = 'groq'
 // Groq Config (Recommended - 100% Free, 800+ tokens/sec, available on all tiers)
 const SHARED_GROQ_KEY        = 'hris_groq_api_key'
 const SHARED_GROQ_MODEL      = 'hris_groq_model'
-export const DEFAULT_GROQ_MODEL = 'llama-3.1-8b-instant'
+export const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-20b'
 
 // Gemini Config
 const SHARED_GEMINI_KEY      = 'hris_gemini_api_key'
@@ -392,8 +392,8 @@ async function callGroqAPI(
   }
 
   const primaryModel = getGroqModel()
-  // Candidate fallback list: primary model first, then standard 8B instant, then gpt-oss-20b
-  const candidateModels = Array.from(new Set([primaryModel, 'llama-3.1-8b-instant', 'openai/gpt-oss-20b']))
+  // Candidate fallback list: primary model first, then standard gpt-oss-20b, then 120b, then llama
+  const candidateModels = Array.from(new Set([primaryModel, 'openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile']))
   const endpoint = 'https://api.groq.com/openai/v1/chat/completions'
 
   const messages: any[] = []
@@ -438,8 +438,8 @@ async function callGroqAPI(
       }
 
       const data = await response.json()
-      const content = data?.choices?.[0]?.message?.content
-      if (typeof content !== 'string') {
+      const content = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.message?.reasoning
+      if (typeof content !== 'string' || content.trim().length === 0) {
         throw new Error('Groq API returned an empty response.')
       }
       return content
@@ -539,7 +539,7 @@ export async function testGroqApiKey(testKey?: string, testModel?: string): Prom
   }
 
   const primary = testModel || getGroqModel()
-  const candidateModels = Array.from(new Set([primary, 'llama-3.1-8b-instant', 'openai/gpt-oss-20b']))
+  const candidateModels = Array.from(new Set([primary, 'openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile']))
   const endpoint = 'https://api.groq.com/openai/v1/chat/completions'
 
   let lastError = ''
@@ -555,7 +555,7 @@ export async function testGroqApiKey(testKey?: string, testModel?: string): Prom
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: 'Respond with "OK"' }],
-          max_tokens: 5,
+          max_tokens: 60,
         }),
       })
 
