@@ -1208,14 +1208,14 @@ export default function Layout({
                   <img src={companySettings.logo_url} alt={companySettings.name} className="w-full h-full object-cover" />
                 ) : (
                   <span className="text-white font-display font-bold text-xs uppercase">
-                    {companySettings.name ? companySettings.name.slice(0, 2) : 'FO'}
+                    {companySettings.name ? companySettings.name.slice(0, 2) : 'HR'}
                   </span>
                 )}
               </div>
               {/* Show text if not collapsed on desktop, or ALWAYS on mobile */}
               <div className={`${collapsed ? 'md:hidden' : 'block'} min-w-0`}>
                 <div className="font-display font-semibold text-white text-sm leading-tight truncate">
-                  {companySettings.name || 'Firstoption'}
+                  {companySettings.name || 'HRIS'}
                 </div>
                 <div className="text-blue-300 text-xs truncate">
                   {companySettings.subtitle || 'HRIS Platform'}
@@ -1720,11 +1720,11 @@ export default function Layout({
           aria-label="Install Application"
           className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-96 z-50 bg-slate-900/95 backdrop-blur-md text-white rounded-2xl p-4 shadow-2xl border border-white/10 flex items-center gap-3.5 anim-fade-up"
         >
-          <div className="w-11 h-11 rounded-xl bg-blue-600 flex-none flex items-center justify-center text-white font-bold text-sm shadow-md">
-            FO
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-500 flex-none flex items-center justify-center text-white font-bold text-xs shadow-md tracking-wider">
+            HRIS
           </div>
           <div className="flex-1 min-w-0">
-            <h4 className="font-semibold text-xs text-white leading-tight">Install Firstoption App</h4>
+            <h4 className="font-semibold text-xs text-white leading-tight">Install HRIS App</h4>
             <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">
               Install to your home screen for fast offline access and instant shift clock-in.
             </p>
