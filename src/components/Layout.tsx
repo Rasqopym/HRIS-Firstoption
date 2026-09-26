@@ -753,15 +753,15 @@ export default function Layout({
               } catch {}
             }
 
-            // ── Chat @Mentions from chat_messages table ──
+            // ── 1. Chat @Mentions from chat_messages table ──
             const targetMentionIds = [authUser.id, currentStaffId].filter(Boolean) as string[]
             const wsPage: any = role === 'staff' ? 'st-workspace' : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
 
             for (const mId of targetMentionIds) {
               const { data: mentionMsgs } = await supabase
                 .from('chat_messages')
-                .select('id, content, sender_id, channel_id, created_at, sender:sender_id(full_name)')
-                .contains('mentions', [mId])
+                .select('id, content, sender_id, channel_id, created_at, sender:sender_id(full_name), channel:channel_id(name)')
+                .contains('mentions', JSON.stringify([mId]))
                 .order('created_at', { ascending: false })
                 .limit(10)
 
@@ -769,11 +769,12 @@ export default function Layout({
                 const msgId = `ws-mention-${m.id}`
                 if (!items.some(x => x.id === msgId)) {
                   const senderName = m.sender?.full_name || 'A team member'
-                  const preview = (m.content || '').replace(/\*\*/g, '').replace(/@\S+/g, '').trim().slice(0, 70)
+                  const channelName = m.channel?.name ? `#${m.channel.name}` : 'workspace chat'
+                  const preview = (m.content || '').replace(/\*\*/g, '').replace(/@[\w\s.-]+/g, '').trim().slice(0, 80)
                   items.push({
                     id: msgId,
-                    title: `💬 ${senderName} mentioned you`,
-                    message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
+                    title: `💬 ${senderName} mentioned you in ${channelName}`,
+                    message: preview ? `"${preview}${preview.length >= 80 ? '…' : ''}"` : `Tagged you in ${channelName}`,
                     timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     type: 'info',
                     read: false,
@@ -782,6 +783,84 @@ export default function Layout({
                   })
                 }
               })
+            }
+
+            // ── 2. Company & General Announcements ──
+            const { data: annMsgs } = await supabase
+              .from('chat_messages')
+              .select('id, content, sender_id, created_at, sender:sender_id(full_name)')
+              .eq('channel_id', 'ch-announcements')
+              .order('created_at', { ascending: false })
+              .limit(3)
+
+            ;(annMsgs || []).forEach((a: any) => {
+              if (a.sender_id !== currentStaffId && !items.some(x => x.id === `ws-ann-${a.id}`)) {
+                const senderName = a.sender?.full_name || 'Management'
+                const preview = (a.content || '').replace(/\*\*/g, '').trim().slice(0, 80)
+                items.push({
+                  id: `ws-ann-${a.id}`,
+                  title: `📢 Announcement from ${senderName}`,
+                  message: `"${preview}${preview.length >= 80 ? '…' : ''}"`,
+                  timestamp: new Date(a.created_at).toLocaleDateString(),
+                  type: 'info',
+                  read: false,
+                  source: 'workspace',
+                  navigateTo: wsPage,
+                })
+              }
+            })
+
+            // ── 3. Task Completed Notifications (for tasks you created) ──
+            if (currentStaffId) {
+              const { data: completedTasks } = await supabase
+                .from('tasks')
+                .select('id, title, completed_at, assignee:assignee_id(full_name)')
+                .eq('creator_id', currentStaffId)
+                .eq('status', 'done')
+                .order('completed_at', { ascending: false })
+                .limit(3)
+
+              ;(completedTasks || []).forEach((ct: any) => {
+                const ctId = `ws-taskdone-${ct.id}`
+                if (!items.some(x => x.id === ctId)) {
+                  const assigneeName = ct.assignee?.full_name || 'Team member'
+                  items.push({
+                    id: ctId,
+                    title: '✅ Task Completed',
+                    message: `"${ct.title}" was completed by ${assigneeName}`,
+                    timestamp: ct.completed_at ? new Date(ct.completed_at).toLocaleDateString() : 'Recently',
+                    type: 'success',
+                    read: false,
+                    source: 'workspace',
+                    navigateTo: wsPage,
+                  })
+                }
+              })
+            }
+
+            // ── 4. Daily Standup Reminder (if not yet submitted today on weekdays) ──
+            const todayDate = new Date().toISOString().split('T')[0]
+            const isWeekday = ![0, 6].includes(new Date().getDay())
+            if (currentStaffId && isWeekday) {
+              const { data: standupRecord } = await supabase
+                .from('daily_standups')
+                .select('id')
+                .eq('staff_id', currentStaffId)
+                .eq('standup_date', todayDate)
+                .maybeSingle()
+
+              if (!standupRecord && !items.some(x => x.id === `ws-standup-${todayDate}`)) {
+                items.push({
+                  id: `ws-standup-${todayDate}`,
+                  title: '⏱️ Daily Standup Pending',
+                  message: 'You have not submitted your daily squad standup update for today.',
+                  timestamp: 'Today',
+                  type: 'warning',
+                  read: false,
+                  source: 'workspace',
+                  navigateTo: wsPage,
+                })
+              }
             }
           }
         } catch (wsErr) {
@@ -813,7 +892,7 @@ export default function Layout({
     fetchNotifications()
     const interval = setInterval(fetchNotifications, 60000) // Periodic 1-minute check for reminders
 
-    // ── Supabase Realtime: instantly surface new tasks & @mentions ─────────
+    // ── Supabase Realtime: instantly surface all workspace events ─────────
     let realtimeChannel: any = null
     ;(async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser()
@@ -848,26 +927,61 @@ export default function Layout({
           setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
         })
         .on('postgres_changes', {
-          event: 'INSERT',
+          event: 'UPDATE',
           schema: 'public',
-          table: 'chat_messages',
+          table: 'tasks',
         }, (payload: any) => {
-          const msg = payload.new
-          if (!msg || !Array.isArray(msg.mentions)) return
-          const isTagged = msg.mentions.includes(authUser.id) || (staffId && msg.mentions.includes(staffId))
-          if (!isTagged) return
-          const preview = (msg.content || '').replace(/\*\*/g, '').replace(/@\S+/g, '').trim().slice(0, 70)
+          const t = payload.new
+          if (!t || t.status !== 'done' || t.creator_id !== staffId) return
           const newNotif: HRISNotification = {
-            id: `ws-mention-rt-${msg.id}`,
-            title: '💬 You were mentioned in chat',
-            message: preview ? `"${preview}${preview.length >= 70 ? '…' : ''}"` : 'In workspace chat',
-            timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            type: 'info',
+            id: `ws-taskdone-${t.id}`,
+            title: '✅ Task Completed',
+            message: `"${t.title}" has been marked completed`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: 'success',
             read: false,
             source: 'workspace',
             navigateTo: wsPage,
           }
           setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+        })
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+        }, (payload: any) => {
+          const msg = payload.new
+          if (!msg) return
+          const isTagged = Array.isArray(msg.mentions) && (msg.mentions.includes(authUser.id) || (staffId && msg.mentions.includes(staffId)))
+          const isAnnouncement = msg.channel_id === 'ch-announcements' && msg.sender_id !== staffId
+
+          if (isTagged) {
+            const preview = (msg.content || '').replace(/\*\*/g, '').replace(/@[\w\s.-]+/g, '').trim().slice(0, 80)
+            const newNotif: HRISNotification = {
+              id: `ws-mention-rt-${msg.id}`,
+              title: '💬 You were mentioned in chat',
+              message: preview ? `"${preview}${preview.length >= 80 ? '…' : ''}"` : 'In workspace chat',
+              timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              type: 'info',
+              read: false,
+              source: 'workspace',
+              navigateTo: wsPage,
+            }
+            setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+          } else if (isAnnouncement) {
+            const preview = (msg.content || '').replace(/\*\*/g, '').trim().slice(0, 80)
+            const newNotif: HRISNotification = {
+              id: `ws-ann-rt-${msg.id}`,
+              title: '📢 New Company Announcement',
+              message: `"${preview}${preview.length >= 80 ? '…' : ''}"`,
+              timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              type: 'info',
+              read: false,
+              source: 'workspace',
+              navigateTo: wsPage,
+            }
+            setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+          }
         })
         .subscribe()
     })()
