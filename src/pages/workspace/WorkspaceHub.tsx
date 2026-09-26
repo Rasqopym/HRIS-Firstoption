@@ -69,6 +69,7 @@ import {
 import TaskBoard from './TaskBoard'
 import GeminiSettingsModal from '../../components/workspace/GeminiSettingsModal'
 import RichChatMessage from '../../components/workspace/RichChatMessage'
+import ExecutiveBriefingCard, { isExecutiveReport } from '../../components/workspace/ExecutiveBriefingCard'
 import { generateChatCopilotResponse, isGeminiConfigured, getAiProvider, loadAiConfigFromSupabase } from '../../lib/geminiService'
 import TeamMonitoring from './TeamMonitoring'
 
@@ -1551,14 +1552,15 @@ export default function WorkspaceHub({
                     const displayPhoto = isMe
                       ? (currentStaffPhoto || msg.sender?.photo)
                       : (msg.sender?.photo || staffList.find(s => s.id === msg.sender_id)?.photo)
-                    // Only extract task proposal for human-sent messages (not AI responses).
+                    const isReport = isExecutiveReport(msg.content)
+                    // Only extract task proposal for human-sent messages (not AI responses or executive reports).
                     // Also only show the badge if action_tasks were actually recorded on send.
-                    const taskProposal = !isAi && (msg.action_tasks?.length ?? 0) > 0
+                    const taskProposal = !isAi && !isReport && (msg.action_tasks?.length ?? 0) > 0
                       ? extractTaskFromMessage(msg.content, staffList.map(s => ({ id: s.id, name: s.name, staffCode: s.staffId })))
                       : { isActionable: false, title: '', priority: 'medium' as const, confidenceScore: 0 }
 
                     return (
-                      <div key={msg.id} className={`flex gap-3 group ${isMe ? 'flex-row-reverse' : ''}`}>
+                      <div key={msg.id} className={`flex gap-3 group ${isMe && !isReport ? 'flex-row-reverse' : ''}`}>
                         {/* Avatar */}
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs shrink-0 shadow-xs overflow-hidden ${
                           isAi 
@@ -1574,8 +1576,8 @@ export default function WorkspaceHub({
                           )}
                         </div>
 
-                        {/* Bubble */}
-                        <div className={`max-w-[85%] sm:max-w-xl space-y-1.5 ${isMe ? 'items-end text-right' : ''}`}>
+                        {/* Bubble / Report Card Container */}
+                        <div className={`space-y-1.5 ${isReport ? 'w-full max-w-2xl' : 'max-w-[85%] sm:max-w-xl'} ${isMe && !isReport ? 'items-end text-right' : ''}`}>
                           {/* Sender Info & Time */}
                           <div className="flex items-center gap-2 text-xs text-slate-400">
                             <div className="flex items-center gap-1.5">
@@ -1585,44 +1587,53 @@ export default function WorkspaceHub({
                                   AI Copilot
                                 </span>
                               )}
+                              {isReport && (
+                                <span className="text-[9px] bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.2 rounded-md tracking-wider uppercase border border-blue-200">
+                                  Executive Digest
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                           </div>
 
                           {/* Message Body */}
-                          <div
-                            className={`p-3 rounded-2xl text-sm leading-relaxed text-left shadow-xs ${
-                              isAi
-                                ? 'bg-purple-50/70 border border-purple-200/70 text-slate-900 rounded-tl-xs'
-                                : isMe
-                                ? 'bg-blue-600 text-white rounded-tr-xs'
-                                : 'bg-slate-100 text-slate-800 rounded-tl-xs border border-slate-200/60'
-                            }`}
-                          >
-                            <RichChatMessage content={msg.content} isMe={isMe} isAi={isAi} />
+                          {isReport ? (
+                            <ExecutiveBriefingCard content={msg.content} isMe={isMe} />
+                          ) : (
+                            <div
+                              className={`p-3 rounded-2xl text-sm leading-relaxed text-left shadow-xs ${
+                                isAi
+                                  ? 'bg-purple-50/70 border border-purple-200/70 text-slate-900 rounded-tl-xs'
+                                  : isMe
+                                  ? 'bg-blue-600 text-white rounded-tr-xs'
+                                  : 'bg-slate-100 text-slate-800 rounded-tl-xs border border-slate-200/60'
+                              }`}
+                            >
+                              <RichChatMessage content={msg.content} isMe={isMe} isAi={isAi} />
 
-                            {/* Image Attachments */}
-                            {msg.attachments && msg.attachments.length > 0 && (
-                              <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-black/10">
-                                {msg.attachments.map((att, aIdx) => (
-                                  <div
-                                    key={aIdx}
-                                    onClick={() => setActiveLightboxImage(att.url)}
-                                    className="relative group/img rounded-xl overflow-hidden border border-black/10 bg-black/5 cursor-pointer max-h-48"
-                                  >
-                                    <img
-                                      src={att.url}
-                                      alt={att.name}
-                                      className="w-full h-36 object-cover group-hover/img:scale-105 transition-transform"
-                                    />
-                                    <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded font-mono">
-                                      {formatFileSize(att.size)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                              {/* Image Attachments */}
+                              {msg.attachments && msg.attachments.length > 0 && (
+                                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-black/10">
+                                  {msg.attachments.map((att, aIdx) => (
+                                    <div
+                                      key={aIdx}
+                                      onClick={() => setActiveLightboxImage(att.url)}
+                                      className="relative group/img rounded-xl overflow-hidden border border-black/10 bg-black/5 cursor-pointer max-h-48"
+                                    >
+                                      <img
+                                        src={att.url}
+                                        alt={att.name}
+                                        className="w-full h-36 object-cover group-hover/img:scale-105 transition-transform"
+                                      />
+                                      <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded font-mono">
+                                        {formatFileSize(att.size)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                           {/* Task Auto-Created Indicator */}
                           {taskProposal.isActionable && (
