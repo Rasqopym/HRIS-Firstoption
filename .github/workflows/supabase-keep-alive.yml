@@ -1,0 +1,42 @@
+name: Supabase Database Keep-Alive
+
+on:
+  schedule:
+    # Runs every 3 days at 06:00 UTC (well within the 7-day pause window)
+    - cron: '0 6 */3 * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions dashboard anytime
+
+jobs:
+  keep-alive:
+    name: Ping Supabase to Prevent Auto-Pause
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Database API
+        run: |
+          SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
+          SUPABASE_KEY="${{ secrets.SUPABASE_ANON_KEY }}"
+          
+          # Default to project configuration if secrets are not explicitly set
+          if [ -z "$SUPABASE_URL" ]; then
+            SUPABASE_URL="https://wnmoczubrqzkbidyiltg.supabase.co"
+          fi
+          
+          if [ -z "$SUPABASE_KEY" ]; then
+            SUPABASE_KEY="sb_publishable_r2p3u7UkUVYaE6mgm3sVaw_JprAXm7Q"
+          fi
+          
+          echo "Pinging Supabase REST API at $SUPABASE_URL..."
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
+            -X GET "$SUPABASE_URL/rest/v1/workspaces?select=id&limit=1" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY")
+          
+          echo "HTTP Status Code: $HTTP_STATUS"
+          echo "Response: $(cat response.json)"
+          
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Supabase project pinged successfully! Auto-pause timer has been reset."
+          else
+            echo "⚠️ Warning: Received HTTP $HTTP_STATUS from Supabase."
+            exit 1
+          fi
