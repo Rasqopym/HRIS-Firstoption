@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Role, Page } from './types'
 import { supabase } from './lib/supabase'
 import { dbRoleToApp } from './lib/roleMap'
+import { isPasswordRecoveryUrl, establishRecoverySession } from './lib/authRecovery'
 
 import Login from './pages/Login'
 import Layout from './components/Layout'
@@ -97,13 +98,7 @@ export default function App() {
   })
   const [currentStaffId, setCurrentStaffId] = useState<string | null>(null)
   const [isRecoveryMode, setIsRecoveryMode] = useState<boolean>(() => {
-    try {
-      const h = window.location.hash || ''
-      const s = window.location.search || ''
-      return h.includes('type=recovery') || s.includes('type=recovery')
-    } catch (e) {
-      return false
-    }
+    return isPasswordRecoveryUrl()
   })
 
   const handleSelectStaff = (id: string | null) => {
@@ -125,10 +120,10 @@ export default function App() {
   useEffect(() => {
     const restoreSession = async () => {
       try {
-        const hash = window.location.hash || ''
-        const search = window.location.search || ''
-        if (hash.includes('type=recovery') || search.includes('type=recovery')) {
+        if (isPasswordRecoveryUrl()) {
           setIsRecoveryMode(true)
+          await establishRecoverySession()
+          setIsLoggedIn(false)
           setCheckingSession(false)
           return
         }

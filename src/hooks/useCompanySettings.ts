@@ -16,10 +16,10 @@ export interface CompanySettings {
 }
 
 export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
-  name: 'Firstoption',
+  name: 'HRIS',
   logo_url: '',
-  subtitle: 'HRIS Platform',
-  footer_text: '© 2026 Firstoption',
+  subtitle: 'Workforce Platform',
+  footer_text: '© 2026 HRIS',
   phone: '+234 800 000 0000',
   email: 'info@firstoption.com',
   address: 'Lagos, Nigeria',

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { dbRoleToApp } from '../lib/roleMap'
 import { logAction } from '../lib/auditLog'
 import { useCompanySettings } from '../hooks/useCompanySettings'
+import { isPasswordRecoveryUrl, establishRecoverySession, getAuthUrlError } from '../lib/authRecovery'
 
 interface LoginProps {
   onLogin: (role: Role) => void
@@ -22,7 +23,8 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
   const [forgotSent, setForgotSent] = useState(false)
 
   // Recovery & Reset Password State
-  const [resetPasswordMode, setResetPasswordMode] = useState(initialResetPasswordMode)
+  const [resetPasswordMode, setResetPasswordMode] = useState(() => initialResetPasswordMode || isPasswordRecoveryUrl())
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showNewPassword, setShowNewPassword] = useState(false)
@@ -67,21 +69,33 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
     window.addEventListener('appinstalled', handleAppInstalled)
 
-    // Detect password reset / recovery link from hash or query
-    const hash = window.location.hash || ''
-    const search = window.location.search || ''
-    if (hash.includes('otp_expired') || hash.includes('invalid') || hash.includes('access_denied') || search.includes('error')) {
-      setError('The password reset link has expired or is invalid. Please request a new reset link below.')
-      setForgotMode(true)
-      setResetPasswordMode(false)
-    } else if (hash.includes('type=recovery') || search.includes('type=recovery') || hash.includes('access_token') || initialResetPasswordMode) {
-      setResetPasswordMode(true)
+    // Initialize password recovery session if arriving via reset link
+    const initRecovery = async () => {
+      const urlError = getAuthUrlError()
+      if (urlError) {
+        setError(urlError)
+        setForgotMode(true)
+        setResetPasswordMode(false)
+        return
+      }
+
+      if (isPasswordRecoveryUrl() || initialResetPasswordMode) {
+        setResetPasswordMode(true)
+        const sessionResult = await establishRecoverySession()
+        if (!sessionResult.success) {
+          setRecoveryError(sessionResult.error || 'The reset link is invalid or has expired.')
+        } else {
+          setRecoveryError(null)
+        }
+      }
     }
+    initRecovery()
 
     // Listen for Supabase auth recovery events
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setResetPasswordMode(true)
+        setRecoveryError(null)
       }
     })
 
@@ -175,7 +189,7 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
     setLoading(true)
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/#type=recovery`
+        redirectTo: window.location.origin
       })
       if (error) throw error
       setForgotSent(true)
@@ -204,6 +218,12 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
 
     setLoading(true)
     try {
+      // Guarantee that Supabase client has an active authenticated session
+      const sessionResult = await establishRecoverySession()
+      if (!sessionResult.success) {
+        throw new Error(sessionResult.error || 'Your recovery session has expired or is invalid. Please request a new link.')
+      }
+
       const { error } = await supabase.auth.updateUser({ password: newPassword })
       if (error) throw error
 
@@ -217,7 +237,10 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
         setResetPasswordMode(false)
         setForgotMode(false)
         setResetSuccess(false)
-        try { window.location.hash = '' } catch (e) {}
+        try {
+          window.location.hash = ''
+          window.history.replaceState({}, document.title, window.location.pathname)
+        } catch (e) {}
         onPasswordResetComplete?.()
       }, 3000)
     } catch (err: any) {
@@ -243,8 +266,8 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
               )}
             </div>
             <div>
-              <div className="font-display font-semibold text-white text-lg">{companySettings.name || 'Firstoption'}</div>
-              <div className="text-blue-300 text-sm">{companySettings.subtitle || 'HRIS Platform'}</div>
+              <div className="font-display font-semibold text-white text-lg">HRIS</div>
+              <div className="text-blue-300 text-sm">{companySettings.subtitle || 'Workforce Platform'}</div>
             </div>
           </div>
 
@@ -324,7 +347,7 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
               )}
             </div>
             <span className="font-display font-semibold text-slate-800 text-lg">
-              {companySettings.name || 'Firstoption'} {companySettings.subtitle || 'HRIS'}
+              HRIS
             </span>
           </div>
 
@@ -342,6 +365,32 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
                 <>
                   <h2 className="font-display font-semibold text-slate-800 text-2xl mb-1">Create new password</h2>
                   <p className="text-slate-500 text-sm mb-7">Enter your new account password below.</p>
+
+                  {recoveryError && (
+                    <div className="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm">
+                      <div className="font-semibold mb-1 flex items-center gap-1.5 text-amber-800">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        Reset Link Expired or Invalid
+                      </div>
+                      <p className="text-xs text-amber-700 mb-3">{recoveryError}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetPasswordMode(false)
+                          setForgotMode(true)
+                          setError('')
+                          setRecoveryError(null)
+                          try {
+                            window.location.hash = ''
+                            window.history.replaceState({}, document.title, window.location.pathname)
+                          } catch (e) {}
+                        }}
+                        className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold transition"
+                      >
+                        Request New Password Reset Link
+                      </button>
+                    </div>
+                  )}
 
                   {error && (
                     <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -396,7 +445,13 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
                       type="button"
                       onClick={() => {
                         setResetPasswordMode(false)
-                        try { window.location.hash = '' } catch (e) {}
+                        setForgotMode(false)
+                        setRecoveryError(null)
+                        setError('')
+                        try {
+                          window.location.hash = ''
+                          window.history.replaceState({}, document.title, window.location.pathname)
+                        } catch (e) {}
                         onPasswordResetComplete?.()
                       }}
                       className="w-full text-center text-sm text-slate-500 hover:text-slate-800 transition-colors pt-1"
