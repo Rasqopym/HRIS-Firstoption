@@ -34,7 +34,14 @@ export default function UserManagement() {
   const [filterStatus, setFilterStatus] = useState<StaffStatus | 'all'>('all')
   const [selected, setSelected] = useState<string[]>([])
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showConfirmModal, setShowConfirmModal] = useState<{ action: 'activate' | 'deactivate' | 'delete'; ids: string[] } | null>(null)
+  const [showConfirmModal, setShowConfirmModal] = useState<{
+    action: 'activate' | 'deactivate' | 'offboard' | 'delete'
+    ids: string[]
+    user?: StaffMember
+  } | null>(null)
+  const [offboardReason, setOffboardReason] = useState('Voluntary Resignation')
+  const [actionLoading, setActionLoading] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null)
   const [editingRole, setEditingRole] = useState<{ userId: string; newRole: Role; oldRole: Role } | null>(null)
   const [updatingRole, setUpdatingRole] = useState(false)
@@ -234,6 +241,7 @@ export default function UserManagement() {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
+        setCurrentUserId(user.id)
 
         const { data: profile } = await supabase
           .from('profiles')
@@ -252,56 +260,105 @@ export default function UserManagement() {
     fetchCurrentUserRole()
   }, [])
 
-  const bulkAction = async (action: 'activate' | 'deactivate') => {
-    const newStatus = action === 'activate' ? 'active' : 'suspended'
-    try {
-      // Separate users with and without staff records
-      const usersWithStaff = selected.map(id => users.find(u => u.id === id && u.staffTableId)).filter(Boolean) as StaffMember[]
-      const usersWithoutStaff = selected.map(id => users.find(u => u.id === id && !u.staffTableId)).filter(Boolean) as StaffMember[]
-      
-      // Update staff table for users with staff records
-      if (usersWithStaff.length > 0) {
-        const staffIds = usersWithStaff.map(u => u.staffTableId).filter(Boolean) as string[]
-        const { error: staffError } = await supabase
-          .from('staff')
-          .update({ status: newStatus })
-          .in('id', staffIds)
-        
-        if (staffError) throw staffError
-      }
-      
-      // Update profiles table for users without staff records
-      if (usersWithoutStaff.length > 0) {
-        const profileIds = usersWithoutStaff.map(u => u.id)
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .update({ status: newStatus })
-          .in('id', profileIds)
-        
-        if (profileError) throw profileError
-      }
+  const handleConfirmAction = async () => {
+    if (!showConfirmModal) return
+    const { action, ids } = showConfirmModal
+    setActionLoading(true)
+    setError('')
 
-      // Log the action for each affected user
-      for (const id of selected) {
-        const user = users.find(u => u.id === id)
-        if (user) {
+    try {
+      if (action === 'delete') {
+        for (const id of ids) {
+          const userToDelete = users.find(u => u.id === id)
+
+          // 1. Attempt Edge Function delete-user for auth.users cleanup
+          try {
+            await supabase.functions.invoke('delete-user', {
+              body: { user_id: id, staff_id: userToDelete?.staffTableId }
+            })
+          } catch (fnErr) {
+            console.warn('Edge function delete-user note:', fnErr)
+          }
+
+          // 2. Delete from staff table
+          if (userToDelete?.staffTableId) {
+            await supabase.from('staff').delete().eq('id', userToDelete.staffTableId)
+          }
+          await supabase.from('staff').delete().eq('profile_id', id)
+          if (userToDelete?.email && userToDelete.email !== '—') {
+            await supabase.from('staff').delete().eq('email', userToDelete.email)
+          }
+
+          // 3. Delete from profiles table
+          const { error: profDelError } = await supabase.from('profiles').delete().eq('id', id)
+          if (profDelError) {
+            console.warn('Profile delete warning:', profDelError.message)
+          }
+
+          // 4. Log audit trail
           await logAction({
-            action: 'UPDATE',
+            action: 'DELETE',
             entity: 'User',
             entityId: id,
-            details: `${action === 'activate' ? 'Activated' : 'Suspended'} account for ${user.name}`,
+            details: `Permanently deleted user ${userToDelete?.name || id} (${userToDelete?.email || ''})`,
+            severity: 'critical' as any,
           })
         }
-      }
 
-      setUsers(us => us.map(u =>
-        selected.includes(u.id) ? { ...u, status: newStatus } : u
-      ))
-      setSelected([])
-      setShowConfirmModal(null)
-    } catch (err) {
-      setError(`Failed to ${action} users. Please try again.`)
-      console.error('Error updating status:', err)
+        setUsers(us => us.filter(u => !ids.includes(u.id)))
+        setSelected(s => s.filter(id => !ids.includes(id)))
+        setShowConfirmModal(null)
+      } else {
+        const newStatus: StaffStatus =
+          action === 'activate' ? 'active' :
+          action === 'deactivate' ? 'suspended' : 'offboarded'
+
+        const usersWithStaff = ids.map(id => users.find(u => u.id === id && u.staffTableId)).filter(Boolean) as StaffMember[]
+        const usersWithoutStaff = ids.map(id => users.find(u => u.id === id && !u.staffTableId)).filter(Boolean) as StaffMember[]
+
+        if (usersWithStaff.length > 0) {
+          const staffIds = usersWithStaff.map(u => u.staffTableId).filter(Boolean) as string[]
+          const { error: staffError } = await supabase
+            .from('staff')
+            .update({ status: newStatus })
+            .in('id', staffIds)
+          if (staffError) throw staffError
+        }
+
+        if (usersWithoutStaff.length > 0) {
+          const profileIds = usersWithoutStaff.map(u => u.id)
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .update({ status: newStatus })
+            .in('id', profileIds)
+          if (profileError) throw profileError
+        }
+
+        for (const id of ids) {
+          const user = users.find(u => u.id === id)
+          if (user) {
+            const label = action === 'activate' ? 'Activated' : action === 'deactivate' ? 'Suspended' : `Offboarded (${offboardReason})`
+            await logAction({
+              action: 'UPDATE',
+              entity: 'User',
+              entityId: id,
+              details: `${label} account for ${user.name}`,
+              severity: action === 'offboard' ? 'high' : 'medium',
+            })
+          }
+        }
+
+        setUsers(us => us.map(u =>
+          ids.includes(u.id) ? { ...u, status: newStatus } : u
+        ))
+        setSelected([])
+        setShowConfirmModal(null)
+      }
+    } catch (err: any) {
+      setError(err?.message || `Failed to ${action} user(s). Please try again.`)
+      console.error(`Error during ${action}:`, err)
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -530,9 +587,21 @@ export default function UserManagement() {
             </button>
             <button
               onClick={() => setShowConfirmModal({ action: 'deactivate', ids: selected })}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
             >
               Suspend
+            </button>
+            <button
+              onClick={() => setShowConfirmModal({ action: 'offboard', ids: selected })}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+            >
+              Offboard
+            </button>
+            <button
+              onClick={() => setShowConfirmModal({ action: 'delete', ids: selected })}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+            >
+              Delete
             </button>
           </div>
         )}
@@ -604,91 +673,64 @@ export default function UserManagement() {
                   <td className="py-3.5 px-4"><Badge status={u.status} /></td>
                   <td className="py-3.5 px-4 text-xs font-mono-data text-slate-500">{u.lastLogin}</td>
                   <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-1">
-                      {u.status === 'active' ? (
-                        <button
-                          onClick={async () => {
-                            try {
-                              if (u.staffTableId) {
-                                const { error } = await supabase
-                                  .from('staff')
-                                  .update({ status: 'suspended' })
-                                  .eq('id', u.staffTableId)
-                                if (error) throw error
-                              } else {
-                                const { error } = await supabase
-                                  .from('profiles')
-                                  .update({ status: 'suspended' })
-                                  .eq('id', u.id)
-                                if (error) throw error
-                              }
-                              
-                              await logAction({
-                                action: 'UPDATE',
-                                entity: 'User',
-                                entityId: u.id,
-                                details: `Suspended account for ${u.name}`,
-                                severity: 'medium',
-                              })
-                              
-                              setUsers(us => us.map(x => x.id === u.id ? { ...x, status: 'suspended' } : x))
-                            } catch (err) {
-                              setError('Failed to suspend user. Please try again.')
-                              console.error('Error suspending user:', err)
-                            }
-                          }}
-                          className="px-2.5 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
-                        >
-                          Suspend
-                        </button>
-                      ) : u.status === 'suspended' ? (
-                        <button
-                          onClick={async () => {
-                            try {
-                              if (u.staffTableId) {
-                                const { error } = await supabase
-                                  .from('staff')
-                                  .update({ status: 'active' })
-                                  .eq('id', u.staffTableId)
-                                if (error) throw error
-                              } else {
-                                const { error } = await supabase
-                                  .from('profiles')
-                                  .update({ status: 'active' })
-                                  .eq('id', u.id)
-                                if (error) throw error
-                              }
-                              
-                              await logAction({
-                                action: 'UPDATE',
-                                entity: 'User',
-                                entityId: u.id,
-                                details: `Activated account for ${u.name}`,
-                                severity: 'medium',
-                              })
-                              
-                              setUsers(us => us.map(x => x.id === u.id ? { ...x, status: 'active' } : x))
-                            } catch (err) {
-                              setError('Failed to activate user. Please try again.')
-                              console.error('Error activating user:', err)
-                            }
-                          }}
-                          className="px-2.5 py-1 text-xs rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
-                        >
-                          Activate
-                        </button>
-                      ) : null}
-                      <button
-                        onClick={() => {
-                          setResetModalUser(u)
-                          setResetSuccessMsg('')
-                          setResetErrorMsg('')
-                        }}
-                        className="px-2 py-1 text-xs rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
-                        title="Reset Password for user"
-                      >
-                        Reset PW
-                      </button>
+                    <div className="flex items-center gap-1.5">
+                      {u.id === currentUserId ? (
+                        <span className="text-[11px] text-slate-400 italic px-2 py-1">You</span>
+                      ) : (
+                        <>
+                          {/* Suspend / Activate / Re-activate */}
+                          {u.status === 'active' ? (
+                            <button
+                              onClick={() => setShowConfirmModal({ action: 'deactivate', ids: [u.id], user: u })}
+                              className="px-2.5 py-1 text-xs font-medium rounded bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                              title="Suspend user account"
+                            >
+                              Suspend
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setShowConfirmModal({ action: 'activate', ids: [u.id], user: u })}
+                              className="px-2.5 py-1 text-xs font-medium rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                              title={u.status === 'offboarded' ? 'Re-activate offboarded staff' : 'Activate user account'}
+                            >
+                              {u.status === 'offboarded' ? 'Re-activate' : 'Activate'}
+                            </button>
+                          )}
+
+                          {/* Offboard button */}
+                          {u.status !== 'offboarded' && (
+                            <button
+                              onClick={() => setShowConfirmModal({ action: 'offboard', ids: [u.id], user: u })}
+                              className="px-2.5 py-1 text-xs font-medium rounded bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+                              title="Offboard staff member"
+                            >
+                              Offboard
+                            </button>
+                          )}
+
+                          {/* Reset Password */}
+                          <button
+                            onClick={() => {
+                              setResetModalUser(u)
+                              setResetSuccessMsg('')
+                              setResetErrorMsg('')
+                            }}
+                            className="px-2 py-1 text-xs font-medium rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                            title="Reset password for user"
+                          >
+                            Reset PW
+                          </button>
+
+                          {/* Permanently Delete */}
+                          <button
+                            onClick={() => setShowConfirmModal({ action: 'delete', ids: [u.id], user: u })}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Permanently delete user from system"
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -860,25 +902,139 @@ export default function UserManagement() {
       )}
 
       {/* Confirm action modal */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 anim-fade-up">
-            <h3 className="font-display font-semibold text-slate-800 mb-2">Confirm Action</h3>
-            <p className="text-slate-500 text-sm mb-5">
-              {showConfirmModal.action === 'activate' ? 'Activate' : 'Suspend'} {showConfirmModal.ids.length} selected {showConfirmModal.ids.length === 1 ? 'account' : 'accounts'}?
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowConfirmModal(null)} className="flex-1 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Cancel</button>
-              <button
-                onClick={() => bulkAction(showConfirmModal.action as 'activate' | 'deactivate')}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium text-white ${showConfirmModal.action === 'activate' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
-              >
-                Confirm
-              </button>
+      {showConfirmModal && (() => {
+        const { action, ids } = showConfirmModal
+        const targetUser = showConfirmModal.user || (ids.length === 1 ? users.find(u => u.id === ids[0]) : null)
+        const isSingle = ids.length === 1
+        const targetName = targetUser?.name || `${ids.length} selected accounts`
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 anim-fade-up border border-slate-100">
+              {/* Header Icon & Title */}
+              <div className="flex items-start gap-4 mb-4">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-none ${
+                  action === 'delete'
+                    ? 'bg-red-100 text-red-600'
+                    : action === 'offboard'
+                    ? 'bg-amber-100 text-amber-700'
+                    : action === 'deactivate'
+                    ? 'bg-red-50 text-red-600'
+                    : 'bg-emerald-100 text-emerald-700'
+                }`}>
+                  {action === 'delete' ? (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                  ) : action === 'offboard' ? (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  ) : action === 'deactivate' ? (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                  ) : (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-display font-semibold text-slate-900 text-lg">
+                    {action === 'delete'
+                      ? (isSingle ? `Permanently Delete ${targetName}?` : `Permanently Delete ${ids.length} Users?`)
+                      : action === 'offboard'
+                      ? (isSingle ? `Offboard ${targetName}?` : `Offboard ${ids.length} Staff Members?`)
+                      : action === 'deactivate'
+                      ? (isSingle ? `Suspend ${targetName}?` : `Suspend ${ids.length} Accounts?`)
+                      : (isSingle ? `Activate ${targetName}?` : `Activate ${ids.length} Accounts?`)}
+                  </h3>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    {action === 'delete'
+                      ? 'Total deletion from profiles, staff, and authentication'
+                      : action === 'offboard'
+                      ? 'Revoke access while preserving statutory payroll/tax records'
+                      : action === 'deactivate'
+                      ? 'Temporarily block sign in and access'
+                      : 'Restore account access and mark as active'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Warning Context Box */}
+              {action === 'delete' ? (
+                <div className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs leading-relaxed">
+                  <p className="font-semibold mb-1 flex items-center gap-1.5">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    Critical Action — Irreversible
+                  </p>
+                  This will completely remove {isSingle ? <strong>{targetName}</strong> : `${ids.length} users`} from the HRIS database, including their staff directory entry, profile, and system access.
+                </div>
+              ) : action === 'offboard' ? (
+                <div className="space-y-3 mb-5">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs leading-relaxed">
+                    Offboarding will mark the employee status as <strong>Offboarded</strong> and immediately disable system login. All historical audit logs, payslips, tax remittances, and attendance records will remain preserved for legal compliance.
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Offboarding Reason</label>
+                    <select
+                      value={offboardReason}
+                      onChange={e => setOffboardReason(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 bg-white"
+                    >
+                      <option value="Voluntary Resignation">Voluntary Resignation</option>
+                      <option value="End of Contract">End of Contract</option>
+                      <option value="Termination of Employment">Termination of Employment</option>
+                      <option value="Retirement">Retirement</option>
+                      <option value="Redundancy / Restructuring">Redundancy / Restructuring</option>
+                      <option value="Mutual Separation">Mutual Separation</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-slate-600 text-sm mb-5 leading-relaxed">
+                  Are you sure you want to {action === 'activate' ? 'activate' : 'suspend'} {isSingle ? <strong>{targetName}</strong> : `${ids.length} accounts`}?
+                </p>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => setShowConfirmModal(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={handleConfirmAction}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-60 flex items-center justify-center gap-2 ${
+                    action === 'delete'
+                      ? 'bg-red-600 hover:bg-red-700 shadow-sm shadow-red-200'
+                      : action === 'offboard'
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-sm shadow-amber-200'
+                      : action === 'deactivate'
+                      ? 'bg-red-600 hover:bg-red-700 shadow-sm shadow-red-200'
+                      : 'bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-200'
+                  }`}
+                >
+                  {actionLoading ? (
+                    <>
+                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                      Processing...
+                    </>
+                  ) : action === 'delete' ? (
+                    'Delete Permanently'
+                  ) : action === 'offboard' ? (
+                    'Confirm Offboard'
+                  ) : action === 'deactivate' ? (
+                    'Suspend Account'
+                  ) : (
+                    'Activate Account'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Role change confirmation modal */}
       {editingRole && (
