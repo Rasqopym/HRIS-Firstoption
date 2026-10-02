@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
-import { DEPARTMENTS } from '../../data/mock'
 import type { StaffMember, StaffStatus, Role } from '../../types'
 import { supabase } from '../../lib/supabase'
 import { dbRoleToApp, appRoleToDb } from '../../lib/roleMap'
 import { logAction } from '../../lib/auditLog'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
+
+interface DepartmentItem {
+  id: string
+  name: string
+}
 
 const roleLabels: Record<Role, string> = {
   superadmin: 'Super Admin', hr: 'HR', accountant: 'Accountant', auditor: 'Auditor', staff: 'Staff',
@@ -125,15 +129,30 @@ export default function UserManagement() {
     }
   }
 
+  // Departments from system settings
+  const [dbDepartments, setDbDepartments] = useState<DepartmentItem[]>([])
+
   // Create user form state
   const [form, setForm] = useState({
-    name: '', email: '', role: 'staff' as Role, department: DEPARTMENTS[0],
+    name: '', email: '', role: 'staff' as Role, department: '',
     jobTitle: '', phone: '', sendInvite: true,
   })
   const [creating, setCreating] = useState(false)
   const [createSuccess, setCreateSuccess] = useState(false)
   const [createError, setCreateError] = useState('')
   const [tempPassword, setTempPassword] = useState('')
+
+  const resetForm = () => {
+    setForm({
+      name: '',
+      email: '',
+      role: 'staff',
+      department: dbDepartments[0]?.name || '',
+      jobTitle: '',
+      phone: '',
+      sendInvite: true,
+    })
+  }
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase()
@@ -157,6 +176,24 @@ export default function UserManagement() {
 
         if (!pError && pData) {
           profilesData = pData
+        }
+
+        // Fetch real system departments from departments table
+        try {
+          const { data: deptData } = await supabase
+            .from('departments')
+            .select('id, name')
+            .order('name')
+
+          if (deptData && deptData.length > 0) {
+            setDbDepartments(deptData)
+            setForm(f => ({
+              ...f,
+              department: f.department || deptData[0].name,
+            }))
+          }
+        } catch (deptErr) {
+          console.error('Error fetching departments:', deptErr)
         }
 
         // Fetch all staff records to map departments accurately by email & profile_id
@@ -430,6 +467,32 @@ export default function UserManagement() {
 
       setTempPassword(generatedTempPw)
 
+      // Insert corresponding staff record to associate department and job title
+      const selectedDeptObj = dbDepartments.find(d => d.name === form.department)
+      let insertedStaffId: string | undefined = undefined
+      let generatedStaffCode: string | undefined = undefined
+
+      try {
+        const { data: staffInsertData, error: staffInsertErr } = await supabase.from('staff').insert({
+          profile_id: createdUserId,
+          full_name: form.name,
+          email: form.email,
+          phone: form.phone || null,
+          department_id: selectedDeptObj?.id || null,
+          department: form.department || 'Operations',
+          job_title: form.jobTitle || (form.role === 'superadmin' ? 'Super Admin' : form.role === 'hr' ? 'HR Manager' : form.role === 'accountant' ? 'Chief Accountant' : form.role === 'auditor' ? 'Internal Auditor' : 'Staff Officer'),
+          status: 'active',
+          date_employed: new Date().toISOString().slice(0, 10),
+        }).select('id, staff_code').single()
+
+        if (!staffInsertErr && staffInsertData) {
+          insertedStaffId = staffInsertData.id
+          generatedStaffCode = staffInsertData.staff_code
+        }
+      } catch (staffErr) {
+        console.warn('Could not insert into staff table:', staffErr)
+      }
+
       // Log the action
       await logAction({
         action: 'CREATE',
@@ -441,13 +504,13 @@ export default function UserManagement() {
       // Add the new user to the local list with real data
       const newUser: StaffMember = {
         id: createdUserId,
-        staffId: `FO-${Date.now().toString().slice(-6).toUpperCase()}`,
-        staffTableId: undefined,
+        staffId: generatedStaffCode || `FO-${Date.now().toString().slice(-6).toUpperCase()}`,
+        staffTableId: insertedStaffId,
         name: form.name,
         email: form.email,
         role: form.role,
         department: form.department,
-        jobTitle: form.jobTitle,
+        jobTitle: form.jobTitle || (form.role === 'superadmin' ? 'Super Admin' : form.role === 'hr' ? 'HR Manager' : form.role === 'accountant' ? 'Chief Accountant' : form.role === 'auditor' ? 'Internal Auditor' : 'Staff Officer'),
         employmentDate: new Date().toISOString().slice(0, 10),
         status: 'active',
         lastLogin: 'Never',
@@ -765,7 +828,7 @@ export default function UserManagement() {
                 setCreateSuccess(false)
                 setCreateError('')
                 setTempPassword('')
-                setForm({ name: '', email: '', role: 'staff', department: DEPARTMENTS[0], jobTitle: '', phone: '', sendInvite: true })
+                resetForm()
               }} className="p-2 rounded-lg hover:bg-slate-100 text-slate-400">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
@@ -795,7 +858,7 @@ export default function UserManagement() {
                   onClick={() => {
                     setCreateSuccess(false)
                     setShowCreateModal(false)
-                    setForm({ name: '', email: '', role: 'staff', department: DEPARTMENTS[0], jobTitle: '', phone: '', sendInvite: true })
+                    resetForm()
                     setCreateError('')
                     setTempPassword('')
                   }}
@@ -845,7 +908,11 @@ export default function UserManagement() {
                       value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-white"
                     >
-                      {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                      {dbDepartments.length > 0 ? (
+                        dbDepartments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)
+                      ) : (
+                        <option value="">Loading departments...</option>
+                      )}
                     </select>
                   </div>
                   <div>
@@ -882,7 +949,7 @@ export default function UserManagement() {
                       setCreateSuccess(false)
                       setCreateError('')
                       setTempPassword('')
-                      setForm({ name: '', email: '', role: 'staff', department: DEPARTMENTS[0], jobTitle: '', phone: '', sendInvite: true })
+                      resetForm()
                     }}
                     className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
                   >
