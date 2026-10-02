@@ -338,17 +338,36 @@ export default function UserManagement() {
       if (action === 'delete') {
         for (const id of ids) {
           const userToDelete = users.find(u => u.id === id)
+          let dbDeleted = false
 
-          // 1. Attempt Edge Function delete-user for auth.users cleanup
+          // 1. Attempt PostgreSQL RPC function admin_delete_user
           try {
-            await supabase.functions.invoke('delete-user', {
-              body: { user_id: id, staff_id: userToDelete?.staffTableId }
+            const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_delete_user', {
+              p_user_id: id,
+              p_staff_id: userToDelete?.staffTableId || null,
             })
-          } catch (fnErr) {
-            console.warn('Edge function delete-user note:', fnErr)
+            if (!rpcErr && rpcData?.success) {
+              dbDeleted = true
+            }
+          } catch (rpcCatch) {
+            console.warn('RPC delete notice:', rpcCatch)
           }
 
-          // 2. Delete from staff table
+          // 2. Attempt Edge Function delete-user
+          if (!dbDeleted) {
+            try {
+              const { data: fnData, error: fnErr } = await supabase.functions.invoke('delete-user', {
+                body: { user_id: id, staff_id: userToDelete?.staffTableId }
+              })
+              if (!fnErr && fnData?.success) {
+                dbDeleted = true
+              }
+            } catch (fnCatch) {
+              console.warn('Edge function delete-user notice:', fnCatch)
+            }
+          }
+
+          // 3. Fallback direct table deletes
           if (userToDelete?.staffTableId) {
             await supabase.from('staff').delete().eq('id', userToDelete.staffTableId)
           }
@@ -357,10 +376,9 @@ export default function UserManagement() {
             await supabase.from('staff').delete().eq('email', userToDelete.email)
           }
 
-          // 3. Delete from profiles table
           const { error: profDelError } = await supabase.from('profiles').delete().eq('id', id)
-          if (profDelError) {
-            console.warn('Profile delete warning:', profDelError.message)
+          if (!profDelError) {
+            dbDeleted = true
           }
 
           // 4. Log audit trail
