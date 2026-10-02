@@ -96,23 +96,24 @@ export default function UserManagement() {
     setResetSuccessMsg('')
 
     try {
-      // Attempt Edge Function / RPC first
-      const { data, error } = await supabase.functions.invoke('admin-reset-password', {
-        body: { user_id: resetModalUser.id, new_password: directPassword }
+      // 1. Attempt RPC first (admin_set_user_password)
+      const { data: rpcData, error: rpcError } = await supabase.rpc('admin_set_user_password', {
+        p_user_id: resetModalUser.id,
+        p_new_password: directPassword
       })
 
-      if (!error && data?.success) {
-        setResetSuccessMsg(`Password updated successfully for ${resetModalUser.name}!`)
+      if (!rpcError && rpcData?.success) {
+        setResetSuccessMsg(`Password successfully updated for ${resetModalUser.name}! They can now sign in with "${directPassword}".`)
       } else {
-        const { error: rpcError } = await supabase.rpc('admin_set_user_password', {
-          p_user_id: resetModalUser.id,
-          p_new_password: directPassword
+        // 2. Attempt Edge Function fallback
+        const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-reset-password', {
+          body: { user_id: resetModalUser.id, new_password: directPassword }
         })
-        if (rpcError) {
-          // Provide instant temporary password for admin
-          setResetSuccessMsg(`Temporary Password Set: "${directPassword}". Share this password with ${resetModalUser.name} to sign in directly.`)
+
+        if (!fnError && fnData?.success) {
+          setResetSuccessMsg(`Password successfully updated for ${resetModalUser.name}!`)
         } else {
-          setResetSuccessMsg(`Password updated successfully for ${resetModalUser.name}!`)
+          throw new Error(rpcError?.message || rpcData?.error || fnError?.message || 'Database function admin_set_user_password not found. Please run the SQL procedure in Supabase.')
         }
       }
 
@@ -120,10 +121,10 @@ export default function UserManagement() {
         action: 'UPDATE',
         entity: 'User',
         entityId: resetModalUser.id,
-        details: `Set direct password for ${resetModalUser.email}`,
+        details: `Reset direct password for ${resetModalUser.email}`,
       })
     } catch (err: any) {
-      setResetSuccessMsg(`Temporary Password Set: "${directPassword}". Share this password with ${resetModalUser.name} to sign in.`)
+      setResetErrorMsg(err.message || 'Failed to update password. Please check database permissions.')
     } finally {
       setSendingReset(false)
     }
