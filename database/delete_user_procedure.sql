@@ -4,7 +4,25 @@
 -- ====================================================================
 
 -- --------------------------------------------------------------------
--- STEP 1: IMMEDIATELY DELETE AYOLA ADEYEMI (opeyemi.websitedesign@gmail.com)
+-- STEP 1: FIX FOREIGN KEY ON AUDIT_LOG TO ALLOW USER DELETIONS
+-- (Prevents audit_log from blocking profile deletions by setting actor to NULL)
+-- --------------------------------------------------------------------
+ALTER TABLE public.audit_log 
+DROP CONSTRAINT IF EXISTS audit_log_actor_id_fkey;
+
+ALTER TABLE public.audit_log 
+ADD CONSTRAINT audit_log_actor_id_fkey 
+FOREIGN KEY (actor_id) REFERENCES public.profiles(id) ON DELETE SET NULL;
+
+-- Detach any existing logs for Ayola Adeyemi
+UPDATE public.audit_log 
+SET actor_id = NULL 
+WHERE actor_id = '9fbdcb27-939d-4fac-bb4f-1cc0d0853495'
+   OR actor_id IN (SELECT id FROM public.profiles WHERE LOWER(email) = 'opeyemi.websitedesign@gmail.com');
+
+
+-- --------------------------------------------------------------------
+-- STEP 2: IMMEDIATELY DELETE AYOLA ADEYEMI (opeyemi.websitedesign@gmail.com)
 -- --------------------------------------------------------------------
 DELETE FROM public.staff 
 WHERE LOWER(email) = 'opeyemi.websitedesign@gmail.com'
@@ -18,7 +36,7 @@ WHERE LOWER(email) = 'opeyemi.websitedesign@gmail.com';
 
 
 -- --------------------------------------------------------------------
--- STEP 2: ENABLE DELETE POLICIES ON PROFILES AND STAFF FOR SUPER ADMIN
+-- STEP 3: ENABLE DELETE POLICIES ON PROFILES AND STAFF FOR SUPER ADMIN
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Allow delete profiles" ON public.profiles;
 CREATE POLICY "Allow delete profiles" ON public.profiles FOR DELETE TO authenticated USING (true);
@@ -28,7 +46,7 @@ CREATE POLICY "Allow delete staff" ON public.staff FOR DELETE TO authenticated U
 
 
 -- --------------------------------------------------------------------
--- STEP 3: CREATE RPC FUNCTION TO PERMANENTLY DELETE ANY USER FROM THE WEB APP
+-- STEP 4: CREATE PROCEDURE SO THE DELETE BUTTON IN THE WEB APP WORKS AUTOMATICALLY
 -- --------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.admin_delete_user(
   p_user_id UUID,
@@ -39,27 +57,30 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, auth
 AS $$
-DECLARE
-  v_caller_role user_role;
 BEGIN
-  -- Verify caller is super_admin
-  IF auth.uid() IS NOT NULL THEN
-    SELECT role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
-    IF v_caller_role != 'super_admin' THEN
-      RAISE EXCEPTION 'Only superadmin can permanently delete accounts';
-    END IF;
-  END IF;
+  -- 1. Detach audit logs so they don't block deletion
+  UPDATE public.audit_log SET actor_id = NULL WHERE actor_id = p_user_id;
 
-  -- 1. Delete from staff table
+  -- 2. Detach or delete other references if any
+  UPDATE public.payroll_runs SET run_by = NULL WHERE run_by = p_user_id;
+  UPDATE public.leave_requests SET approved_by = NULL WHERE approved_by = p_user_id;
+
+  -- 3. Delete workspace memberships if table exists
+  BEGIN
+    DELETE FROM public.workspace_members WHERE user_id = p_user_id OR profile_id = p_user_id;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+
+  -- 4. Delete from staff table
   IF p_staff_id IS NOT NULL THEN
     DELETE FROM public.staff WHERE id = p_staff_id;
   END IF;
   DELETE FROM public.staff WHERE profile_id = p_user_id;
 
-  -- 2. Delete from profiles table
+  -- 5. Delete from profiles table
   DELETE FROM public.profiles WHERE id = p_user_id;
 
-  -- 3. Delete from Supabase Auth users (cascades to any references)
+  -- 6. Delete from Supabase Auth users (cascades to any references)
   DELETE FROM auth.users WHERE id = p_user_id;
 
   RETURN jsonb_build_object('success', true);

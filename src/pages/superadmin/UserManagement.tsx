@@ -368,6 +368,10 @@ export default function UserManagement() {
           }
 
           // 3. Fallback direct table deletes
+          try {
+            await supabase.from('audit_log').update({ actor_id: null }).eq('actor_id', id)
+          } catch (e) {}
+
           if (userToDelete?.staffTableId) {
             await supabase.from('staff').delete().eq('id', userToDelete.staffTableId)
           }
