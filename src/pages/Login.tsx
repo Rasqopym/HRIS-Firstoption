@@ -81,12 +81,8 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
 
       if (isPasswordRecoveryUrl() || initialResetPasswordMode) {
         setResetPasswordMode(true)
-        const sessionResult = await establishRecoverySession()
-        if (!sessionResult.success) {
-          setRecoveryError(sessionResult.error || 'The reset link is invalid or has expired.')
-        } else {
-          setRecoveryError(null)
-        }
+        // Background session setup - pre-fetch/exchange tokens silently without blocking
+        establishRecoverySession()
       }
     }
     initRecovery()
@@ -244,7 +240,9 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
         onPasswordResetComplete?.()
       }, 3000)
     } catch (err: any) {
-      setError(err.message || 'Failed to update password. The link may have expired.')
+      const msg = err.message || 'Failed to update password. The link may have expired.'
+      setError(msg)
+      setRecoveryError(msg)
     } finally {
       setLoading(false)
     }

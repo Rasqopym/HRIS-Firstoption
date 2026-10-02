@@ -78,60 +78,36 @@ export function getAuthUrlError(): string | null {
   return null
 }
 
+let recoveryPromise: Promise<{ success: boolean; error?: string }> | null = null
+
 /**
  * Ensures an active Supabase auth session is established for password recovery.
- * Attempts PKCE code exchange, OTP token verification, and hash token restoration.
+ * Attempts hash token restoration, OTP verification, and PKCE code exchange with deduplication.
  */
-export async function establishRecoverySession(): Promise<{ success: boolean; error?: string }> {
+export function establishRecoverySession(): Promise<{ success: boolean; error?: string }> {
+  if (recoveryPromise) return recoveryPromise
+  recoveryPromise = _establishRecoverySession().finally(() => {
+    setTimeout(() => {
+      recoveryPromise = null
+    }, 1000)
+  })
+  return recoveryPromise
+}
+
+async function _establishRecoverySession(): Promise<{ success: boolean; error?: string }> {
   try {
     const urlError = getAuthUrlError()
     if (urlError) {
       return { success: false, error: urlError }
     }
 
-    // Check if session is already active
+    // 1. Check if session is already active
     const { data: { session: existingSession } } = await supabase.auth.getSession()
     if (existingSession?.user) {
       return { success: true }
     }
 
-    // 1. Try PKCE code exchange if ?code= is present
-    const code = getAuthParam('code')
-    if (code) {
-      try {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-        if (!error && data.session) {
-          return { success: true }
-        }
-        if (error) {
-          console.warn('PKCE exchangeCodeForSession failed:', error.message)
-        }
-      } catch (err: any) {
-        console.warn('exchangeCodeForSession thrown:', err?.message)
-      }
-    }
-
-    // 2. Try OTP verify if token_hash is present
-    const tokenHash = getAuthParam('token_hash')
-    if (tokenHash) {
-      try {
-        const type = (getAuthParam('type') || 'recovery') as any
-        const { data, error } = await supabase.auth.verifyOtp({
-          token_hash: tokenHash,
-          type: type === 'recovery' ? 'recovery' : 'email'
-        })
-        if (!error && data.session) {
-          return { success: true }
-        }
-        if (error) {
-          console.warn('verifyOtp failed:', error.message)
-        }
-      } catch (err: any) {
-        console.warn('verifyOtp thrown:', err?.message)
-      }
-    }
-
-    // 3. Try setSession if access_token & refresh_token are present in URL
+    // 2. Hash tokens (implicit flow: #access_token=...&refresh_token=...)
     const accessToken = getAuthParam('access_token')
     const refreshToken = getAuthParam('refresh_token')
     if (accessToken && refreshToken) {
@@ -143,23 +119,53 @@ export async function establishRecoverySession(): Promise<{ success: boolean; er
         if (!error && data.session) {
           return { success: true }
         }
-        if (error) {
-          console.warn('setSession failed:', error.message)
-        }
       } catch (err: any) {
-        console.warn('setSession thrown:', err?.message)
+        console.warn('setSession failed:', err?.message)
       }
     }
 
-    // 4. Final verification of active session
-    const { data: { session: finalSession } } = await supabase.auth.getSession()
-    if (finalSession?.user) {
-      return { success: true }
+    // 3. OTP verification if token_hash is present
+    const tokenHash = getAuthParam('token_hash')
+    if (tokenHash) {
+      try {
+        const type = (getAuthParam('type') || 'recovery') as any
+        const { data, error } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: type === 'recovery' ? 'recovery' : 'email'
+        })
+        if (!error && data.session) {
+          return { success: true }
+        }
+      } catch (err: any) {
+        console.warn('verifyOtp failed:', err?.message)
+      }
+    }
+
+    // 4. PKCE code exchange if ?code= is present
+    const code = getAuthParam('code')
+    if (code) {
+      try {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        if (!error && data.session) {
+          return { success: true }
+        }
+      } catch (err: any) {
+        console.warn('exchangeCodeForSession failed:', err?.message)
+      }
+    }
+
+    // 5. Allow up to 1.5 seconds for background auth state / initializePromise to settle
+    for (let i = 0; i < 6; i++) {
+      await new Promise(r => setTimeout(r, 250))
+      const { data: { session: retrySession } } = await supabase.auth.getSession()
+      if (retrySession?.user) {
+        return { success: true }
+      }
     }
 
     return {
       success: false,
-      error: 'Auth session missing. The reset link may have expired or already been used. Please request a new link.'
+      error: 'Unable to verify reset session. The link may have expired or already been used. Please request a new reset link.'
     }
   } catch (err: any) {
     return {
