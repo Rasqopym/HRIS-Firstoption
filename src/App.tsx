@@ -96,6 +96,15 @@ export default function App() {
     try { return localStorage.getItem('hris_selected_payslip_id') } catch (e) { return null }
   })
   const [currentStaffId, setCurrentStaffId] = useState<string | null>(null)
+  const [isRecoveryMode, setIsRecoveryMode] = useState<boolean>(() => {
+    try {
+      const h = window.location.hash || ''
+      const s = window.location.search || ''
+      return h.includes('type=recovery') || s.includes('type=recovery')
+    } catch (e) {
+      return false
+    }
+  })
 
   const handleSelectStaff = (id: string | null) => {
     setSelectedStaffId(id)
@@ -116,6 +125,14 @@ export default function App() {
   useEffect(() => {
     const restoreSession = async () => {
       try {
+        const hash = window.location.hash || ''
+        const search = window.location.search || ''
+        if (hash.includes('type=recovery') || search.includes('type=recovery')) {
+          setIsRecoveryMode(true)
+          setCheckingSession(false)
+          return
+        }
+
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) {
           const { data: profile } = await supabase
@@ -144,8 +161,12 @@ export default function App() {
     restoreSession()
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true)
         setIsLoggedIn(false)
+      } else if (event === 'SIGNED_OUT') {
+        setIsLoggedIn(false)
+        setIsRecoveryMode(false)
         setAuthenticatedRole('superadmin')
         setViewRole('superadmin')
         setPage('sa-dashboard')
@@ -369,8 +390,14 @@ export default function App() {
     )
   }
 
-  if (!isLoggedIn) {
-    return <Login onLogin={handleLogin} />
+  if (!isLoggedIn || isRecoveryMode) {
+    return (
+      <Login
+        onLogin={handleLogin}
+        initialResetPasswordMode={isRecoveryMode}
+        onPasswordResetComplete={() => setIsRecoveryMode(false)}
+      />
+    )
   }
 
   const renderPage = () => {

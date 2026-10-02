@@ -7,9 +7,11 @@ import { useCompanySettings } from '../hooks/useCompanySettings'
 
 interface LoginProps {
   onLogin: (role: Role) => void
+  initialResetPasswordMode?: boolean
+  onPasswordResetComplete?: () => void
 }
 
-export default function Login({ onLogin }: LoginProps) {
+export default function Login({ onLogin, initialResetPasswordMode = false, onPasswordResetComplete }: LoginProps) {
   const { settings: companySettings } = useCompanySettings()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,7 +22,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [forgotSent, setForgotSent] = useState(false)
 
   // Recovery & Reset Password State
-  const [resetPasswordMode, setResetPasswordMode] = useState(false)
+  const [resetPasswordMode, setResetPasswordMode] = useState(initialResetPasswordMode)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showNewPassword, setShowNewPassword] = useState(false)
@@ -65,12 +67,14 @@ export default function Login({ onLogin }: LoginProps) {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
     window.addEventListener('appinstalled', handleAppInstalled)
 
-    // Detect password reset / recovery link from hash
+    // Detect password reset / recovery link from hash or query
     const hash = window.location.hash || ''
-    if (hash.includes('otp_expired') || hash.includes('invalid') || hash.includes('access_denied')) {
+    const search = window.location.search || ''
+    if (hash.includes('otp_expired') || hash.includes('invalid') || hash.includes('access_denied') || search.includes('error')) {
       setError('The password reset link has expired or is invalid. Please request a new reset link below.')
       setForgotMode(true)
-    } else if (hash.includes('type=recovery') || hash.includes('access_token')) {
+      setResetPasswordMode(false)
+    } else if (hash.includes('type=recovery') || search.includes('type=recovery') || hash.includes('access_token') || initialResetPasswordMode) {
       setResetPasswordMode(true)
     }
 
@@ -214,6 +218,7 @@ export default function Login({ onLogin }: LoginProps) {
         setForgotMode(false)
         setResetSuccess(false)
         try { window.location.hash = '' } catch (e) {}
+        onPasswordResetComplete?.()
       }, 3000)
     } catch (err: any) {
       setError(err.message || 'Failed to update password. The link may have expired.')
@@ -386,6 +391,17 @@ export default function Login({ onLogin }: LoginProps) {
                       className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
                     >
                       {loading ? 'Updating password...' : 'Update Password'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetPasswordMode(false)
+                        try { window.location.hash = '' } catch (e) {}
+                        onPasswordResetComplete?.()
+                      }}
+                      className="w-full text-center text-sm text-slate-500 hover:text-slate-800 transition-colors pt-1"
+                    >
+                      Back to sign in
                     </button>
                   </form>
                 </>
