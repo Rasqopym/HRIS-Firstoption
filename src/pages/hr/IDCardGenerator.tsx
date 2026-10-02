@@ -9,14 +9,21 @@ type ViewMode = 'single' | 'bulk'
 
 interface StaffMember {
   id: string
+  profile_id?: string | null
+  email?: string | null
   full_name: string
   job_title: string
   department_name: string
-  photo_url: string
+  photo_url: string | null
   staff_code: string
   id_verification_code: string
   id_card_issued_at: string | null
   id_card_expires_at: string | null
+}
+
+export interface IDCardGeneratorProps {
+  staffId?: string | null
+  isPersonalView?: boolean
 }
 
 function getInitials(name: string): string {
@@ -301,6 +308,11 @@ function IDCardLandscape({ s, side, companySettings }: { s: StaffMember; side: C
           <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: accentColor, fontFamily: 'sans-serif' }}>
             {s.job_title}
           </div>
+          {s.department_name && (
+            <div style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', fontFamily: 'sans-serif', marginTop: '2px' }}>
+              {s.department_name}
+            </div>
+          )}
           <span style={{ display: 'block', width: '30px', height: '2px', background: accentColor, margin: '2px 0 0' }}></span>
         </div>
 
@@ -654,6 +666,11 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
           <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: accentColor, fontFamily: 'sans-serif' }}>
             {s.job_title}
           </div>
+          {s.department_name && (
+            <div style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', fontFamily: 'sans-serif', marginTop: '2px' }}>
+              {s.department_name}
+            </div>
+          )}
           <span style={{ display: 'block', width: '40px', height: '2px', background: accentColor, margin: '2px auto 0' }}></span>
         </div>
 
@@ -709,7 +726,7 @@ function IDCardPortrait({ s, side, companySettings }: { s: StaffMember; side: Ca
   )
 }
 
-export default function IDCardGenerator() {
+export default function IDCardGenerator({ staffId, isPersonalView = false }: IDCardGeneratorProps) {
   const [selectedId, setSelectedId] = useState('')
   const [orientation, setOrientation] = useState<Orientation>('landscape')
   const [side, setSide] = useState<CardSide>('front')
@@ -724,17 +741,19 @@ export default function IDCardGenerator() {
     const fetchData = async () => {
       try {
         let staffData: any[] = []
+        const { data: { user } } = await supabase.auth.getUser()
         
-        // Attempt relational query first
+        // Query staff with relations (departments, profiles)
         const { data, error: staffError } = await supabase
           .from('staff')
           .select(`
             id,
+            profile_id,
+            email,
             full_name,
             job_title,
-            department,
             department_id,
-            departments (name),
+            departments (id, name),
             photo_url,
             profiles (photo_url),
             staff_code,
@@ -751,32 +770,35 @@ export default function IDCardGenerator() {
           // Fallback query without joins
           const { data: simpleData } = await supabase
             .from('staff')
-            .select('*')
+            .select('id, profile_id, email, full_name, job_title, department_id, photo_url, staff_code, id_verification_code, id_card_issued_at, id_card_expires_at, status')
             .order('full_name', { ascending: true })
 
           staffData = simpleData || []
         }
 
-        // If staffData is still empty, synthesize logged in staff member
+        // If staffData is still empty, synthesize user
         if (staffData.length === 0) {
-          const { data: { user } } = await supabase.auth.getUser()
           staffData = [{
             id: user?.id || 'staff-1',
-            full_name: 'Amara Ike',
-            job_title: 'Head of Marketing & Media',
-            department: 'Media & Marketing',
+            profile_id: user?.id,
+            email: user?.email,
+            full_name: user?.user_metadata?.full_name || 'Staff Member',
+            job_title: 'Staff',
+            department_id: null,
             photo_url: null,
-            staff_code: 'FO-0002',
-            id_verification_code: 'VERIFY-FO-0002',
+            staff_code: 'FO-0001',
+            id_verification_code: 'VERIFY-FO-0001',
             status: 'active'
           }]
         }
 
-        const formattedStaff = staffData.map((s: any) => ({
+        const formattedStaff: StaffMember[] = staffData.map((s: any) => ({
           id: s.id,
-          full_name: s.full_name,
+          profile_id: s.profile_id,
+          email: s.email,
+          full_name: s.full_name || 'Staff Member',
           job_title: s.job_title || 'Staff',
-          department_name: (s.departments as any)?.name || s.department || 'General Operations',
+          department_name: (s.departments as any)?.name || 'General Operations',
           photo_url: s.photo_url || (Array.isArray(s.profiles) ? s.profiles[0]?.photo_url : s.profiles?.photo_url) || null,
           staff_code: s.staff_code || 'FO-0001',
           id_verification_code: s.id_verification_code || 'VERIFY123',
@@ -784,11 +806,52 @@ export default function IDCardGenerator() {
           id_card_expires_at: s.id_card_expires_at,
         }))
 
-        setStaffList(formattedStaff)
-        if (formattedStaff.length > 0) {
-          setSelectedId(formattedStaff[0].id)
-          setBulkSelected(formattedStaff.map(s => s.id))
+        // Match staff to display
+        let targetStaff: StaffMember | undefined
+
+        // 1. If staffId is passed, match by id or profile_id
+        if (staffId) {
+          targetStaff = formattedStaff.find(s => s.id === staffId || s.profile_id === staffId)
         }
+
+        // 2. If in personal view or target not yet found, match by auth user
+        if (!targetStaff && user) {
+          targetStaff = formattedStaff.find(s =>
+            s.id === user.id ||
+            s.profile_id === user.id ||
+            (user.email && s.email && s.email.toLowerCase() === user.email.toLowerCase())
+          )
+        }
+
+        // 3. If in personal view and still not found in staffList, synthesize fallback
+        if (!targetStaff && isPersonalView && user) {
+          const fallbackEntry: StaffMember = {
+            id: user.id,
+            profile_id: user.id,
+            email: user.email,
+            full_name: user.user_metadata?.full_name || 'Staff Member',
+            job_title: 'Staff',
+            department_name: 'General Operations',
+            photo_url: null,
+            staff_code: 'FO-' + user.id.slice(0, 4).toUpperCase(),
+            id_verification_code: user.id.slice(0, 10),
+            id_card_issued_at: new Date().toISOString(),
+            id_card_expires_at: new Date(new Date().setFullYear(new Date().getFullYear() + 2)).toISOString()
+          }
+          formattedStaff.unshift(fallbackEntry)
+          targetStaff = fallbackEntry
+        }
+
+        // 4. Default to first staff for admin general view
+        if (!targetStaff && formattedStaff.length > 0) {
+          targetStaff = formattedStaff[0]
+        }
+
+        setStaffList(formattedStaff)
+        if (targetStaff) {
+          setSelectedId(targetStaff.id)
+        }
+        setBulkSelected(formattedStaff.map(s => s.id))
 
         let cachedSettings: any = null
         try {
@@ -822,7 +885,17 @@ export default function IDCardGenerator() {
     }
 
     fetchData()
-  }, [])
+  }, [staffId, isPersonalView])
+
+  // Sync selectedId when staffId changes
+  useEffect(() => {
+    if (staffId && staffList.length > 0) {
+      const match = staffList.find(s => s.id === staffId || s.profile_id === staffId)
+      if (match) {
+        setSelectedId(match.id)
+      }
+    }
+  }, [staffId, staffList])
 
   const selectedStaff = staffList.find(s => s.id === selectedId) || staffList[0]
 
@@ -833,7 +906,8 @@ export default function IDCardGenerator() {
       try {
         const dataUrl = await toPng(cardRef.current, { quality: 1.0, pixelRatio: 2, cacheBust: true })
         const link = document.createElement('a')
-        link.download = `${selectedStaff.staff_code}-id-card-${side}.png`
+        const safeName = (selectedStaff.full_name || 'staff').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+        link.download = `${selectedStaff.staff_code || 'staff'}-${safeName}-id-card-${side}.png`
         link.href = dataUrl
         link.click()
       } catch (err) {
@@ -884,8 +958,14 @@ export default function IDCardGenerator() {
   return (
     <div className="p-4 sm:p-6 anim-fade-up">
       <div className="mb-4 sm:mb-6">
-        <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">ID Card Generator</h2>
-        <p className="text-xs sm:text-sm text-slate-500">Design, preview, and export staff identity cards (CR80 format)</p>
+        <h2 className="font-display font-semibold text-slate-800 text-lg sm:text-xl">
+          {isPersonalView ? 'My ID Card' : 'ID Card Generator'}
+        </h2>
+        <p className="text-xs sm:text-sm text-slate-500">
+          {isPersonalView
+            ? 'Preview and download your official company identity card'
+            : 'Design, preview, and export staff identity cards (CR80 format)'}
+        </p>
       </div>
 
       <style>{`
@@ -910,19 +990,21 @@ export default function IDCardGenerator() {
 
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-3 sm:p-4 mb-5">
         <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
-            {(['single', 'bulk'] as ViewMode[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all capitalize ${viewMode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                {m === 'single' ? 'Single Preview' : 'Bulk Generate'}
-              </button>
-            ))}
-          </div>
+          {!isPersonalView && (
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              {(['single', 'bulk'] as ViewMode[]).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setViewMode(m)}
+                  className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all capitalize ${viewMode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  {m === 'single' ? 'Single Preview' : 'Bulk Generate'}
+                </button>
+              ))}
+            </div>
+          )}
 
-          {viewMode === 'single' && (
+          {(!isPersonalView && viewMode === 'single') && (
             <>
               <select
                 value={selectedId}
@@ -951,36 +1033,36 @@ export default function IDCardGenerator() {
                   className="text-xs border-0 focus:outline-none bg-transparent text-slate-700 font-medium cursor-pointer"
                 />
               </div>
-
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
-                {(['landscape', 'portrait'] as Orientation[]).map(o => (
-                  <button key={o} onClick={() => setOrientation(o)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${orientation === o ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
-                    {o}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
-                {(['front', 'back'] as CardSide[]).map(s => (
-                  <button key={s} onClick={() => setSide(s)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${side === s ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
-                    {s}
-                  </button>
-                ))}
-              </div>
             </>
           )}
+
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+            {(['landscape', 'portrait'] as Orientation[]).map(o => (
+              <button key={o} onClick={() => setOrientation(o)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${orientation === o ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
+                {o}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+            {(['front', 'back'] as CardSide[]).map(s => (
+              <button key={s} onClick={() => setSide(s)} className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium capitalize transition-all ${side === s ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
+                {s}
+              </button>
+            ))}
+          </div>
 
           <div className="sm:ml-auto flex items-center gap-2">
             <button
               onClick={handleDownload}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium transition-colors"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-medium transition-colors shadow-sm"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              {viewMode === 'bulk' ? `Download ${bulkSelected.length} Cards` : 'Download Card'}
+              {viewMode === 'bulk' && !isPersonalView ? `Download ${bulkSelected.length} Cards` : 'Download Card'}
             </button>
           </div>
         </div>

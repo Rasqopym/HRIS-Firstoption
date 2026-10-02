@@ -414,7 +414,7 @@ export default function App() {
       case 'hr-directory': return <StaffDirectory key={page} onNavigate={navigate} onSelectStaff={setSelectedStaffId} />
       case 'hr-profile': return <StaffProfile key={page} staffId={selectedStaffId} onNavigate={navigate} onSelectStaff={setSelectedStaffId} />
       case 'hr-add-staff': return <AddEditStaff key={page} staffId={selectedStaffId} onNavigate={navigate} />
-      case 'hr-id-cards': return <IDCardGenerator key={page} />
+      case 'hr-id-cards': return <IDCardGenerator key={page} staffId={selectedStaffId || currentStaffId} isPersonalView={false} />
       case 'hr-attendance-daily': return <AttendanceDaily key={page} />
       case 'hr-attendance-summary': return <AttendanceSummary key={page} />
       case 'hr-holidays': return <PublicHolidays key={page} />
@@ -443,7 +443,7 @@ export default function App() {
       case 'st-payslips': return <MyPayslips key={page} onNavigate={navigate} onSelectPayslip={setSelectedPayslipId} />
       case 'st-payslip': return <PayslipV2 key={page} payslipId={selectedPayslipId || undefined} onNavigate={navigate} />
       case 'st-profile': return <StaffProfile key={page} staffId={currentStaffId || ''} onNavigate={navigate} onSelectStaff={setSelectedStaffId} />
-      case 'st-id-card': return <IDCardGenerator key={page} />
+      case 'st-id-card': return <IDCardGenerator key={page} staffId={currentStaffId} isPersonalView={true} />
       case 'st-attendance': return <AttendanceSelf key={page} />
       case 'st-leave': return <LeaveRequest key={page} />
       case 'st-appraisal': return <MyAppraisal key={page} onNavigate={navigate} />
