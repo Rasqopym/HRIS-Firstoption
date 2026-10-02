@@ -78,7 +78,6 @@ Deno.serve(async (req) => {
     const staffUpdates: Record<string, any> = {}
     if (email) staffUpdates.email = email.trim().toLowerCase()
     if (full_name) staffUpdates.full_name = full_name.trim()
-    if (department) staffUpdates.department = department
     if (department_id) staffUpdates.department_id = department_id
     if (job_title) staffUpdates.job_title = job_title
     if (phone !== undefined) staffUpdates.phone = phone

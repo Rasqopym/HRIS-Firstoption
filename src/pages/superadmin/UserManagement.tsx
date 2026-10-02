@@ -210,33 +210,43 @@ export default function UserManagement() {
           console.error('Error fetching departments:', deptErr)
         }
 
-        // Fetch all staff records to map departments accurately by email & profile_id
+        // Fetch all staff records to map departments accurately by email, profile_id, or name
         let staffRecords: any[] = []
         try {
-          const { data: sData } = await supabase
+          const { data: sData, error: sErr } = await supabase
             .from('staff')
-            .select('id, profile_id, email, department, departments(name), job_title, staff_code, date_employed, status')
+            .select('id, profile_id, email, full_name, department_id, departments(id, name), job_title, staff_code, date_employed, status')
+          if (sErr) console.warn('Staff records query warning:', sErr)
           if (sData) staffRecords = sData
-        } catch (e) {}
+        } catch (e) {
+          console.error('Error fetching staff records:', e)
+        }
 
         const staffMembers: StaffMember[] = profilesData.map(p => {
           const appRole = dbRoleToApp(p.role)
           
-          // Match staff record by profile_id or email
-          const matchedStaff = staffRecords.find(s => s.profile_id === p.id || (s.email && s.email.toLowerCase() === (p.email || '').toLowerCase())) || (p.staff?.[0] ? p.staff[0] : null)
+          // Match staff record by profile_id, email, or full_name
+          const pEmail = (p.email || '').trim().toLowerCase()
+          const pName = (p.full_name || '').trim().toLowerCase()
+          const matchedStaff = staffRecords.find(s => 
+            (s.profile_id && s.profile_id === p.id) || 
+            (s.email && pEmail && s.email.trim().toLowerCase() === pEmail) ||
+            (s.full_name && pName && s.full_name.trim().toLowerCase() === pName)
+          )
 
           let deptName = '—'
           if (matchedStaff?.departments?.name) {
             deptName = matchedStaff.departments.name
-          } else if (matchedStaff?.department) {
-            deptName = matchedStaff.department
+          } else if (matchedStaff?.department_id) {
+            const d = dbDepartments.find(dep => dep.id === matchedStaff.department_id)
+            if (d) deptName = d.name
           } else {
             // Default department per role
             if (appRole === 'superadmin') deptName = 'System Administration'
             else if (appRole === 'hr') deptName = 'Human Resources'
             else if (appRole === 'accountant') deptName = 'Accounting & Finance'
             else if (appRole === 'auditor') deptName = 'Internal Audit'
-            else if (appRole === 'staff') deptName = 'Media & Marketing'
+            else deptName = 'General Operations'
           }
 
           // Format last login time
@@ -250,19 +260,26 @@ export default function UserManagement() {
             }
           }
 
+          const userJobTitle = matchedStaff?.job_title || (
+            appRole === 'superadmin' ? 'Super Admin' :
+            appRole === 'hr' ? 'HR Manager' :
+            appRole === 'accountant' ? 'Accountant' :
+            appRole === 'auditor' ? 'Internal Auditor' : 'Staff Member'
+          )
+
           return {
             id: p.id,
             staffId: matchedStaff?.staff_code || `FO-${p.id.slice(0, 6).toUpperCase()}`,
             staffTableId: matchedStaff?.id,
-            name: p.full_name || '—',
-            email: p.email || '—',
+            name: p.full_name || matchedStaff?.full_name || '—',
+            email: p.email || matchedStaff?.email || '—',
             role: appRole,
             department: deptName,
-            jobTitle: matchedStaff?.job_title || (appRole === 'superadmin' ? 'Super Admin' : appRole === 'hr' ? 'HR Manager' : appRole === 'accountant' ? 'Chief Accountant' : appRole === 'auditor' ? 'Internal Auditor' : 'Head of Marketing & Media'),
+            jobTitle: userJobTitle,
             employmentDate: matchedStaff?.date_employed || p.created_at?.slice(0, 10) || '2026-01-15',
             status: (matchedStaff?.status || p.status || 'active') as StaffStatus,
             lastLogin: lastLoginText,
-            phone: p.phone || '',
+            phone: p.phone || matchedStaff?.phone || '',
             photo: p.photo_url || null,
             bankName: '',
             accountNumber: '',
@@ -493,7 +510,6 @@ export default function UserManagement() {
           email: form.email,
           phone: form.phone || null,
           department_id: selectedDeptObj?.id || null,
-          department: form.department || 'Operations',
           job_title: form.jobTitle || (form.role === 'superadmin' ? 'Super Admin' : form.role === 'hr' ? 'HR Manager' : form.role === 'accountant' ? 'Chief Accountant' : form.role === 'auditor' ? 'Internal Auditor' : 'Staff Officer'),
           status: 'active',
           date_employed: new Date().toISOString().slice(0, 10),
@@ -577,17 +593,41 @@ export default function UserManagement() {
         full_name: editForm.name.trim(),
         email: trimmedEmail,
         phone: editForm.phone.trim() || null,
-        department: editForm.department,
         department_id: selectedDeptObj?.id || null,
         job_title: editForm.jobTitle.trim(),
       }
 
+      let staffUpdated = false
       if (editUserModal.staffTableId) {
-        await supabase.from('staff').update(staffUpdates).eq('id', editUserModal.staffTableId)
+        const { error: err1 } = await supabase.from('staff').update(staffUpdates).eq('id', editUserModal.staffTableId)
+        if (!err1) staffUpdated = true
       }
-      await supabase.from('staff').update(staffUpdates).eq('profile_id', editUserModal.id)
+      const { error: err2 } = await supabase.from('staff').update(staffUpdates).eq('profile_id', editUserModal.id)
+      if (!err2) staffUpdated = true
       if (editUserModal.email && editUserModal.email !== '—') {
-        await supabase.from('staff').update(staffUpdates).eq('email', editUserModal.email)
+        const { error: err3 } = await supabase.from('staff').update(staffUpdates).eq('email', editUserModal.email)
+        if (!err3) staffUpdated = true
+      }
+
+      // If no staff record existed yet, insert one now so department and job title persist!
+      if (!staffUpdated && !editUserModal.staffTableId) {
+        try {
+          const { data: newStaffData } = await supabase.from('staff').insert({
+            profile_id: editUserModal.id,
+            full_name: editForm.name.trim(),
+            email: trimmedEmail,
+            phone: editForm.phone.trim() || null,
+            department_id: selectedDeptObj?.id || null,
+            job_title: editForm.jobTitle.trim(),
+            status: 'active',
+            date_employed: new Date().toISOString().slice(0, 10),
+          }).select('id').single()
+          if (newStaffData) {
+            editUserModal.staffTableId = newStaffData.id
+          }
+        } catch (insertErr) {
+          console.warn('Staff insert fallback warning:', insertErr)
+        }
       }
 
       // 3. Update auth.users login email via Edge Function

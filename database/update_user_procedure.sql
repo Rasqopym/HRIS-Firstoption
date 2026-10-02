@@ -52,7 +52,7 @@ BEGIN
   UPDATE public.staff
   SET email = v_normalized_email,
       full_name = COALESCE(NULLIF(p_full_name, ''), full_name),
-      department = COALESCE(NULLIF(p_department, ''), department),
+      department_id = COALESCE((SELECT id FROM public.departments WHERE name = p_department LIMIT 1), department_id),
       job_title = COALESCE(NULLIF(p_job_title, ''), job_title),
       phone = COALESCE(p_phone, phone)
   WHERE profile_id = p_user_id;
