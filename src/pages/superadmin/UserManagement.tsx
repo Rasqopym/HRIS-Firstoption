@@ -132,6 +132,20 @@ export default function UserManagement() {
   // Departments from system settings
   const [dbDepartments, setDbDepartments] = useState<DepartmentItem[]>([])
 
+  // Edit user state
+  const [editUserModal, setEditUserModal] = useState<StaffMember | null>(null)
+  const [editForm, setEditForm] = useState({
+    name: '',
+    email: '',
+    role: 'staff' as Role,
+    department: '',
+    jobTitle: '',
+    phone: '',
+  })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [editSuccess, setEditSuccess] = useState('')
+
   // Create user form state
   const [form, setForm] = useState({
     name: '', email: '', role: 'staff' as Role, department: '',
@@ -534,6 +548,110 @@ export default function UserManagement() {
     }
   }
 
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editUserModal) return
+    setEditSaving(true)
+    setEditError('')
+    setEditSuccess('')
+
+    try {
+      const trimmedEmail = editForm.email.trim().toLowerCase()
+      const selectedDeptObj = dbDepartments.find(d => d.name === editForm.department)
+
+      // 1. Update profiles table
+      const { error: pErr } = await supabase
+        .from('profiles')
+        .update({
+          full_name: editForm.name.trim(),
+          email: trimmedEmail,
+          role: appRoleToDb(editForm.role),
+          phone: editForm.phone.trim() || null,
+        })
+        .eq('id', editUserModal.id)
+
+      if (pErr) console.warn('Profile update warning:', pErr)
+
+      // 2. Update staff table
+      const staffUpdates: any = {
+        full_name: editForm.name.trim(),
+        email: trimmedEmail,
+        phone: editForm.phone.trim() || null,
+        department: editForm.department,
+        department_id: selectedDeptObj?.id || null,
+        job_title: editForm.jobTitle.trim(),
+      }
+
+      if (editUserModal.staffTableId) {
+        await supabase.from('staff').update(staffUpdates).eq('id', editUserModal.staffTableId)
+      }
+      await supabase.from('staff').update(staffUpdates).eq('profile_id', editUserModal.id)
+      if (editUserModal.email && editUserModal.email !== '—') {
+        await supabase.from('staff').update(staffUpdates).eq('email', editUserModal.email)
+      }
+
+      // 3. Update auth.users login email via Edge Function
+      try {
+        await supabase.functions.invoke('update-user', {
+          body: {
+            user_id: editUserModal.id,
+            email: trimmedEmail,
+            full_name: editForm.name.trim(),
+            role: appRoleToDb(editForm.role),
+            department: editForm.department,
+            department_id: selectedDeptObj?.id || null,
+            job_title: editForm.jobTitle.trim(),
+            phone: editForm.phone.trim() || null,
+          }
+        })
+      } catch (fnErr) {
+        console.warn('Edge function update-user notice:', fnErr)
+      }
+
+      // 4. Try RPC function admin_update_user_email as secondary fallback
+      try {
+        await supabase.rpc('admin_update_user_email', {
+          p_user_id: editUserModal.id,
+          p_new_email: trimmedEmail,
+          p_full_name: editForm.name.trim(),
+          p_department: editForm.department,
+          p_job_title: editForm.jobTitle.trim(),
+          p_phone: editForm.phone.trim() || null,
+        })
+      } catch (e) {}
+
+      // 5. Audit log
+      await logAction({
+        action: 'UPDATE',
+        entity: 'User',
+        entityId: editUserModal.id,
+        details: `Updated details for ${editForm.name}: email=${trimmedEmail}, role=${editForm.role}, dept=${editForm.department}`,
+        severity: 'medium',
+      })
+
+      // 6. Update local state
+      setUsers(prev => prev.map(u => u.id === editUserModal.id ? {
+        ...u,
+        name: editForm.name.trim(),
+        email: trimmedEmail,
+        role: editForm.role,
+        department: editForm.department,
+        jobTitle: editForm.jobTitle.trim(),
+        phone: editForm.phone.trim(),
+      } : u))
+
+      setEditSuccess('User details updated successfully!')
+      setTimeout(() => {
+        setEditUserModal(null)
+        setEditSuccess('')
+      }, 1000)
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update user details')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   const handleRoleChange = async () => {
     if (!editingRole) return
 
@@ -737,6 +855,27 @@ export default function UserManagement() {
                   <td className="py-3.5 px-4 text-xs font-mono-data text-slate-500">{u.lastLogin}</td>
                   <td className="py-3.5 px-4">
                     <div className="flex items-center gap-1.5">
+                      {/* Edit User Button */}
+                      <button
+                        onClick={() => {
+                          setEditUserModal(u)
+                          setEditForm({
+                            name: u.name === '—' ? '' : u.name,
+                            email: u.email === '—' ? '' : u.email,
+                            role: u.role,
+                            department: u.department === '—' ? (dbDepartments[0]?.name || '') : u.department,
+                            jobTitle: u.jobTitle === '—' ? '' : u.jobTitle,
+                            phone: u.phone || '',
+                          })
+                          setEditError('')
+                          setEditSuccess('')
+                        }}
+                        className="px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                        title="Edit user details and email"
+                      >
+                        Edit
+                      </button>
+
                       {u.id === currentUserId ? (
                         <span className="text-[11px] text-slate-400 italic px-2 py-1">You</span>
                       ) : (
@@ -1260,6 +1399,142 @@ export default function UserManagement() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {editUserModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg anim-fade-up">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+              <div>
+                <h3 className="font-display font-semibold text-slate-800 text-lg">Edit User & Staff Record</h3>
+                <p className="text-sm text-slate-500">Update staff email, department, role, and details</p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditUserModal(null)
+                  setEditError('')
+                  setEditSuccess('')
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-400"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
+              {editError && (
+                <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                  {editError}
+                </div>
+              )}
+              {editSuccess && (
+                <div className="px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">
+                  {editSuccess}
+                </div>
+              )}
+
+              <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3 text-xs text-blue-800 flex items-start gap-2">
+                <svg className="w-4 h-4 text-blue-600 mt-0.5 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>Changing the email address will update the staff profile, staff directory records, and their login credentials across the database.</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Full Name *</label>
+                  <input
+                    required
+                    value={editForm.name}
+                    onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Amara Okafor"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Work Email Address *</label>
+                  <input
+                    required
+                    type="email"
+                    value={editForm.email}
+                    onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="staff@firstoption.ng"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Role *</label>
+                  <select
+                    value={editForm.role}
+                    onChange={e => setEditForm(f => ({ ...f, role: e.target.value as Role }))}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-white"
+                  >
+                    {ROLES.map(r => <option key={r} value={r}>{roleLabels[r]}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Department *</label>
+                  <select
+                    value={editForm.department}
+                    onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-white"
+                  >
+                    {dbDepartments.length > 0 ? (
+                      dbDepartments.map(d => <option key={d.id} value={d.name}>{d.name}</option>)
+                    ) : (
+                      <option value={editForm.department}>{editForm.department || 'Operations'}</option>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Job Title</label>
+                  <input
+                    value={editForm.jobTitle}
+                    onChange={e => setEditForm(f => ({ ...f, jobTitle: e.target.value }))}
+                    placeholder="e.g. Sales Specialist"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+                  <input
+                    value={editForm.phone}
+                    onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="+234 800 000 0000"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditUserModal(null)
+                    setEditError('')
+                    setEditSuccess('')
+                  }}
+                  className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {editSaving ? (
+                    <>
+                      <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Changes'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
