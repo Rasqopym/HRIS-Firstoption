@@ -205,6 +205,103 @@ export async function getWorkspaces(): Promise<Workspace[]> {
   }
 }
 
+export async function getUserWorkspaces(
+  staffId?: string | null,
+  role?: string,
+  departmentName?: string
+): Promise<Workspace[]> {
+  const allWorkspaces = await getWorkspaces()
+  if (role === 'superadmin' || !staffId) {
+    return allWorkspaces
+  }
+
+  // 1. Direct workspace memberships from Supabase
+  const userWsIds = new Set<string>()
+  try {
+    const { data: wm } = await supabase
+      .from('workspace_members')
+      .select('workspace_id')
+      .eq('staff_id', staffId)
+    if (wm) {
+      wm.forEach((m: any) => {
+        if (m.workspace_id) userWsIds.add(m.workspace_id)
+      })
+    }
+  } catch {}
+
+  // 2. Check local storage cache for workspace members
+  for (const ws of allWorkspaces) {
+    try {
+      const cached = localStorage.getItem(`${LOCAL_WS_MEMBERS_KEY}_${ws.id}`)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (Array.isArray(parsed) && parsed.some((m: any) => m.staff_id === staffId)) {
+          userWsIds.add(ws.id)
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Team memberships from Supabase
+  const userTeamWsIds = new Set<string>()
+  try {
+    const { data: tm } = await supabase
+      .from('team_members')
+      .select('team_id, teams (workspace_id)')
+      .eq('staff_id', staffId)
+    if (tm) {
+      tm.forEach((m: any) => {
+        const wsId = m.teams?.workspace_id
+        if (wsId) userTeamWsIds.add(wsId)
+      })
+    }
+  } catch {}
+
+  // 4. Resolve staff department if not provided
+  let resolvedDept = departmentName
+  if (!resolvedDept && staffId) {
+    try {
+      const { data: staff } = await supabase
+        .from('staff')
+        .select('departments (name)')
+        .eq('id', staffId)
+        .maybeSingle()
+      if (staff) {
+        resolvedDept = (staff.departments as any)?.name
+      }
+    } catch {}
+  }
+
+  const deptLower = (resolvedDept || '').toLowerCase()
+
+  return allWorkspaces.filter(ws => {
+    // Explicit workspace member
+    if (userWsIds.has(ws.id)) return true
+    // Explicit member of a team in this workspace
+    if (userTeamWsIds.has(ws.id)) return true
+    // Default company-wide workspace
+    if (ws.is_default) return true
+    // Department match
+    if (deptLower) {
+      const wsName = ws.name.toLowerCase()
+      const wsCode = (ws.code || '').toLowerCase()
+      if (
+        (deptLower.includes('sales') && (wsName.includes('sales') || wsCode.includes('sale'))) ||
+        (deptLower.includes('marketing') && (wsName.includes('marketing') || wsName.includes('media') || wsCode.includes('medi'))) ||
+        ((deptLower.includes('tech') || deptLower.includes('engineer') || deptLower.includes('it')) && (wsName.includes('tech') || wsCode.includes('tech'))) ||
+        (deptLower.includes('human') && (wsName.includes('human') || wsName.includes('people') || wsName.includes('hr'))) ||
+        (deptLower.includes('account') && (wsName.includes('account') || wsName.includes('finance'))) ||
+        (deptLower.includes('operation') && (wsName.includes('operation') || wsName.includes('ops'))) ||
+        (deptLower.includes('customer') && (wsName.includes('customer') || wsName.includes('support'))) ||
+        (deptLower.includes('admin') && (wsName.includes('admin') || wsName.includes('headquarters') || wsName.includes('fohq')))
+      ) {
+        return true
+      }
+    }
+    return false
+  })
+}
+
 export async function createWorkspace(ws: Partial<Workspace>): Promise<Workspace> {
   const payload = {
     name: ws.name || 'New Workspace',

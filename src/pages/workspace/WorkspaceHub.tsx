@@ -12,6 +12,7 @@ import type {
 } from '../../types'
 import {
   getWorkspaces,
+  getUserWorkspaces,
   createWorkspace,
   deleteWorkspace,
   getTeams,
@@ -118,6 +119,7 @@ export default function WorkspaceHub({
   const [selectedTeamStaffToAdd, setSelectedTeamStaffToAdd] = useState('')
   const [selectedTeamRoleToAdd, setSelectedTeamRoleToAdd] = useState<'lead' | 'member'>('member')
   const [memberSearchQuery, setMemberSearchQuery] = useState('')
+  const [currentUserDepartment, setCurrentUserDepartment] = useState<string>('')
 
   // Message input state & interactive @ mention tagging
   const [inputText, setInputText] = useState('')
@@ -182,13 +184,50 @@ export default function WorkspaceHub({
     )
   }, [isSuperAdmin, isWorkspaceAdmin, teamMembers, currentStaffId])
 
+  // Workspace Membership Gate:
+  // Superadmin or explicit member in workspace_members, or member of squad in workspace,
+  // or user's department matches workspace, or workspace is default company workspace.
+  const isWorkspaceMember = useMemo(() => {
+    if (isSuperAdmin || isWorkspaceAdmin) return true
+    if (!selectedWorkspace) return false
+    // 1. Explicit workspace member
+    if (workspaceMembers.some(m => m.staff_id === currentStaffId)) return true
+    // 2. Member of squad in this workspace
+    if (teamMembers.some(m => m.staff_id === currentStaffId)) return true
+    // 3. Default company-wide workspace
+    if (selectedWorkspace.is_default) return true
+    // 4. Department match
+    if (currentUserDepartment) {
+      const dept = currentUserDepartment.toLowerCase()
+      const wsName = selectedWorkspace.name.toLowerCase()
+      const wsCode = (selectedWorkspace.code || '').toLowerCase()
+      if (
+        (dept.includes('sales') && (wsName.includes('sales') || wsCode.includes('sale'))) ||
+        (dept.includes('marketing') && (wsName.includes('marketing') || wsName.includes('media') || wsCode.includes('medi'))) ||
+        ((dept.includes('tech') || dept.includes('engineer') || dept.includes('it')) && (wsName.includes('tech') || wsCode.includes('tech'))) ||
+        (dept.includes('human') && (wsName.includes('human') || wsName.includes('people') || wsName.includes('hr'))) ||
+        (dept.includes('account') && (wsName.includes('account') || wsName.includes('finance'))) ||
+        (dept.includes('operation') && (wsName.includes('operation') || wsName.includes('ops'))) ||
+        (dept.includes('customer') && (wsName.includes('customer') || wsName.includes('support'))) ||
+        (dept.includes('admin') && (wsName.includes('admin') || wsName.includes('headquarters') || wsName.includes('fohq')))
+      ) {
+        return true
+      }
+    }
+    return false
+  }, [isSuperAdmin, isWorkspaceAdmin, selectedWorkspace, workspaceMembers, teamMembers, currentStaffId, currentUserDepartment])
+
   // Squad Membership Gate:
-  // Superadmin & appointed Workspace Admins can govern all squads.
-  // All other staff (including HR) must be an assigned member in team_members to view or post.
+  // Superadmin, appointed Workspace Admins, or assigned squad members have full access.
+  // Public squads (!selectedTeam.is_private) within the workspace are accessible to all workspace members.
   const isSquadMember = useMemo(() => {
     if (isSuperAdmin || isWorkspaceAdmin) return true
-    return teamMembers.some(m => m.staff_id === currentStaffId)
-  }, [isSuperAdmin, isWorkspaceAdmin, teamMembers, currentStaffId])
+    // Explicit member in this squad
+    if (teamMembers.some(m => m.staff_id === currentStaffId)) return true
+    // If squad is public within the user's workspace, granted
+    if (selectedTeam && !selectedTeam.is_private && isWorkspaceMember) return true
+    return false
+  }, [isSuperAdmin, isWorkspaceAdmin, teamMembers, currentStaffId, selectedTeam, isWorkspaceMember])
 
   const canAccessExecutiveDigest = isWorkspaceAdmin || isSquadLead
 
@@ -208,47 +247,77 @@ export default function WorkspaceHub({
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
 
+  // Refresh visible workspaces whenever user identity or department resolves
+  useEffect(() => {
+    if (currentStaffId) {
+      getUserWorkspaces(currentStaffId, role, currentUserDepartment).then(wsList => {
+        setWorkspaces(wsList)
+        setSelectedWorkspace(prev => {
+          if (prev && wsList.some(w => w.id === prev.id)) return prev
+          return wsList[0] || null
+        })
+      })
+    }
+  }, [currentStaffId, role, currentUserDepartment])
+
   const loadInitialData = async () => {
     try {
-      const wsList = await getWorkspaces()
-      setWorkspaces(wsList)
-      if (wsList.length > 0) {
-        setSelectedWorkspace(wsList[0])
-      }
-
-      // Fetch staff list for mentions and assignment
+      // 1. Fetch staff list for mentions and assignment
       let mapped: StaffMember[] = []
+      let resolvedDept = ''
       try {
         const { data: sData, error: sErr } = await supabase
           .from('staff')
           .select('id, full_name, staff_code, photo_url, departments(name), email')
 
         if (!sErr && sData && sData.length > 0) {
-          mapped = sData.map(s => ({
-            id: s.id,
-            staffId: s.staff_code || s.id,
-            name: s.full_name,
-            email: s.email || '',
-            role: 'staff',
-            department: (s.departments as any)?.name || 'General',
-            jobTitle: '',
-            employmentDate: '',
-            status: 'active',
-            lastLogin: '',
-            phone: '',
-            photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
-            bankName: '',
-            accountNumber: '',
-            grossSalary: 0,
-            address: '',
-            nextOfKin: '',
-            nextOfKinPhone: '',
-            state: '',
-          }))
+          mapped = sData.map(s => {
+            const dName = (s.departments as any)?.name || 'General'
+            if (s.id === currentStaffId) {
+              resolvedDept = dName
+            }
+            return {
+              id: s.id,
+              staffId: s.staff_code || s.id,
+              name: s.full_name,
+              email: s.email || '',
+              role: 'staff',
+              department: dName,
+              jobTitle: '',
+              employmentDate: '',
+              status: 'active',
+              lastLogin: '',
+              phone: '',
+              photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
+              bankName: '',
+              accountNumber: '',
+              grossSalary: 0,
+              address: '',
+              nextOfKin: '',
+              nextOfKinPhone: '',
+              state: '',
+            }
+          })
         }
       } catch (err) {
         console.warn('Could not fetch staff from Supabase:', err)
       }
+
+      // If resolvedDept is empty and currentStaffId is present, query directly
+      if (!resolvedDept && currentStaffId) {
+        try {
+          const { data: sRow } = await supabase
+            .from('staff')
+            .select('departments (name)')
+            .eq('id', currentStaffId)
+            .maybeSingle()
+          if (sRow) {
+            resolvedDept = (sRow.departments as any)?.name || ''
+          }
+        } catch {}
+      }
+
+      setCurrentUserDepartment(resolvedDept)
 
       // Also fetch administrative user profiles (Superadmin, HR, Accountant, Auditor) so they can be tagged with @
       try {
@@ -290,6 +359,20 @@ export default function WorkspaceHub({
       }
 
       setStaffList(mapped)
+
+      // 2. Fetch only the workspaces where the user is a member!
+      const wsList = await getUserWorkspaces(currentStaffId, role, resolvedDept)
+      setWorkspaces(wsList)
+      
+      const lastWsId = localStorage.getItem('hris_last_active_workspace_id')
+      const matchingLast = wsList.find(w => w.id === lastWsId)
+      if (matchingLast) {
+        setSelectedWorkspace(matchingLast)
+      } else if (wsList.length > 0) {
+        setSelectedWorkspace(wsList[0])
+      } else {
+        setSelectedWorkspace(null)
+      }
     } catch (err) {
       console.error('Error initializing workspace hub:', err)
       setStaffList(mockStaff)
@@ -1390,8 +1473,8 @@ export default function WorkspaceHub({
                   >
                     <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
                     <span className="truncate">{t.name}</span>
-                    {!isSuperAdmin && !isWorkspaceAdmin && (
-                      <IconLock className="w-3 h-3 text-slate-500 shrink-0 ml-auto mr-1 opacity-70" />
+                    {t.is_private && (
+                      <IconLock className="w-3 h-3 text-amber-400 shrink-0 ml-auto mr-1 opacity-80" />
                     )}
                   </button>
                   {isWorkspaceAdmin && (
