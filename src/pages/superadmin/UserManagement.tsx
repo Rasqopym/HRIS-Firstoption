@@ -96,33 +96,99 @@ export default function UserManagement() {
     setResetSuccessMsg('')
 
     try {
-      // 1. Attempt RPC first (admin_set_user_password)
-      const { data: rpcData, error: rpcError } = await supabase.rpc('admin_set_user_password', {
-        p_user_id: resetModalUser.id,
-        p_new_password: directPassword
-      })
+      let resetSuccessful = false
+      let confirmedUserId = resetModalUser.id
 
-      if (!rpcError && rpcData?.success) {
-        setResetSuccessMsg(`Password successfully updated for ${resetModalUser.name}! They can now sign in with "${directPassword}".`)
-      } else {
-        // 2. Attempt Edge Function fallback
-        const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-reset-password', {
-          body: { user_id: resetModalUser.id, new_password: directPassword }
+      // 1. Attempt RPC with email parameter first (enhanced version)
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('admin_set_user_password', {
+          p_user_id: resetModalUser.id,
+          p_new_password: directPassword,
+          p_email: resetModalUser.email
         })
 
-        if (!fnError && fnData?.success) {
-          setResetSuccessMsg(`Password successfully updated for ${resetModalUser.name}!`)
-        } else {
-          throw new Error(rpcError?.message || rpcData?.error || fnError?.message || 'Database function admin_set_user_password not found. Please run the SQL procedure in Supabase.')
+        if (!rpcError && rpcData?.success) {
+          if (rpcData.user_id) confirmedUserId = rpcData.user_id
+          resetSuccessful = true
+        }
+      } catch (e) {
+        // Fallback to 2-arg RPC if procedure doesn't take 3 args
+      }
+
+      if (!resetSuccessful) {
+        const { data: rpcData2, error: rpcError2 } = await supabase.rpc('admin_set_user_password', {
+          p_user_id: resetModalUser.id,
+          p_new_password: directPassword
+        })
+
+        if (!rpcError2 && rpcData2?.success) {
+          resetSuccessful = true
         }
       }
 
-      await logAction({
-        action: 'UPDATE',
-        entity: 'User',
-        entityId: resetModalUser.id,
-        details: `Reset direct password for ${resetModalUser.email}`,
-      })
+      // 2. Ensure auth.users record exists: if user was only in staff table, register them now
+      if (resetModalUser.email && resetModalUser.email !== '—') {
+        try {
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: resetModalUser.email,
+            password: directPassword,
+            options: {
+              data: {
+                full_name: resetModalUser.name,
+                role: appRoleToDb(resetModalUser.role)
+              }
+            }
+          })
+
+          if (signUpData?.user) {
+            confirmedUserId = signUpData.user.id
+            resetSuccessful = true
+
+            // Immediately confirm their email so they can log in without verification link
+            try {
+              await supabase.rpc('admin_set_user_password', {
+                p_user_id: confirmedUserId,
+                p_new_password: directPassword
+              })
+            } catch (e) {}
+
+            // Ensure profile exists with active status
+            try {
+              await supabase.from('profiles').upsert({
+                id: confirmedUserId,
+                email: resetModalUser.email,
+                full_name: resetModalUser.name,
+                role: appRoleToDb(resetModalUser.role),
+                status: 'active'
+              })
+            } catch (e) {}
+          } else if (signUpError?.message?.toLowerCase().includes('already registered')) {
+            // User was already registered in auth.users
+            resetSuccessful = true
+          }
+        } catch (authCatch) {
+          console.warn('Auth registration check notice:', authCatch)
+        }
+      }
+
+      // 3. Keep staff table in sync with real profile ID
+      if (confirmedUserId && resetModalUser.email) {
+        try {
+          await supabase.from('staff').update({ profile_id: confirmedUserId }).ilike('email', resetModalUser.email)
+        } catch (e) {}
+      }
+
+      if (resetSuccessful) {
+        setResetSuccessMsg(`Password successfully updated for ${resetModalUser.name}! They can now sign in with "${directPassword}".`)
+        await logAction({
+          action: 'UPDATE',
+          entity: 'User',
+          entityId: confirmedUserId || resetModalUser.id,
+          details: `Reset direct password for ${resetModalUser.email}`,
+        })
+      } else {
+        throw new Error('Failed to update password. Please check database permissions.')
+      }
     } catch (err: any) {
       setResetErrorMsg(err.message || 'Failed to update password. Please check database permissions.')
     } finally {

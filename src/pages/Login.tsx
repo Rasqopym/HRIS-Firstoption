@@ -137,13 +137,55 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
     }
 
     // Step 2: Now that we know WHO they are, look up their ROLE
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('role, status')
-      .eq('id', authData.user.id)
-      .single()
+    let profile: { role: string; status: string } | null = null
 
-    if (profileError || !profile) {
+    try {
+      const { data: pData } = await supabase
+        .from('profiles')
+        .select('role, status')
+        .eq('id', authData.user.id)
+        .maybeSingle()
+
+      if (pData) {
+        profile = pData
+      }
+    } catch (e) {
+      console.warn('Profile direct lookup error:', e)
+    }
+
+    // Fallback: If no profile row by auth id, check profiles by email
+    if (!profile && email) {
+      try {
+        const { data: pByEmail } = await supabase
+          .from('profiles')
+          .select('role, status')
+          .ilike('email', email.trim())
+          .maybeSingle()
+        if (pByEmail) {
+          profile = pByEmail
+        }
+      } catch (e) {}
+    }
+
+    // Fallback: If still no profile row, check staff table by email
+    if (!profile && email) {
+      try {
+        const { data: staffRec } = await supabase
+          .from('staff')
+          .select('id, status, job_title')
+          .ilike('email', email.trim())
+          .maybeSingle()
+
+        if (staffRec) {
+          profile = {
+            role: 'staff',
+            status: staffRec.status || 'active'
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!profile) {
       setError('Logged in, but no profile found. Contact Super Admin.')
       setLoading(false)
       return

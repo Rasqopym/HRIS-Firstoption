@@ -130,14 +130,42 @@ export default function App() {
 
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) {
+          let roleFound: any = null
+
           const { data: profile } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', session.user.id)
-            .single()
+            .maybeSingle()
 
-          if (profile) {
-            const appRole = dbRoleToApp(profile.role)
+          if (profile?.role) {
+            roleFound = profile.role
+          } else if (session.user.email) {
+            // Check profiles by email
+            const { data: pEmail } = await supabase
+              .from('profiles')
+              .select('role')
+              .ilike('email', session.user.email)
+              .maybeSingle()
+
+            if (pEmail?.role) {
+              roleFound = pEmail.role
+            } else {
+              // Check staff table by email
+              const { data: sEmail } = await supabase
+                .from('staff')
+                .select('id')
+                .ilike('email', session.user.email)
+                .maybeSingle()
+
+              if (sEmail) {
+                roleFound = 'staff'
+              }
+            }
+          }
+
+          if (roleFound) {
+            const appRole = dbRoleToApp(roleFound)
             setAuthenticatedRole(appRole)
             setViewRole(appRole)
             const targetPage = getSavedPage(appRole)
