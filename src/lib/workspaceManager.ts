@@ -1401,9 +1401,86 @@ export async function submitDailyStandup(standup: Partial<DailyStandup>): Promis
 }
 
 // ── Workspace Member Management ──────────────────────────────────────────────
+// ── Workspace Member Management ──────────────────────────────────────────────
 export const DEFAULT_WORKSPACE_MEMBERS: WorkspaceMember[] = []
 
 export const DEFAULT_TEAM_MEMBERS: TeamMember[] = []
+
+/**
+ * Resolves an effective staff UUID for workspace / team membership.
+ * If the provided staffId is already in public.staff, returns it.
+ * If staffId is a profile_id, finds the matching staff row or creates one.
+ * If the user only exists in profiles (e.g. Super Admin or Executive like Adepoju Ayodeji),
+ * automatically creates a matching record in public.staff so foreign key constraints are met.
+ */
+async function resolveEffectiveStaffId(staffId: string, staffDetails?: any): Promise<string> {
+  if (!staffId) return staffId
+
+  try {
+    // 1. Check if staffId directly matches an ID in public.staff
+    const { data: direct } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('id', staffId)
+      .maybeSingle()
+
+    if (direct?.id) {
+      return direct.id
+    }
+
+    // 2. Check if staffId matches profile_id in public.staff
+    const { data: byProfile } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('profile_id', staffId)
+      .maybeSingle()
+
+    if (byProfile?.id) {
+      return byProfile.id
+    }
+
+    // 3. Check if staffDetails email matches a staff row
+    if (staffDetails?.email) {
+      const { data: byEmail } = await supabase
+        .from('staff')
+        .select('id')
+        .ilike('email', staffDetails.email.trim())
+        .maybeSingle()
+
+      if (byEmail?.id) {
+        try {
+          await supabase.from('staff').update({ profile_id: staffId }).eq('id', byEmail.id)
+        } catch {}
+        return byEmail.id
+      }
+    }
+
+    // 4. If user exists in profiles but not staff, create a staff record for them
+    const staffCode = `ADM-${Math.random().toString(36).slice(-4).toUpperCase()}`
+    const { data: created, error: createErr } = await supabase
+      .from('staff')
+      .insert({
+        profile_id: staffId,
+        staff_code: staffCode,
+        full_name: staffDetails?.name || 'Administrative Staff',
+        email: staffDetails?.email || '',
+        department: staffDetails?.department || 'Executive Management',
+        job_title: staffDetails?.jobTitle || staffDetails?.department || 'Executive',
+        status: 'active',
+        date_employed: new Date().toISOString().slice(0, 10),
+      })
+      .select('id')
+      .maybeSingle()
+
+    if (created?.id) {
+      return created.id
+    }
+  } catch (err) {
+    console.warn('Error resolving effective staff ID for workspace:', err)
+  }
+
+  return staffId
+}
 
 export async function getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
   try {
@@ -1431,22 +1508,51 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<Workspac
       try {
         const { data: sData } = await supabase
           .from('staff')
-          .select('id, full_name, staff_code, photo_url, departments(name), email')
+          .select('id, profile_id, full_name, staff_code, photo_url, departments(name), email, department, job_title')
           .in('id', staffIds)
         if (sData) {
           sData.forEach(s => {
-            staffMap[s.id] = {
+            const mappedStaff = {
               id: s.id,
               staffId: s.staff_code || s.id,
               name: s.full_name,
               email: s.email || '',
               role: 'staff',
-              department: (s.departments as any)?.name || 'General',
+              department: (s.departments as any)?.name || s.department || 'General',
+              jobTitle: s.job_title || '',
               photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
+            }
+            staffMap[s.id] = mappedStaff
+            if (s.profile_id) {
+              staffMap[s.profile_id] = mappedStaff
             }
           })
         }
       } catch {}
+
+      // Fallback: check profiles for any staff_id that might be a profile_id
+      const missingStaffIds = staffIds.filter(id => !staffMap[id])
+      if (missingStaffIds.length > 0) {
+        try {
+          const { data: pData } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, role, photo_url')
+            .in('id', missingStaffIds)
+          if (pData) {
+            pData.forEach(p => {
+              staffMap[p.id] = {
+                id: p.id,
+                staffId: (p.role || 'admin').toUpperCase(),
+                name: p.full_name || 'Staff Member',
+                email: p.email || '',
+                role: p.role || 'staff',
+                department: p.role === 'super_admin' || p.role === 'superadmin' ? 'Executive Management' : 'Administration',
+                photo: p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.full_name || 'U')}&background=random`,
+              }
+            })
+          }
+        } catch {}
+      }
     }
 
     const members: WorkspaceMember[] = data.map((m: any) => ({
@@ -1479,10 +1585,12 @@ export async function addWorkspaceMember(
   role: 'admin' | 'lead' | 'member' | 'viewer' = 'member',
   staffDetails?: any
 ): Promise<WorkspaceMember> {
+  const effectiveStaffId = await resolveEffectiveStaffId(staffId, staffDetails)
+
   const newMember: WorkspaceMember = {
     id: `wsm-${Date.now()}`,
     workspace_id: workspaceId,
-    staff_id: staffId,
+    staff_id: effectiveStaffId,
     role,
     joined_at: new Date().toISOString(),
     staff: staffDetails,
@@ -1493,7 +1601,7 @@ export async function addWorkspaceMember(
       .from('workspace_members')
       .upsert({
         workspace_id: workspaceId,
-        staff_id: staffId,
+        staff_id: effectiveStaffId,
         role,
       }, { onConflict: 'workspace_id,staff_id' })
       .select()
@@ -1509,7 +1617,7 @@ export async function addWorkspaceMember(
   // Update local cache
   try {
     const cached: WorkspaceMember[] = JSON.parse(localStorage.getItem(`${LOCAL_WS_MEMBERS_KEY}_${workspaceId}`) || '[]')
-    const filtered = cached.filter(m => m.staff_id !== staffId)
+    const filtered = cached.filter(m => m.staff_id !== staffId && m.staff_id !== effectiveStaffId)
     const updated = [...filtered, newMember]
     localStorage.setItem(`${LOCAL_WS_MEMBERS_KEY}_${workspaceId}`, JSON.stringify(updated))
   } catch {}
@@ -1522,37 +1630,50 @@ export async function updateWorkspaceMemberRole(
   staffId: string,
   role: 'admin' | 'lead' | 'member' | 'viewer'
 ): Promise<void> {
+  const effectiveStaffId = await resolveEffectiveStaffId(staffId)
+
   try {
-    await supabase
+    const { data: updated } = await supabase
       .from('workspace_members')
       .update({ role })
       .eq('workspace_id', workspaceId)
-      .eq('staff_id', staffId)
+      .eq('staff_id', effectiveStaffId)
+      .select()
+
+    if (!updated || updated.length === 0) {
+      await supabase
+        .from('workspace_members')
+        .update({ role })
+        .eq('workspace_id', workspaceId)
+        .eq('staff_id', staffId)
+    }
   } catch (err) {
     console.warn('Could not update role on Supabase, updating locally:', err)
   }
 
   try {
     const cached: WorkspaceMember[] = JSON.parse(localStorage.getItem(`${LOCAL_WS_MEMBERS_KEY}_${workspaceId}`) || '[]')
-    const updated = cached.map(m => m.staff_id === staffId ? { ...m, role } : m)
+    const updated = cached.map(m => (m.staff_id === staffId || m.staff_id === effectiveStaffId) ? { ...m, role } : m)
     localStorage.setItem(`${LOCAL_WS_MEMBERS_KEY}_${workspaceId}`, JSON.stringify(updated))
   } catch {}
 }
 
 export async function removeWorkspaceMember(workspaceId: string, staffId: string): Promise<void> {
+  const effectiveStaffId = await resolveEffectiveStaffId(staffId)
+
   try {
     await supabase
       .from('workspace_members')
       .delete()
       .eq('workspace_id', workspaceId)
-      .eq('staff_id', staffId)
+      .or(`staff_id.eq.${effectiveStaffId},staff_id.eq.${staffId}`)
   } catch (err) {
     console.warn('Could not delete member from Supabase, removing locally:', err)
   }
 
   try {
     const cached: WorkspaceMember[] = JSON.parse(localStorage.getItem(`${LOCAL_WS_MEMBERS_KEY}_${workspaceId}`) || '[]')
-    const updated = cached.filter(m => m.staff_id !== staffId)
+    const updated = cached.filter(m => m.staff_id !== staffId && m.staff_id !== effectiveStaffId)
     localStorage.setItem(`${LOCAL_WS_MEMBERS_KEY}_${workspaceId}`, JSON.stringify(updated))
   } catch {}
 }
@@ -1584,22 +1705,51 @@ export async function getTeamMembers(teamId: string): Promise<TeamMember[]> {
       try {
         const { data: sData } = await supabase
           .from('staff')
-          .select('id, full_name, staff_code, photo_url, departments(name), email')
+          .select('id, profile_id, full_name, staff_code, photo_url, departments(name), email, department, job_title')
           .in('id', staffIds)
         if (sData) {
           sData.forEach(s => {
-            staffMap[s.id] = {
+            const mappedStaff = {
               id: s.id,
               staffId: s.staff_code || s.id,
               name: s.full_name,
               email: s.email || '',
               role: 'staff',
-              department: (s.departments as any)?.name || 'General',
+              department: (s.departments as any)?.name || s.department || 'General',
+              jobTitle: s.job_title || '',
               photo: s.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.full_name)}&background=random`,
+            }
+            staffMap[s.id] = mappedStaff
+            if (s.profile_id) {
+              staffMap[s.profile_id] = mappedStaff
             }
           })
         }
       } catch {}
+
+      // Fallback: check profiles for missing staff_ids
+      const missingStaffIds = staffIds.filter(id => !staffMap[id])
+      if (missingStaffIds.length > 0) {
+        try {
+          const { data: pData } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, role, photo_url')
+            .in('id', missingStaffIds)
+          if (pData) {
+            pData.forEach(p => {
+              staffMap[p.id] = {
+                id: p.id,
+                staffId: (p.role || 'admin').toUpperCase(),
+                name: p.full_name || 'Staff Member',
+                email: p.email || '',
+                role: p.role || 'staff',
+                department: p.role === 'super_admin' || p.role === 'superadmin' ? 'Executive Management' : 'Administration',
+                photo: p.photo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.full_name || 'U')}&background=random`,
+              }
+            })
+          }
+        } catch {}
+      }
     }
 
     const members: TeamMember[] = data.map((m: any) => ({
@@ -1632,10 +1782,12 @@ export async function addTeamMember(
   role: 'lead' | 'member' = 'member',
   staffDetails?: any
 ): Promise<TeamMember> {
+  const effectiveStaffId = await resolveEffectiveStaffId(staffId, staffDetails)
+
   const newMember: TeamMember = {
     id: `tm-${Date.now()}`,
     team_id: teamId,
-    staff_id: staffId,
+    staff_id: effectiveStaffId,
     role,
     joined_at: new Date().toISOString(),
     staff: staffDetails,
@@ -1646,13 +1798,13 @@ export async function addTeamMember(
       .from('team_members')
       .upsert({
         team_id: teamId,
-        staff_id: staffId,
+        staff_id: effectiveStaffId,
         role,
       }, { onConflict: 'team_id,staff_id' })
       .select()
-      .single()
+      .maybeSingle()
 
-    if (data) {
+    if (data?.id) {
       newMember.id = data.id
     }
   } catch (err) {
@@ -1662,7 +1814,7 @@ export async function addTeamMember(
   // Update local cache
   try {
     const cached: TeamMember[] = JSON.parse(localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`) || '[]')
-    const filtered = cached.filter(m => m.staff_id !== staffId)
+    const filtered = cached.filter(m => m.staff_id !== staffId && m.staff_id !== effectiveStaffId)
     const updated = [...filtered, newMember]
     localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
   } catch {}
@@ -1675,38 +1827,52 @@ export async function updateTeamMemberRole(
   staffId: string,
   role: 'lead' | 'member'
 ): Promise<void> {
+  const effectiveStaffId = await resolveEffectiveStaffId(staffId)
+
   try {
-    await supabase
+    const { data: updated } = await supabase
       .from('team_members')
       .update({ role })
       .eq('team_id', teamId)
-      .eq('staff_id', staffId)
+      .eq('staff_id', effectiveStaffId)
+      .select()
+
+    if (!updated || updated.length === 0) {
+      await supabase
+        .from('team_members')
+        .update({ role })
+        .eq('team_id', teamId)
+        .eq('staff_id', staffId)
+    }
   } catch (err) {
     console.warn('Could not update team role on Supabase, updating locally:', err)
   }
 
   try {
     const cached: TeamMember[] = JSON.parse(localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`) || '[]')
-    const updated = cached.map(m => m.staff_id === staffId ? { ...m, role } : m)
+    const updated = cached.map(m => (m.staff_id === staffId || m.staff_id === effectiveStaffId) ? { ...m, role } : m)
     localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
   } catch {}
 }
 
 export async function removeTeamMember(teamId: string, staffId: string): Promise<void> {
+  const effectiveStaffId = await resolveEffectiveStaffId(staffId)
+
   try {
     await supabase
       .from('team_members')
       .delete()
       .eq('team_id', teamId)
-      .eq('staff_id', staffId)
+      .or(`staff_id.eq.${effectiveStaffId},staff_id.eq.${staffId}`)
   } catch (err) {
     console.warn('Could not delete team member from Supabase, removing locally:', err)
   }
 
   try {
     const cached: TeamMember[] = JSON.parse(localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`) || '[]')
-    const updated = cached.filter(m => m.staff_id !== staffId)
+    const updated = cached.filter(m => m.staff_id !== staffId && m.staff_id !== effectiveStaffId)
     localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
   } catch {}
 }
+
 

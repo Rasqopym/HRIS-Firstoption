@@ -23,11 +23,14 @@ CREATE TABLE IF NOT EXISTS public.workspaces (
 CREATE TABLE IF NOT EXISTS public.workspace_members (
   id VARCHAR(100) PRIMARY KEY DEFAULT ('wm-' || substr(md5(random()::text), 1, 12)),
   workspace_id VARCHAR(100) NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-  staff_id UUID NOT NULL REFERENCES public.staff(id) ON DELETE CASCADE,
+  staff_id UUID NOT NULL,
   role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'lead', 'member', 'viewer')),
   joined_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(workspace_id, staff_id)
 );
+
+-- Ensure workspace_members accepts both staff IDs and administrative profile IDs
+ALTER TABLE public.workspace_members DROP CONSTRAINT IF EXISTS workspace_members_staff_id_fkey;
 
 -- 3. TEAMS / SQUADS TABLE
 CREATE TABLE IF NOT EXISTS public.teams (
@@ -47,11 +50,14 @@ CREATE TABLE IF NOT EXISTS public.teams (
 CREATE TABLE IF NOT EXISTS public.team_members (
   id VARCHAR(100) PRIMARY KEY DEFAULT ('tm-' || substr(md5(random()::text), 1, 12)),
   team_id VARCHAR(100) NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
-  staff_id UUID NOT NULL REFERENCES public.staff(id) ON DELETE CASCADE,
+  staff_id UUID NOT NULL,
   role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('lead', 'member')),
   joined_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(team_id, staff_id)
 );
+
+-- Ensure team_members accepts both staff IDs and administrative profile IDs
+ALTER TABLE public.team_members DROP CONSTRAINT IF EXISTS team_members_staff_id_fkey;
 
 -- 5. CHANNELS TABLE
 CREATE TABLE IF NOT EXISTS public.channels (

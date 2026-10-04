@@ -1001,7 +1001,7 @@ export default function WorkspaceHub({
       staff
     )
     setWorkspaceMembers(prev => {
-      const filtered = prev.filter(m => m.staff_id !== selectedStaffToAdd)
+      const filtered = prev.filter(m => m.staff_id !== selectedStaffToAdd && m.staff_id !== newMember.staff_id)
       return [...filtered, newMember]
     })
     setSelectedStaffToAdd('')
@@ -1047,7 +1047,7 @@ export default function WorkspaceHub({
       staff
     )
     setTeamMembers(prev => {
-      const filtered = prev.filter(m => m.staff_id !== selectedTeamStaffToAdd)
+      const filtered = prev.filter(m => m.staff_id !== selectedTeamStaffToAdd && m.staff_id !== newMember.staff_id)
       return [...filtered, newMember]
     })
     setSelectedTeamStaffToAdd('')
@@ -2555,7 +2555,11 @@ export default function WorkspaceHub({
                       >
                         <option value="">-- Select Staff from Directory --</option>
                         {staffList
-                          .filter(s => !workspaceMembers.some(m => m.staff_id === s.id))
+                          .filter(s => !workspaceMembers.some(m => 
+                            m.staff_id === s.id || 
+                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
+                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                          ))
                           .map(s => (
                             <option key={s.id} value={s.id}>
                               {s.name} ({s.staffId}) — {s.department}
@@ -2621,7 +2625,11 @@ export default function WorkspaceHub({
                       workspaceMembers
                         .filter(m => {
                           if (!memberSearchQuery) return true
-                          const st = m.staff || staffList.find(s => s.id === m.staff_id)
+                          const st = m.staff || staffList.find(s => 
+                            s.id === m.staff_id || 
+                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
+                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                          )
                           const q = memberSearchQuery.toLowerCase()
                           return (
                             (st?.name && st.name.toLowerCase().includes(q)) ||
@@ -2630,7 +2638,11 @@ export default function WorkspaceHub({
                           )
                         })
                         .map(m => {
-                          const st = m.staff || staffList.find(s => s.id === m.staff_id)
+                          const st = m.staff || staffList.find(s => 
+                            s.id === m.staff_id || 
+                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
+                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                          )
                           return (
                             <div key={m.id} className="p-3 bg-white hover:bg-slate-50 flex items-center justify-between gap-2.5 transition-colors">
                               <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -2805,7 +2817,11 @@ export default function WorkspaceHub({
                       >
                         <option value="">-- Select Staff --</option>
                         {staffList
-                          .filter(s => !teamMembers.some(m => m.staff_id === s.id))
+                          .filter(s => !teamMembers.some(m => 
+                            m.staff_id === s.id || 
+                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
+                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                          ))
                           .map(s => (
                             <option key={s.id} value={s.id}>
                               {s.name} ({s.staffId}) — {s.department}
@@ -2858,7 +2874,11 @@ export default function WorkspaceHub({
                       </div>
                     ) : (
                       teamMembers.map(tm => {
-                        const st = tm.staff || staffList.find(s => s.id === tm.staff_id)
+                        const st = tm.staff || staffList.find(s => 
+                          s.id === tm.staff_id || 
+                          (tm.staff?.email && s.email && tm.staff.email.toLowerCase() === s.email.toLowerCase()) ||
+                          (tm.staff?.name && s.name && tm.staff.name.toLowerCase() === s.name.toLowerCase())
+                        )
                         return (
                           <div key={tm.id} className="p-3 bg-white hover:bg-slate-50 flex items-center justify-between gap-2.5 transition-colors">
                             <div className="flex items-center gap-2.5 min-w-0 flex-1">
