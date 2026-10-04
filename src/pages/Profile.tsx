@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { dbRoleToApp } from '../lib/roleMap'
-import type { Role } from '../types'
+import type { Role, Page } from '../types'
 
 const roleLabels: Record<Role, string> = {
   superadmin: 'Super Admin',
@@ -21,6 +21,10 @@ interface Profile {
   status: string
 }
 
+interface ProfileProps {
+  onNavigate?: (p: Page) => void
+}
+
 function getInitials(name: string, email: string): string {
   if (name && name.trim()) {
     const parts = name.trim().split(/\s+/)
@@ -35,7 +39,7 @@ function getInitials(name: string, email: string): string {
   return 'U'
 }
 
-export default function Profile() {
+export default function Profile({ onNavigate }: ProfileProps = {}) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -66,19 +70,97 @@ export default function Profile() {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) throw new Error('Not authenticated')
 
-        const { data: profileData, error } = await supabase
+        let pData: Profile | null = null
+
+        // 1. Try profiles table by auth user ID
+        const { data: profileById } = await supabase
           .from('profiles')
           .select('id, full_name, role, email, phone, photo_url, status')
           .eq('id', user.id)
-          .single()
+          .maybeSingle()
 
-        if (error) throw error
-        if (!profileData) throw new Error('Profile not found')
+        if (profileById && profileById.full_name) {
+          pData = profileById
+        } else if (user.email) {
+          // 2. Try profiles table by email
+          const { data: profileByEmail } = await supabase
+            .from('profiles')
+            .select('id, full_name, role, email, phone, photo_url, status')
+            .ilike('email', user.email)
+            .maybeSingle()
+          if (profileByEmail && profileByEmail.full_name) {
+            pData = { ...profileByEmail, id: user.id }
+          }
+        }
 
-        setProfile(profileData)
-        setFullName(profileData.full_name || '')
-        setPhone(profileData.phone || '')
-        setPhotoUrl(profileData.photo_url || '')
+        // 3. If not in profiles, query staff directory table
+        if (!pData) {
+          const { data: staffRow } = await supabase
+            .from('staff')
+            .select('id, full_name, email, phone, photo_url, avatar_url, status, profile_id')
+            .or(`profile_id.eq.${user.id},email.ilike.${user.email || ''},id.eq.${user.id}`)
+            .maybeSingle()
+
+          if (staffRow) {
+            pData = {
+              id: user.id,
+              full_name: staffRow.full_name || '',
+              role: 'staff',
+              email: staffRow.email || user.email || '',
+              phone: staffRow.phone || '',
+              photo_url: staffRow.photo_url || staffRow.avatar_url || '',
+              status: staffRow.status || 'active',
+            }
+
+            // Auto-heal linking in background
+            try {
+              if (!staffRow.profile_id || staffRow.profile_id !== user.id) {
+                await supabase.from('staff').update({ profile_id: user.id }).eq('id', staffRow.id)
+              }
+              await supabase.from('profiles').upsert({
+                id: user.id,
+                email: user.email || staffRow.email,
+                full_name: staffRow.full_name,
+                role: 'staff',
+                phone: staffRow.phone || null,
+                photo_url: staffRow.photo_url || staffRow.avatar_url || null,
+                status: staffRow.status || 'active',
+              }, { onConflict: 'id' })
+            } catch (healErr) {
+              console.warn('Auto-link profile error:', healErr)
+            }
+          }
+        }
+
+        // 4. Safe fallback if still not found
+        if (!pData) {
+          pData = {
+            id: user.id,
+            full_name: user.user_metadata?.full_name || (user.email ? user.email.split('@')[0] : 'User'),
+            role: 'staff',
+            email: user.email || '',
+            phone: user.user_metadata?.phone || user.phone || '',
+            photo_url: user.user_metadata?.avatar_url || '',
+            status: 'active',
+          }
+
+          try {
+            await supabase.from('profiles').upsert({
+              id: user.id,
+              email: user.email,
+              full_name: pData.full_name,
+              role: 'staff',
+              phone: pData.phone || null,
+              photo_url: pData.photo_url || null,
+              status: 'active',
+            }, { onConflict: 'id' })
+          } catch {}
+        }
+
+        setProfile(pData)
+        setFullName(pData.full_name || '')
+        setPhone(pData.phone || '')
+        setPhotoUrl(pData.photo_url || '')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load profile')
         console.error('Error fetching profile:', err)
@@ -101,12 +183,8 @@ export default function Profile() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
 
-      console.log('Photo upload - User ID:', user.id)
-
       const fileExt = file.name.split('.').pop()
       const filePath = `${user.id}/avatar.${fileExt}`
-
-      console.log('Photo upload - File path:', filePath)
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
@@ -114,38 +192,27 @@ export default function Profile() {
 
       if (uploadError) throw uploadError
 
-      console.log('Photo upload - Storage upload successful')
-
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
         .getPublicUrl(filePath)
 
-      console.log('Photo upload - Public URL:', publicUrl)
-
-      // Debug: Log user.id from the initial getUser call
-      console.log('[Photo Upload Debug] user.id from initial getUser:', user.id)
-
-      // Debug: Get fresh session to check auth.uid()
-      const { data: { session } } = await supabase.auth.getSession()
-      console.log('[Photo Upload Debug] auth.uid() from fresh session:', session?.user?.id)
-      console.log('[Photo Upload Debug] IDs match?', user.id === session?.user?.id)
-
-      const updateResult = await supabase
+      // Upsert profile record with new photo URL
+      await supabase
         .from('profiles')
-        .update({ photo_url: publicUrl })
-        .eq('id', user.id)
+        .upsert({
+          id: user.id,
+          photo_url: publicUrl,
+          full_name: fullName || profile?.full_name || '',
+          email: profile?.email || user.email || '',
+          role: profile?.role || 'staff',
+          status: profile?.status || 'active',
+        }, { onConflict: 'id' })
 
+      // Also update staff directory record
       await supabase
         .from('staff')
-        .update({ photo_url: publicUrl })
-        .eq('profile_id', user.id)
-
-      console.log('[Photo Upload Debug] FULL update result:', updateResult)
-      console.log('[Photo Upload Debug] Update affected rows:', updateResult.count)
-
-      if (updateResult.error) throw updateResult.error
-
-      console.log('Photo upload - Database update successful')
+        .update({ photo_url: publicUrl, avatar_url: publicUrl })
+        .or(`profile_id.eq.${user.id},email.ilike.${user.email || profile?.email || ''}`)
 
       setPhotoUrl(publicUrl)
       setImgError(false)
@@ -167,17 +234,27 @@ export default function Profile() {
     setSuccess('')
 
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const targetUserId = user?.id || profile.id
+
       const { error } = await supabase
         .from('profiles')
-        .update({ full_name: fullName, phone })
-        .eq('id', profile.id)
+        .upsert({
+          id: targetUserId,
+          full_name: fullName,
+          phone,
+          email: profile.email || user?.email || '',
+          role: profile.role || 'staff',
+          status: profile.status || 'active',
+          photo_url: photoUrl || profile.photo_url || undefined,
+        }, { onConflict: 'id' })
 
       if (error) throw error
 
       await supabase
         .from('staff')
-        .update({ full_name: fullName, phone })
-        .eq('profile_id', profile.id)
+        .update({ full_name: fullName, phone, photo_url: photoUrl || undefined })
+        .or(`profile_id.eq.${targetUserId},email.ilike.${profile.email || user?.email || ''}`)
 
       setSuccess('Changes saved successfully')
       setTimeout(() => setSuccess(''), 3000)
@@ -286,6 +363,22 @@ export default function Profile() {
         <h2 className="font-display font-bold text-slate-800 text-xl sm:text-2xl tracking-tight">My Profile</h2>
         <p className="text-xs sm:text-sm text-slate-500 mt-0.5">Manage your personal information, contact info, and security credentials</p>
       </div>
+
+      {/* Staff Employment Link Banner */}
+      {appRole === 'staff' && onNavigate && (
+        <div className="mb-5 p-4 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div>
+            <div className="text-sm font-semibold text-slate-800">Employment & Payroll Records</div>
+            <div className="text-xs text-slate-500 mt-0.5">Looking for your job title, department, salary structure, payslips, or staff ID card?</div>
+          </div>
+          <button
+            onClick={() => onNavigate('st-profile')}
+            className="self-start sm:self-auto shrink-0 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition"
+          >
+            View Staff Records &rarr;
+          </button>
+        </div>
+      )}
 
       {/* Global Alerts */}
       {error && (

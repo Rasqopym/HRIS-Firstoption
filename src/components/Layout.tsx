@@ -9,6 +9,9 @@ interface LayoutProps {
   role: Role
   authenticatedRole?: Role
   page: Page
+  userName?: string
+  userPhoto?: string
+  userEmail?: string
   onNavigate: (p: Page) => void
   onRoleChange: (r: Role) => void
   onToggleEmployeeView?: () => void
@@ -386,6 +389,9 @@ export default function Layout({
   role, 
   authenticatedRole,
   page, 
+  userName,
+  userPhoto,
+  userEmail,
   onNavigate, 
   onRoleChange, 
   onToggleEmployeeView,
@@ -405,7 +411,19 @@ export default function Layout({
   const [searchResults, setSearchResults] = useState<{ id: string; icon: React.ReactNode; primary: string; secondary: string; category: string; onClick: () => void }[]>([])
   const [notifs, setNotifs] = useState<HRISNotification[]>([])
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
-  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; photo: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; photo: string | null } | null>(
+    userName ? { name: userName, email: userEmail || '', photo: userPhoto || null } : null
+  )
+
+  useEffect(() => {
+    if (userName) {
+      setCurrentUser(prev => ({
+        name: userName,
+        email: userEmail || prev?.email || '',
+        photo: userPhoto !== undefined ? userPhoto : prev?.photo || null,
+      }))
+    }
+  }, [userName, userPhoto, userEmail])
   
   // PWA Installation & Device Standalone Detection
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
@@ -457,26 +475,78 @@ export default function Layout({
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
+        let pName = ''
+        let pEmail = user.email || ''
+        let pPhoto: string | null = null
+
+        // 1. Try profiles by auth user ID
         const { data: profile } = await supabase
           .from('profiles')
           .select('full_name, email, photo_url')
           .eq('id', user.id)
-          .single()
+          .maybeSingle()
 
-        if (profile) {
-          setCurrentUser({
-            name: profile.full_name || 'User',
-            email: profile.email || user.email || '',
-            photo: profile.photo_url || null,
-          })
+        if (profile?.full_name) {
+          pName = profile.full_name
+          pEmail = profile.email || pEmail
+          pPhoto = profile.photo_url || null
+        } else {
+          // 2. Try profiles by email
+          if (user.email) {
+            const { data: pEmailRow } = await supabase
+              .from('profiles')
+              .select('full_name, email, photo_url')
+              .ilike('email', user.email)
+              .maybeSingle()
+            if (pEmailRow?.full_name) {
+              pName = pEmailRow.full_name
+              pEmail = pEmailRow.email || pEmail
+              pPhoto = pEmailRow.photo_url || null
+            }
+          }
+
+          // 3. Try staff table
+          if (!pName) {
+            const { data: staffRow } = await supabase
+              .from('staff')
+              .select('id, full_name, email, photo_url, avatar_url')
+              .or(`profile_id.eq.${user.id},email.ilike.${user.email || ''},id.eq.${user.id}`)
+              .maybeSingle()
+            if (staffRow?.full_name) {
+              pName = staffRow.full_name
+              pEmail = staffRow.email || pEmail
+              pPhoto = staffRow.photo_url || staffRow.avatar_url || null
+            }
+          }
         }
+
+        // 4. Props or metadata fallback
+        if (!pName) {
+          pName = userName || user.user_metadata?.full_name || (user.email ? user.email.split('@')[0] : 'User')
+        }
+        if (!pPhoto && userPhoto) {
+          pPhoto = userPhoto
+        }
+
+        setCurrentUser({
+          name: pName,
+          email: pEmail,
+          photo: pPhoto,
+        })
       } catch (err) {
         console.error('Error fetching current user:', err)
+        if (userName) {
+          setCurrentUser({
+            name: userName,
+            email: userEmail || '',
+            photo: userPhoto || null,
+          })
+        }
       }
     }
 
     fetchCurrentUser()
-  }, [page])
+  }, [page, userName, userPhoto, userEmail])
 
   useEffect(() => {
     const fetchNotifications = async () => {
@@ -1159,6 +1229,11 @@ export default function Layout({
     })
   }
 
+  const displayName = currentUser?.name || userName || 'User'
+  const displayPhoto = currentUser?.photo || userPhoto || null
+  const displayEmail = currentUser?.email || userEmail || ''
+  const displayInitials = getInitials(displayName)
+
   return (
     <div className="flex h-screen bg-slate-50/80 overflow-hidden">
       {/* Mobile sidebar backdrop */}
@@ -1316,18 +1391,18 @@ export default function Layout({
         {/* User info at bottom */}
         <div className="border-t border-white/10 p-3">
           <div className="flex items-center gap-2">
-            {currentUser?.photo ? (
-              <img src={currentUser.photo} alt={currentUser.name} className="w-8 h-8 rounded-full flex-none object-cover" />
+            {displayPhoto ? (
+              <img src={displayPhoto} alt={displayName} className="w-8 h-8 rounded-full flex-none object-cover" />
             ) : (
               <div 
                 className="w-8 h-8 rounded-full flex-none flex items-center justify-center text-white text-xs font-medium"
-                style={{ backgroundColor: getAvatarColor(currentUser?.name || 'User') }}
+                style={{ backgroundColor: getAvatarColor(displayName) }}
               >
-                {getInitials(currentUser?.name || 'User')}
+                {displayInitials}
               </div>
             )}
             <div className={`flex-1 min-w-0 ${collapsed ? 'md:hidden' : 'block'}`}>
-              <div className="text-white text-xs font-medium truncate">{currentUser?.name || 'User'}</div>
+              <div className="text-white text-xs font-medium truncate">{displayName}</div>
               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                 <div className={`inline-block text-[11px] px-1.5 py-0.5 rounded font-medium ${roleBadgeColors[role]}`}>
                   {roleLabels[role]}
@@ -1483,18 +1558,18 @@ export default function Layout({
                 onClick={() => { setShowUserMenu(!showUserMenu); setShowNotifications(false) }}
                 className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
               >
-                {currentUser?.photo ? (
-                  <img src={currentUser.photo} alt={currentUser.name} className="w-7 h-7 rounded-full object-cover" />
+                {displayPhoto ? (
+                  <img src={displayPhoto} alt={displayName} className="w-7 h-7 rounded-full object-cover" />
                 ) : (
                   <div 
                     className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-medium"
-                    style={{ backgroundColor: getAvatarColor(currentUser?.name || 'User') }}
+                    style={{ backgroundColor: getAvatarColor(displayName) }}
                   >
-                    {getInitials(currentUser?.name || 'User')}
+                    {displayInitials}
                   </div>
                 )}
                 <div className="text-left hidden sm:block">
-                  <div className="text-sm font-medium text-slate-800 leading-tight">{currentUser?.name?.split(' ')[0] || 'User'}</div>
+                  <div className="text-sm font-medium text-slate-800 leading-tight">{displayName.split(' ')[0]}</div>
                   <div className="text-xs text-slate-500 leading-tight">{roleLabels[role]}</div>
                 </div>
               </button>
@@ -1502,8 +1577,8 @@ export default function Layout({
               {showUserMenu && (
                 <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg shadow-lg border border-slate-100 py-1 z-50">
                   <div className="px-4 py-2 border-b border-slate-100">
-                    <div className="text-sm font-medium text-slate-800">{currentUser?.name || 'User'}</div>
-                    <div className="text-xs text-slate-500">{currentUser?.email || ''}</div>
+                    <div className="text-sm font-medium text-slate-800">{displayName}</div>
+                    <div className="text-xs text-slate-500">{displayEmail}</div>
                   </div>
                   
                   {/* Quick Switch Option in Menu */}
@@ -1525,11 +1600,21 @@ export default function Layout({
                   )}
 
                   <div className="border-t border-slate-100 py-1">
+                    {role === 'staff' && (
+                      <button
+                        onClick={() => { onNavigate('st-profile'); setShowUserMenu(false) }}
+                        className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
+                      >
+                        <span>Employment & Records</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">HR</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => { onNavigate('profile'); setShowUserMenu(false) }}
-                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
                     >
-                      My Profile
+                      <span>{role === 'staff' ? 'Account & Security' : 'My Profile'}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">Security</span>
                     </button>
                     <button
                       onClick={onLogout}
@@ -1552,7 +1637,7 @@ export default function Layout({
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-none" />
                 <span className="truncate">
-                  Viewing <strong>Employee Self-Service Portal</strong> ({currentUser?.name || 'Staff'}) · Apply for leave, clock in, view personal payslips & appraisal.
+                  Viewing <strong>Employee Self-Service Portal</strong> ({displayName}) · Apply for leave, clock in, view personal payslips & appraisal.
                 </span>
               </div>
               <button

@@ -301,7 +301,7 @@ export default function App() {
         // 1. Match by profile_id or id
         const { data: byProfile } = await supabase
           .from('staff')
-          .select('id, full_name, photo_url')
+          .select('id, full_name, photo_url, profile_id, phone, email')
           .or(`profile_id.eq.${user.id},id.eq.${user.id}`)
           .maybeSingle()
 
@@ -311,10 +311,26 @@ export default function App() {
         if (!staffData && user.email) {
           const { data: byEmail } = await supabase
             .from('staff')
-            .select('id, full_name, photo_url')
+            .select('id, full_name, photo_url, profile_id, phone, email')
             .ilike('email', `%${user.email}%`)
             .maybeSingle()
           staffData = byEmail
+        }
+
+        // Auto-heal linking in background
+        if (staffData && user.id) {
+          if (!staffData.profile_id || staffData.profile_id !== user.id) {
+            supabase.from('staff').update({ profile_id: user.id }).eq('id', staffData.id).then(() => {})
+          }
+          supabase.from('profiles').upsert({
+            id: user.id,
+            email: user.email || staffData.email,
+            full_name: staffData.full_name,
+            role: role || 'staff',
+            photo_url: staffData.photo_url || undefined,
+            phone: staffData.phone || undefined,
+            status: 'active'
+          }, { onConflict: 'id' }).then(() => {})
         }
 
         // 3. Match profiles table if no staff row
@@ -491,7 +507,7 @@ export default function App() {
       case 'hr-appraisal-summary': return <AppraisalSummary key={page} onNavigate={navigate} />
 
       // Profile (shared across all roles)
-      case 'profile': return <Profile key={page} />
+      case 'profile': return <Profile key={page} onNavigate={navigate} />
 
       default: return (
         <div className="flex items-center justify-center h-full">
@@ -516,6 +532,8 @@ export default function App() {
       role={role}
       authenticatedRole={authenticatedRole}
       page={page}
+      userName={currentStaffName}
+      userPhoto={currentStaffPhoto}
       onNavigate={navigate}
       onRoleChange={handleRoleChange}
       onToggleEmployeeView={handleToggleEmployeeView}
