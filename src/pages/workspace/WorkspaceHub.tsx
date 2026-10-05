@@ -1001,7 +1001,12 @@ export default function WorkspaceHub({
       staff
     )
     setWorkspaceMembers(prev => {
-      const filtered = prev.filter(m => m.staff_id !== selectedStaffToAdd && m.staff_id !== newMember.staff_id)
+      const filtered = prev.filter(m => 
+        m.staff_id !== selectedStaffToAdd && 
+        m.staff_id !== newMember.staff_id &&
+        m.staff?.id !== selectedStaffToAdd &&
+        m.staff?.id !== newMember.staff_id
+      )
       return [...filtered, newMember]
     })
     setSelectedStaffToAdd('')
@@ -1015,7 +1020,7 @@ export default function WorkspaceHub({
     }
     await updateWorkspaceMemberRole(selectedWorkspace.id, staffId, newRole)
     setWorkspaceMembers(prev =>
-      prev.map(m => m.staff_id === staffId ? { ...m, role: newRole } : m)
+      prev.map(m => (m.staff_id === staffId || m.staff?.id === staffId) ? { ...m, role: newRole } : m)
     )
   }
 
@@ -1027,7 +1032,7 @@ export default function WorkspaceHub({
     }
     if (confirm('Are you sure you want to remove this member from the workspace?')) {
       await removeWorkspaceMember(selectedWorkspace.id, staffId)
-      setWorkspaceMembers(prev => prev.filter(m => m.staff_id !== staffId))
+      setWorkspaceMembers(prev => prev.filter(m => m.staff_id !== staffId && m.staff?.id !== staffId))
     }
   }
 
@@ -1047,7 +1052,12 @@ export default function WorkspaceHub({
       staff
     )
     setTeamMembers(prev => {
-      const filtered = prev.filter(m => m.staff_id !== selectedTeamStaffToAdd && m.staff_id !== newMember.staff_id)
+      const filtered = prev.filter(m => 
+        m.staff_id !== selectedTeamStaffToAdd && 
+        m.staff_id !== newMember.staff_id &&
+        m.staff?.id !== selectedTeamStaffToAdd &&
+        m.staff?.id !== newMember.staff_id
+      )
       return [...filtered, newMember]
     })
     setSelectedTeamStaffToAdd('')
@@ -1061,7 +1071,7 @@ export default function WorkspaceHub({
     }
     await updateTeamMemberRole(selectedTeam.id, staffId, newRole)
     setTeamMembers(prev =>
-      prev.map(m => m.staff_id === staffId ? { ...m, role: newRole } : m)
+      prev.map(m => (m.staff_id === staffId || m.staff?.id === staffId) ? { ...m, role: newRole } : m)
     )
   }
 
@@ -1073,7 +1083,7 @@ export default function WorkspaceHub({
     }
     if (confirm('Are you sure you want to remove this member from this squad?')) {
       await removeTeamMember(selectedTeam.id, staffId)
-      setTeamMembers(prev => prev.filter(m => m.staff_id !== staffId))
+      setTeamMembers(prev => prev.filter(m => m.staff_id !== staffId && m.staff?.id !== staffId))
     }
   }
 
@@ -2557,8 +2567,9 @@ export default function WorkspaceHub({
                         {staffList
                           .filter(s => !workspaceMembers.some(m => 
                             m.staff_id === s.id || 
-                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
-                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                            m.staff?.id === s.id ||
+                            (s.email && (m.staff?.email?.toLowerCase() === s.email.toLowerCase() || (m as any).email?.toLowerCase() === s.email.toLowerCase())) ||
+                            (s.name && (m.staff?.name?.toLowerCase() === s.name.toLowerCase() || (m as any).name?.toLowerCase() === s.name.toLowerCase()))
                           ))
                           .map(s => (
                             <option key={s.id} value={s.id}>
@@ -2627,8 +2638,9 @@ export default function WorkspaceHub({
                           if (!memberSearchQuery) return true
                           const st = m.staff || staffList.find(s => 
                             s.id === m.staff_id || 
-                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
-                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                            s.id === m.staff?.id ||
+                            (s.email && (m.staff?.email?.toLowerCase() === s.email.toLowerCase() || (m as any).email?.toLowerCase() === s.email.toLowerCase())) ||
+                            (s.name && (m.staff?.name?.toLowerCase() === s.name.toLowerCase() || (m as any).name?.toLowerCase() === s.name.toLowerCase()))
                           )
                           const q = memberSearchQuery.toLowerCase()
                           return (
@@ -2640,8 +2652,9 @@ export default function WorkspaceHub({
                         .map(m => {
                           const st = m.staff || staffList.find(s => 
                             s.id === m.staff_id || 
-                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
-                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                            s.id === m.staff?.id ||
+                            (s.email && (m.staff?.email?.toLowerCase() === s.email.toLowerCase() || (m as any).email?.toLowerCase() === s.email.toLowerCase())) ||
+                            (s.name && (m.staff?.name?.toLowerCase() === s.name.toLowerCase() || (m as any).name?.toLowerCase() === s.name.toLowerCase()))
                           )
                           return (
                             <div key={m.id} className="p-3 bg-white hover:bg-slate-50 flex items-center justify-between gap-2.5 transition-colors">
@@ -2819,8 +2832,9 @@ export default function WorkspaceHub({
                         {staffList
                           .filter(s => !teamMembers.some(m => 
                             m.staff_id === s.id || 
-                            (m.staff?.email && s.email && m.staff.email.toLowerCase() === s.email.toLowerCase()) ||
-                            (m.staff?.name && s.name && m.staff.name.toLowerCase() === s.name.toLowerCase())
+                            m.staff?.id === s.id ||
+                            (s.email && (m.staff?.email?.toLowerCase() === s.email.toLowerCase() || (m as any).email?.toLowerCase() === s.email.toLowerCase())) ||
+                            (s.name && (m.staff?.name?.toLowerCase() === s.name.toLowerCase() || (m as any).name?.toLowerCase() === s.name.toLowerCase()))
                           ))
                           .map(s => (
                             <option key={s.id} value={s.id}>
@@ -2876,8 +2890,9 @@ export default function WorkspaceHub({
                       teamMembers.map(tm => {
                         const st = tm.staff || staffList.find(s => 
                           s.id === tm.staff_id || 
-                          (tm.staff?.email && s.email && tm.staff.email.toLowerCase() === s.email.toLowerCase()) ||
-                          (tm.staff?.name && s.name && tm.staff.name.toLowerCase() === s.name.toLowerCase())
+                          s.id === tm.staff?.id ||
+                          (s.email && (tm.staff?.email?.toLowerCase() === s.email.toLowerCase() || (tm as any).email?.toLowerCase() === s.email.toLowerCase())) ||
+                          (s.name && (tm.staff?.name?.toLowerCase() === s.name.toLowerCase() || (tm as any).name?.toLowerCase() === s.name.toLowerCase()))
                         )
                         return (
                           <div key={tm.id} className="p-3 bg-white hover:bg-slate-50 flex items-center justify-between gap-2.5 transition-colors">
