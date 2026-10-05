@@ -64,6 +64,7 @@ export default function SystemSettings() {
   })
   const [detectingNewBranch, setDetectingNewBranch] = useState(false)
   const [detectFeedback, setDetectFeedback] = useState('')
+  const [savingLocation, setSavingLocation] = useState(false)
 
   // Public Holidays State
   const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
@@ -109,17 +110,32 @@ export default function SystemSettings() {
           let locs: OfficeLocation[] = []
           if (Array.isArray(data.office_locations) && data.office_locations.length > 0) {
             locs = data.office_locations
-          } else if (data.office_lat && data.office_lng) {
-            locs = [{
-              id: 'loc-1',
-              name: data.office_address_label || 'Main Head Office',
-              lat: data.office_lat,
-              lng: data.office_lng,
-              radius_meters: data.office_radius_meters || 100,
-              is_active: true,
-            }]
+            try {
+              localStorage.setItem('hris_office_locations', JSON.stringify(locs))
+            } catch (e) {}
           } else {
-            locs = [{ id: 'loc-1', name: 'Main Head Office', lat: 6.5244, lng: 3.3792, radius_meters: 100, is_active: true }]
+            try {
+              const cached = localStorage.getItem('hris_office_locations')
+              if (cached) {
+                const parsed = JSON.parse(cached)
+                if (Array.isArray(parsed) && parsed.length > 0) locs = parsed
+              }
+            } catch (e) {}
+          }
+
+          if (locs.length === 0) {
+            if (data.office_lat && data.office_lng) {
+              locs = [{
+                id: 'loc-1',
+                name: data.office_address_label || 'Main Head Office',
+                lat: data.office_lat,
+                lng: data.office_lng,
+                radius_meters: data.office_radius_meters || 100,
+                is_active: true,
+              }]
+            } else {
+              locs = [{ id: 'loc-1', name: 'Main Head Office', lat: 6.5244, lng: 3.3792, radius_meters: 100, is_active: true }]
+            }
           }
 
           // Load custom holidays
@@ -226,14 +242,17 @@ export default function SystemSettings() {
 
       if (error) {
         console.warn('Database save warning (saved locally):', error.message)
+        setCompanyError(`Database save warning: ${error.message}`)
+      } else {
+        try {
+          localStorage.setItem('hris_office_locations', JSON.stringify(companySettings.office_locations))
+        } catch (e) {}
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2500)
       }
-
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Save settings handled locally:', err)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
+      setCompanyError(`Save error: ${err?.message || String(err)}`)
     }
   }
 
@@ -266,8 +285,10 @@ export default function SystemSettings() {
     )
   }
 
-  const handleAddLocation = () => {
+  const handleAddLocation = async () => {
     if (!newBranch.name.trim()) return
+    setSavingLocation(true)
+
     const locItem: OfficeLocation = {
       id: `loc-${Date.now()}`,
       name: newBranch.name.trim(),
@@ -277,32 +298,130 @@ export default function SystemSettings() {
       is_active: true,
     }
 
+    const updatedLocations = [...companySettings.office_locations, locItem]
+
     setCompanySettings(c => ({
       ...c,
-      office_locations: [...c.office_locations, locItem],
+      office_locations: updatedLocations,
     }))
+
+    try {
+      localStorage.setItem('hris_office_locations', JSON.stringify(updatedLocations))
+    } catch (e) {}
 
     setShowAddBranch(false)
     setNewBranch({ id: '', name: '', lat: 6.5244, lng: 3.3792, radius_meters: 100, is_active: true })
     setDetectFeedback('')
+
+    try {
+      const primaryLoc = updatedLocations[0] || locItem
+      const { error } = await supabase
+        .from('company_settings')
+        .update({
+          office_locations: updatedLocations,
+          office_lat: primaryLoc.lat,
+          office_lng: primaryLoc.lng,
+          office_radius_meters: primaryLoc.radius_meters,
+          office_address_label: primaryLoc.name,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 1)
+
+      if (error) {
+        console.warn('Could not persist new branch to Supabase:', error.message)
+      } else {
+        notifyCompanySettingsUpdated({
+          ...companySettings,
+          office_locations: updatedLocations,
+        })
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2500)
+      }
+    } catch (err) {
+      console.warn('Branch persistence exception:', err)
+    } finally {
+      setSavingLocation(false)
+    }
   }
 
-  const handleRemoveLocation = (id: string) => {
+  const handleRemoveLocation = async (id: string) => {
     if (companySettings.office_locations.length <= 1) {
       alert('You must have at least one office/site location.')
       return
     }
+    const updatedLocations = companySettings.office_locations.filter(l => l.id !== id)
     setCompanySettings(c => ({
       ...c,
-      office_locations: c.office_locations.filter(l => l.id !== id),
+      office_locations: updatedLocations,
     }))
+
+    try {
+      localStorage.setItem('hris_office_locations', JSON.stringify(updatedLocations))
+    } catch (e) {}
+
+    try {
+      const primaryLoc = updatedLocations[0] || {
+        lat: 6.5244,
+        lng: 3.3792,
+        radius_meters: 100,
+        name: 'Main Head Office',
+      }
+      const { error } = await supabase
+        .from('company_settings')
+        .update({
+          office_locations: updatedLocations,
+          office_lat: primaryLoc.lat,
+          office_lng: primaryLoc.lng,
+          office_radius_meters: primaryLoc.radius_meters,
+          office_address_label: primaryLoc.name,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 1)
+
+      if (!error) {
+        notifyCompanySettingsUpdated({
+          ...companySettings,
+          office_locations: updatedLocations,
+        })
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2500)
+      }
+    } catch (err) {
+      console.warn('Branch removal exception:', err)
+    }
   }
 
-  const handleToggleLocationActive = (id: string) => {
+  const handleToggleLocationActive = async (id: string) => {
+    const updatedLocations = companySettings.office_locations.map(l => l.id === id ? { ...l, is_active: !l.is_active } : l)
     setCompanySettings(c => ({
       ...c,
-      office_locations: c.office_locations.map(l => l.id === id ? { ...l, is_active: !l.is_active } : l),
+      office_locations: updatedLocations,
     }))
+
+    try {
+      localStorage.setItem('hris_office_locations', JSON.stringify(updatedLocations))
+    } catch (e) {}
+
+    try {
+      const { error } = await supabase
+        .from('company_settings')
+        .update({
+          office_locations: updatedLocations,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', 1)
+
+      if (!error) {
+        notifyCompanySettingsUpdated({
+          ...companySettings,
+          office_locations: updatedLocations,
+        })
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2500)
+      }
+    } catch (err) {
+      console.warn('Branch toggle exception:', err)
+    }
   }
 
   const handleAddHoliday = async () => {
@@ -752,6 +871,32 @@ export default function SystemSettings() {
               ))}
             </div>
           </div>
+
+          {/* Save Button for Attendance & Geofencing Settings */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-xs">
+            <div>
+              <h4 className="text-xs font-bold text-slate-800">Save Attendance & Geofencing Rules</h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Applies work hours, lateness grace threshold, off-site field permissions, and geofence enforcement.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSave}
+              className={`px-5 py-2.5 rounded-lg text-xs font-bold transition-all shadow-xs self-start sm:self-auto flex items-center gap-1.5 ${
+                saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              {saved ? (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>Settings Saved</span>
+                </>
+              ) : (
+                <span>Save Attendance & Geofencing Settings</span>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
@@ -844,10 +989,17 @@ export default function SystemSettings() {
               <button
                 type="button"
                 onClick={handleAddLocation}
-                disabled={!newBranch.name.trim()}
-                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                disabled={!newBranch.name.trim() || savingLocation}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
-                Save Branch / Site
+                {savingLocation ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Saving Branch...</span>
+                  </>
+                ) : (
+                  <span>Save Branch / Site</span>
+                )}
               </button>
             </div>
           </div>
