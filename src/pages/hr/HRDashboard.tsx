@@ -591,7 +591,8 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
             bgClass: 'bg-emerald-50/80',
             iconClass: 'text-emerald-600',
-            border: 'border-emerald-100'
+            border: 'border-emerald-100',
+            filter: 'present',
           },
           { 
             l: 'Field & Site Stops', 
@@ -600,7 +601,8 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>,
             bgClass: 'bg-indigo-50/80',
             iconClass: 'text-indigo-600',
-            border: 'border-indigo-100'
+            border: 'border-indigo-100',
+            filter: 'field',
           },
           { 
             l: 'ID Cards Expiring', 
@@ -609,10 +611,21 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>,
             bgClass: 'bg-purple-50/80',
             iconClass: 'text-purple-600',
-            border: 'border-purple-100'
+            border: 'border-purple-100',
           },
         ].map(k => (
-          <div key={k.l} className={`bg-white rounded-2xl border ${k.border} shadow-xs p-4 sm:p-5 flex flex-col justify-between`}>
+          <div
+            key={k.l}
+            onClick={() => {
+              if ((k as any).filter) {
+                sessionStorage.setItem('hris_attendance_filter', (k as any).filter)
+                onNavigate('hr-attendance-daily')
+              }
+            }}
+            className={`bg-white rounded-2xl border ${k.border} shadow-xs p-4 sm:p-5 flex flex-col justify-between ${
+              (k as any).filter ? 'cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all' : ''
+            }`}
+          >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{k.l}</span>
               <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${k.bgClass} flex items-center justify-center ${k.iconClass}`}>
