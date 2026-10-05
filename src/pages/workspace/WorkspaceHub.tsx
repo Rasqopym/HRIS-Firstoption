@@ -32,6 +32,10 @@ import {
   addTeamMember,
   updateTeamMemberRole,
   removeTeamMember,
+  recordWorkspaceActivity,
+  getLocalWorkspaceActivityMap,
+  fetchWorkspaceLatestActivityMap,
+  sortWorkspacesByLatestActivity,
 } from '../../lib/workspaceManager'
 import { uploadCompressedImage, formatFileSize, extractClipboardImage } from '../../lib/imageCompressor'
 import { extractTaskFromMessage, ExtractedTaskDraft } from '../../lib/taskExtractor'
@@ -254,11 +258,57 @@ export default function WorkspaceHub({
         setWorkspaces(wsList)
         setSelectedWorkspace(prev => {
           if (prev && wsList.some(w => w.id === prev.id)) return prev
-          return wsList[0] || null
+          const lastWsId = localStorage.getItem('hris_last_active_workspace_id')
+          const matched = wsList.find(w => w.id === lastWsId)
+          return matched || wsList[0] || null
         })
       })
     }
   }, [currentStaffId, role, currentUserDepartment])
+
+  // Persist active workspace to localStorage so refreshes always return to the same workspace
+  useEffect(() => {
+    if (selectedWorkspace?.id) {
+      localStorage.setItem('hris_last_active_workspace_id', selectedWorkspace.id)
+    }
+  }, [selectedWorkspace?.id])
+
+  // Persist active squad and channel per workspace
+  useEffect(() => {
+    if (selectedTeam?.id && selectedWorkspace?.id) {
+      localStorage.setItem(`hris_last_active_team_id_${selectedWorkspace.id}`, selectedTeam.id)
+    }
+  }, [selectedTeam?.id, selectedWorkspace?.id])
+
+  useEffect(() => {
+    if (selectedChannel?.id && selectedTeam?.id) {
+      localStorage.setItem(`hris_last_active_channel_id_${selectedTeam.id}`, selectedChannel.id)
+    }
+  }, [selectedChannel?.id, selectedTeam?.id])
+
+  // Realtime subscription: whenever a new message is posted in any channel across any workspace,
+  // re-sort workspaces dynamically so the one with the latest message immediately floats to the top
+  useEffect(() => {
+    const globalChatSub = supabase
+      .channel('global_workspace_chat_sort')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+        },
+        async () => {
+          const actMap = await fetchWorkspaceLatestActivityMap()
+          setWorkspaces(prev => sortWorkspacesByLatestActivity(prev, actMap))
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(globalChatSub)
+    }
+  }, [])
 
   const loadInitialData = async () => {
     try {
@@ -396,7 +446,9 @@ export default function WorkspaceHub({
     const tList = await getTeams(wsId)
     setTeams(tList)
     if (tList.length > 0) {
-      setSelectedTeam(tList[0])
+      const lastTeamId = localStorage.getItem(`hris_last_active_team_id_${wsId}`)
+      const matchedTeam = tList.find(t => t.id === lastTeamId)
+      setSelectedTeam(matchedTeam || tList[0])
     } else {
       setSelectedTeam(null)
       setChannels([])
@@ -422,7 +474,9 @@ export default function WorkspaceHub({
     const chList = await getChannels(teamId)
     setChannels(chList)
     if (chList.length > 0) {
-      setSelectedChannel(chList[0])
+      const lastChannelId = localStorage.getItem(`hris_last_active_channel_id_${teamId}`)
+      const matchedChannel = chList.find(c => c.id === lastChannelId)
+      setSelectedChannel(matchedChannel || chList[0])
     } else {
       setSelectedChannel(null)
       setMessages([])
@@ -469,6 +523,11 @@ export default function WorkspaceHub({
               }
               return [...prev, formatted]
             })
+            if (selectedWorkspace?.id) {
+              recordWorkspaceActivity(selectedWorkspace.id, Date.now())
+              const actMap = getLocalWorkspaceActivityMap()
+              setWorkspaces(prev => sortWorkspacesByLatestActivity(prev, actMap))
+            }
             scrollToBottom()
           }
         )
@@ -812,6 +871,7 @@ export default function WorkspaceHub({
 
       const msg = await sendChatMessage({
         channel_id: selectedChannel.id,
+        workspace_id: selectedWorkspace?.id,
         sender_id: senderId,
         content: inputText.trim(),
         attachments,
@@ -820,6 +880,12 @@ export default function WorkspaceHub({
         sender_name: senderName,
         sender_photo: senderPhoto,
       })
+
+      if (selectedWorkspace?.id) {
+        recordWorkspaceActivity(selectedWorkspace.id, Date.now())
+        const actMap = getLocalWorkspaceActivityMap()
+        setWorkspaces(prev => sortWorkspacesByLatestActivity(prev, actMap))
+      }
 
       setMessages(prev => {
         if (prev.some(m => m.id === msg.id)) return prev
@@ -865,6 +931,7 @@ export default function WorkspaceHub({
             if (!isGeminiConfigured()) {
               const helpMsg = await sendChatMessage({
                 channel_id: selectedChannel.id,
+                workspace_id: selectedWorkspace?.id,
                 sender_id: 'gemini-ai',
                 content: "⚡ **Workspace AI Copilot**: Hello! To enable AI responses, task breakdowns, and standup digests, please configure your **Workspace AI API Key** (Groq or Gemini) by clicking the **⚡ Workspace AI** button in the top navigation bar.",
                 attachments: [],
@@ -873,6 +940,11 @@ export default function WorkspaceHub({
                 sender_name: 'Workspace AI Copilot',
                 sender_photo: '',
               })
+              if (selectedWorkspace?.id) {
+                recordWorkspaceActivity(selectedWorkspace.id, Date.now())
+                const actMap = getLocalWorkspaceActivityMap()
+                setWorkspaces(prev => sortWorkspacesByLatestActivity(prev, actMap))
+              }
               setMessages(prev => prev.some(m => m.id === helpMsg.id) ? prev : [...prev, helpMsg])
             } else {
               const aiAnswer = await generateChatCopilotResponse({
@@ -887,6 +959,7 @@ export default function WorkspaceHub({
 
               const aiMsg = await sendChatMessage({
                 channel_id: selectedChannel.id,
+                workspace_id: selectedWorkspace?.id,
                 sender_id: 'gemini-ai',
                 content: aiAnswer,
                 attachments: [],
@@ -895,13 +968,18 @@ export default function WorkspaceHub({
                 sender_name: 'Workspace AI Copilot',
                 sender_photo: '',
               })
-
+              if (selectedWorkspace?.id) {
+                recordWorkspaceActivity(selectedWorkspace.id, Date.now())
+                const actMap = getLocalWorkspaceActivityMap()
+                setWorkspaces(prev => sortWorkspacesByLatestActivity(prev, actMap))
+              }
               setMessages(prev => prev.some(m => m.id === aiMsg.id) ? prev : [...prev, aiMsg])
             }
           } catch (aiErr: any) {
             console.error('AI Copilot Error:', aiErr)
             const errMsg = await sendChatMessage({
               channel_id: selectedChannel.id,
+              workspace_id: selectedWorkspace?.id,
               sender_id: 'gemini-ai',
               content: `⚠️ **Workspace AI Notice**: ${aiErr.message || 'Unable to generate response. Please verify your API key and connection.'}`,
               attachments: [],
@@ -910,6 +988,11 @@ export default function WorkspaceHub({
               sender_name: 'Workspace AI Copilot',
               sender_photo: '',
             })
+            if (selectedWorkspace?.id) {
+              recordWorkspaceActivity(selectedWorkspace.id, Date.now())
+              const actMap = getLocalWorkspaceActivityMap()
+              setWorkspaces(prev => sortWorkspacesByLatestActivity(prev, actMap))
+            }
             setMessages(prev => prev.some(m => m.id === errMsg.id) ? prev : [...prev, errMsg])
           } finally {
             setAiThinking(false)
@@ -1243,7 +1326,10 @@ export default function WorkspaceHub({
               value={selectedWorkspace?.id || ''}
               onChange={e => {
                 const ws = workspaces.find(w => w.id === e.target.value)
-                if (ws) setSelectedWorkspace(ws)
+                if (ws) {
+                  setSelectedWorkspace(ws)
+                  localStorage.setItem('hris_last_active_workspace_id', ws.id)
+                }
               }}
               className="font-bold text-xs sm:text-sm text-slate-800 bg-transparent border-none outline-none cursor-pointer hover:text-blue-600 truncate max-w-[160px] sm:max-w-[240px] md:max-w-xs"
             >

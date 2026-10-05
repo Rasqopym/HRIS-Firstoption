@@ -179,29 +179,96 @@ export const DEFAULT_TASKS: WorkspaceTask[] = [
   },
 ]
 
-// ── Workspaces Queries ───────────────────────────────────────────────────────
+// ── Workspaces Queries & Activity Sorting ───────────────────────────────────
+export const LOCAL_WS_ACTIVITY_KEY = 'hris_ws_latest_activity_map'
+
+export function getLocalWorkspaceActivityMap(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(LOCAL_WS_ACTIVITY_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function recordWorkspaceActivity(workspaceId: string, timestamp: number = Date.now()) {
+  if (!workspaceId) return
+  try {
+    const map = getLocalWorkspaceActivityMap()
+    map[workspaceId] = Math.max(map[workspaceId] || 0, timestamp)
+    localStorage.setItem(LOCAL_WS_ACTIVITY_KEY, JSON.stringify(map))
+  } catch {}
+}
+
+export async function fetchWorkspaceLatestActivityMap(): Promise<Record<string, number>> {
+  const localMap = getLocalWorkspaceActivityMap()
+  try {
+    const { data: msgs, error } = await supabase
+      .from('chat_messages')
+      .select('channel_id, created_at, channels(teams(workspace_id))')
+      .order('created_at', { ascending: false })
+      .limit(100)
+
+    if (!error && msgs) {
+      msgs.forEach((m: any) => {
+        const wsId = m.channels?.teams?.workspace_id
+        if (wsId && m.created_at) {
+          const t = new Date(m.created_at).getTime()
+          localMap[wsId] = Math.max(localMap[wsId] || 0, t)
+        }
+      })
+      localStorage.setItem(LOCAL_WS_ACTIVITY_KEY, JSON.stringify(localMap))
+    }
+  } catch (err) {
+    console.warn('Could not fetch workspace latest messages:', err)
+  }
+  return localMap
+}
+
+export function sortWorkspacesByLatestActivity(
+  workspaces: Workspace[],
+  activityMap: Record<string, number>
+): Workspace[] {
+  return [...workspaces].sort((a, b) => {
+    const timeA = activityMap[a.id] || 0
+    const timeB = activityMap[b.id] || 0
+    if (timeA !== timeB) {
+      return timeB - timeA
+    }
+    const createdA = new Date(a.created_at || 0).getTime()
+    const createdB = new Date(b.created_at || 0).getTime()
+    if (createdA !== createdB) {
+      return createdB - createdA
+    }
+    return a.name.localeCompare(b.name)
+  })
+}
+
 export async function getWorkspaces(): Promise<Workspace[]> {
   try {
     const { data, error } = await supabase
       .from('workspaces')
       .select('*')
-      .order('is_default', { ascending: false })
-      .order('name', { ascending: true })
 
+    let cleaned: Workspace[] = []
     if (error || !data || data.length === 0) {
       const cached = localStorage.getItem(LOCAL_WORKSPACE_KEY)
-      if (cached) return JSON.parse(cached)
-      return DEFAULT_WORKSPACES
+      cleaned = cached ? JSON.parse(cached) : DEFAULT_WORKSPACES
+    } else {
+      cleaned = data.map(ws => ({
+        ...ws,
+        description: ws.description ? ws.description.replace(/<!--AI_CONFIG:[\s\S]*?-->/g, '').trim() : ws.description
+      }))
     }
-    const cleaned = data.map(ws => ({
-      ...ws,
-      description: ws.description ? ws.description.replace(/<!--AI_CONFIG:[\s\S]*?-->/g, '').trim() : ws.description
-    }))
-    localStorage.setItem(LOCAL_WORKSPACE_KEY, JSON.stringify(cleaned))
-    return cleaned
+
+    const activityMap = await fetchWorkspaceLatestActivityMap()
+    const sorted = sortWorkspacesByLatestActivity(cleaned, activityMap)
+    localStorage.setItem(LOCAL_WORKSPACE_KEY, JSON.stringify(sorted))
+    return sorted
   } catch {
     const cached = localStorage.getItem(LOCAL_WORKSPACE_KEY)
-    return cached ? JSON.parse(cached) : DEFAULT_WORKSPACES
+    const fallback: Workspace[] = cached ? JSON.parse(cached) : DEFAULT_WORKSPACES
+    return sortWorkspacesByLatestActivity(fallback, getLocalWorkspaceActivityMap())
   }
 }
 
@@ -275,7 +342,7 @@ export async function getUserWorkspaces(
 
   const deptLower = (resolvedDept || '').toLowerCase()
 
-  return allWorkspaces.filter(ws => {
+  const filtered = allWorkspaces.filter(ws => {
     // Explicit workspace member
     if (userWsIds.has(ws.id)) return true
     // Explicit member of a team in this workspace
@@ -301,6 +368,9 @@ export async function getUserWorkspaces(
     }
     return false
   })
+
+  const activityMap = await fetchWorkspaceLatestActivityMap()
+  return sortWorkspacesByLatestActivity(filtered, activityMap)
 }
 
 export async function createWorkspace(ws: Partial<Workspace>): Promise<Workspace> {
@@ -594,6 +664,7 @@ export async function getChannelMessages(channelId: string, limit: number = 50):
 
 export async function sendChatMessage(msg: {
   channel_id: string
+  workspace_id?: string
   sender_id?: string | null
   content?: string
   message?: string
@@ -607,6 +678,10 @@ export async function sendChatMessage(msg: {
   const localId = `msg-${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
   const textContent = (msg.content ?? msg.message ?? '').trim()
   const resolvedSenderId = msg.sender_id || 'user-current'
+
+  if (msg.workspace_id) {
+    recordWorkspaceActivity(msg.workspace_id, Date.now())
+  }
 
   const payload = {
     channel_id: msg.channel_id,
