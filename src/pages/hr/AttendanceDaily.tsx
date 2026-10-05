@@ -47,6 +47,8 @@ interface StaffMember {
   full_name: string
   job_title: string
   photo_url: string
+  profile_id?: string
+  email?: string
   department_name?: string
 }
 
@@ -201,19 +203,19 @@ export default function AttendanceDaily() {
       overtime_approval: dayRecord.overtimeApproval || 'none',
     }
 
-    try {
-      const staffCode = staffMember.staff_code || ''
-      const keys = [
-        `hris_attendance_daily_${staffMember.id}`,
-        `hris_self_attendance_${staffMember.id}`,
-        staffCode ? `hris_self_attendance_${staffCode}` : null,
-        staffCode ? `hris_attendance_daily_${staffCode}` : null,
-      ].filter(Boolean) as string[]
+    const candidateIds = [staffMember.id, staffMember.staff_code, staffMember.profile_id, staffMember.email].filter(Boolean) as string[]
 
-      for (const k of keys) {
-        const existingCache = JSON.parse(localStorage.getItem(k) || '{}')
-        existingCache[dayRecord.date] = record
-        localStorage.setItem(k, JSON.stringify(existingCache))
+    try {
+      for (const cid of candidateIds) {
+        const keys = [
+          `hris_attendance_daily_${cid}`,
+          `hris_self_attendance_${cid}`,
+        ]
+        for (const k of keys) {
+          const existingCache = JSON.parse(localStorage.getItem(k) || '{}')
+          existingCache[dayRecord.date] = record
+          localStorage.setItem(k, JSON.stringify(existingCache))
+        }
       }
       window.dispatchEvent(new Event('storage'))
     } catch (e) {
@@ -228,12 +230,12 @@ export default function AttendanceDaily() {
       console.warn('Supabase attendance upsert skipped:', e)
     }
 
-    // Update in-memory today records
-    setTodayRecords(prev => ({
-      ...prev,
-      [staffMember.id]: record,
-      ...(staffMember.staff_code ? { [staffMember.staff_code]: record } : {})
-    }))
+    // Update in-memory today records for all candidate IDs
+    const updates: Record<string, any> = {}
+    candidateIds.forEach(cid => {
+      updates[cid] = record
+    })
+    setTodayRecords(prev => ({ ...prev, ...updates }))
 
     // If this staff member is currently active in the calendar view, update their days
     if (selectedStaffId === staffMember.id) {
@@ -281,7 +283,7 @@ export default function AttendanceDaily() {
 
       const { data, error } = await supabase
         .from('staff')
-        .select('id, staff_code, full_name, job_title, photo_url, departments(name)')
+        .select('id, staff_code, full_name, job_title, photo_url, profile_id, email, departments(name)')
         .eq('status', 'active')
         .order('full_name')
       
@@ -294,6 +296,8 @@ export default function AttendanceDaily() {
           full_name: s.full_name,
           job_title: s.job_title,
           photo_url: s.photo_url,
+          profile_id: s.profile_id,
+          email: s.email,
           department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
         }))
         setStaffList(staffWithDept)
@@ -312,7 +316,7 @@ export default function AttendanceDaily() {
   const fetchTodayData = async (dateStr: string, staffMembers: StaffMember[] = staffList) => {
     setRosterLoading(true)
     try {
-      // 1. Fetch DB records
+      // 1. Fetch DB records for dateStr
       const { data: dbRecords } = await supabase
         .from('attendance_records')
         .select('*')
@@ -325,28 +329,40 @@ export default function AttendanceDaily() {
         })
       }
 
-      // 2. Merge LocalStorage records
+      // 2. Map and normalize across all staff candidate identifiers (id, staff_code, profile_id, email)
       staffMembers.forEach(st => {
-        const keys = [
-          `hris_self_attendance_${st.id}`,
-          `hris_self_attendance_${st.staff_code}`,
-          `hris_attendance_daily_${st.id}`,
-          `hris_attendance_daily_${st.staff_code}`,
-        ].filter(Boolean)
+        const candidateIds = [st.id, st.staff_code, st.profile_id, st.email].filter(Boolean) as string[]
 
-        for (const k of keys) {
-          const raw = localStorage.getItem(k)
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw)
-              if (parsed[dateStr]) {
-                recMap[st.id] = { ...recMap[st.id], ...parsed[dateStr] }
-                if (st.staff_code) {
-                  recMap[st.staff_code] = recMap[st.id]
-                }
-              }
-            } catch (e) {}
+        // Check if DB record exists for ANY candidate ID
+        let foundRecord: any = null
+        for (const cid of candidateIds) {
+          if (recMap[cid]) {
+            foundRecord = recMap[cid]
+            break
           }
+        }
+
+        // Also check LocalStorage across all candidate IDs
+        for (const cid of candidateIds) {
+          const keys = [`hris_self_attendance_${cid}`, `hris_attendance_daily_${cid}`]
+          for (const k of keys) {
+            const raw = localStorage.getItem(k)
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw)
+                if (parsed[dateStr]) {
+                  foundRecord = { ...(foundRecord || {}), ...parsed[dateStr] }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        // If found, associate across all candidate IDs for consistent lookup
+        if (foundRecord) {
+          candidateIds.forEach(cid => {
+            recMap[cid] = foundRecord
+          })
         }
       })
 
@@ -364,6 +380,23 @@ export default function AttendanceDaily() {
           if (l.staff_id) leaveMap[l.staff_id] = l
         })
       }
+
+      // Normalize leave map across candidate IDs as well
+      staffMembers.forEach(st => {
+        const candidateIds = [st.id, st.staff_code, st.profile_id].filter(Boolean) as string[]
+        let foundLeave: any = null
+        for (const cid of candidateIds) {
+          if (leaveMap[cid]) {
+            foundLeave = leaveMap[cid]
+            break
+          }
+        }
+        if (foundLeave) {
+          candidateIds.forEach(cid => {
+            leaveMap[cid] = foundLeave
+          })
+        }
+      })
 
       setTodayRecords(recMap)
       setTodayLeaves(leaveMap)
@@ -390,41 +423,42 @@ export default function AttendanceDaily() {
       const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
       const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
       
+      const staffCode = selectedStaff?.staff_code || ''
+      const profileId = selectedStaff?.profile_id || ''
+      const email = selectedStaff?.email || ''
+      const candidateIds = [selectedStaffId, staffCode, profileId, email].filter(Boolean) as string[]
+
+      // 1. Read LocalStorage across all candidate IDs
       let cachedRecords: Record<string, any> = {}
       try {
-        const staffCode = selectedStaff?.staff_code || ''
-        const keysToTry = [
-          `hris_self_attendance_${selectedStaffId}`,
-          `hris_self_attendance_${staffCode}`,
-          `hris_attendance_daily_${selectedStaffId}`,
-          `hris_attendance_daily_${staffCode}`,
-        ]
-        for (const k of keysToTry) {
-          const raw = localStorage.getItem(k)
-          if (raw) {
-            try {
-              cachedRecords = { ...cachedRecords, ...JSON.parse(raw) }
-            } catch (e) {}
+        for (const cid of candidateIds) {
+          const keysToTry = [
+            `hris_self_attendance_${cid}`,
+            `hris_attendance_daily_${cid}`,
+          ]
+          for (const k of keysToTry) {
+            const raw = localStorage.getItem(k)
+            if (raw) {
+              try {
+                cachedRecords = { ...cachedRecords, ...JSON.parse(raw) }
+              } catch (e) {}
+            }
           }
         }
       } catch (e) {
         console.warn('LocalStorage read error:', e)
       }
 
+      // 2. Fetch from Supabase across all candidate IDs
       let dbRecords: Record<string, any> = {}
       try {
-        const staffCode = selectedStaff?.staff_code || ''
+        const orFilter = candidateIds.map(id => `staff_id.eq.${id}`).join(',')
         let query = supabase
           .from('attendance_records')
           .select('*')
           .gte('attendance_date', firstDay)
           .lte('attendance_date', lastDay)
-
-        if (staffCode && staffCode !== selectedStaffId) {
-          query = query.or(`staff_id.eq.${selectedStaffId},staff_id.eq.${staffCode}`)
-        } else {
-          query = query.eq('staff_id', selectedStaffId)
-        }
+          .or(orFilter)
 
         const { data, error } = await query
 
@@ -437,6 +471,17 @@ export default function AttendanceDaily() {
         console.warn('Supabase fetch attendance skipped:', e)
       }
 
+      // 3. Directly merge any in-memory today records for this staff member
+      for (const cid of candidateIds) {
+        if (todayRecords[cid]) {
+          const tRec = todayRecords[cid]
+          const dStr = tRec.attendance_date || todayStr
+          if (dStr.startsWith(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`)) {
+            dbRecords[dStr] = { ...(dbRecords[dStr] || {}), ...tRec }
+          }
+        }
+      }
+
       const mergedRecords = { ...cachedRecords, ...dbRecords }
       const monthDays = buildMonth(selectedYear, selectedMonth, mergedRecords, customHolidays)
       setDays(monthDays)
@@ -444,7 +489,7 @@ export default function AttendanceDaily() {
     }
 
     fetchAttendance()
-  }, [selectedStaffId, selectedMonth, selectedYear, customHolidays])
+  }, [selectedStaffId, selectedMonth, selectedYear, customHolidays, todayRecords])
 
   // ── Monthly Calendar Summary Metrics ──
   const presentDays = days.filter(d => d.status === 'present').length
@@ -512,8 +557,14 @@ export default function AttendanceDaily() {
     const holiday = isPublicHoliday(targetDate, customHolidays)
 
     return staffList.map(st => {
-      const rec = todayRecords[st.id] || (st.staff_code ? todayRecords[st.staff_code] : null)
-      const leave = todayLeaves[st.id] || (st.staff_code ? todayLeaves[st.staff_code] : null)
+      const rec = todayRecords[st.id] ||
+        (st.staff_code ? todayRecords[st.staff_code] : null) ||
+        (st.profile_id ? todayRecords[st.profile_id] : null) ||
+        (st.email ? todayRecords[st.email] : null)
+
+      const leave = todayLeaves[st.id] ||
+        (st.staff_code ? todayLeaves[st.staff_code] : null) ||
+        (st.profile_id ? todayLeaves[st.profile_id] : null)
 
       let computedStatus: AttendanceStatus = 'unmarked'
       let clockInTime = rec?.clock_in_time || rec?.clockInTime

@@ -129,7 +129,7 @@ export default function AttendanceSummary() {
 
       const { data: staffData, error: staffError } = await supabase
         .from('staff')
-        .select('id, staff_code, full_name, departments(name)')
+        .select('id, staff_code, full_name, profile_id, email, departments(name)')
         .eq('status', 'active')
         .order('full_name')
       
@@ -143,6 +143,8 @@ export default function AttendanceSummary() {
         id: s.id,
         staff_code: s.staff_code,
         full_name: s.full_name,
+        profile_id: s.profile_id,
+        email: s.email,
         department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
       }))
 
@@ -168,15 +170,18 @@ export default function AttendanceSummary() {
 
       staffWithDept.forEach(staff => {
         const staffRecordsMap: Record<string, any> = {}
+        const candidateIds = [staff.id, staff.staff_code, staff.profile_id, staff.email].filter(Boolean)
 
         try {
-          const rawCache1 = localStorage.getItem(`hris_self_attendance_${staff.id}`)
-          const rawCache2 = localStorage.getItem(`hris_attendance_daily_${staff.id}`)
-          if (rawCache1) Object.assign(staffRecordsMap, JSON.parse(rawCache1))
-          if (rawCache2) Object.assign(staffRecordsMap, JSON.parse(rawCache2))
+          candidateIds.forEach(cid => {
+            const rawCache1 = localStorage.getItem(`hris_self_attendance_${cid}`)
+            const rawCache2 = localStorage.getItem(`hris_attendance_daily_${cid}`)
+            if (rawCache1) Object.assign(staffRecordsMap, JSON.parse(rawCache1))
+            if (rawCache2) Object.assign(staffRecordsMap, JSON.parse(rawCache2))
+          })
         } catch (e) {}
 
-        attendanceData.filter(r => r.staff_id === staff.id).forEach(r => {
+        attendanceData.filter(r => candidateIds.includes(r.staff_id)).forEach(r => {
           staffRecordsMap[r.attendance_date] = r
         })
 
