@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 import { useCompanySettings } from '../hooks/useCompanySettings'
 import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus } from '../lib/pushNotification'
+import { getUserWorkspaces } from '../lib/workspaceManager'
 
 interface LayoutProps {
   role: Role
@@ -962,18 +963,87 @@ export default function Layout({
     fetchNotifications()
     const interval = setInterval(fetchNotifications, 60000) // Periodic 1-minute check for reminders
 
-    // ── Supabase Realtime: instantly surface all workspace events ─────────
+    // ── Supabase Realtime: instantly surface all workspace events & squad messages ─────────
     let realtimeChannel: any = null
     ;(async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) return
 
       let staffId: string | null = null
-      const { data: sRow } = await supabase
-        .from('staff').select('id').eq('profile_id', authUser.id).maybeSingle()
-      staffId = sRow?.id || null
+      let userDept = ''
+      try {
+        const { data: sRow } = await supabase
+          .from('staff')
+          .select('id, departments(name)')
+          .or(`profile_id.eq.${authUser.id},id.eq.${authUser.id}`)
+          .maybeSingle()
+        staffId = sRow?.id || null
+        userDept = (sRow?.departments as any)?.name || ''
+      } catch {}
 
       const wsPage: any = role === 'staff' ? 'st-workspace' : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
+
+      // Preload user's squad memberships and channel information
+      const userTeamIds = new Set<string>()
+      const userWsIds = new Set<string>()
+      try {
+        const uWorkspaces = await getUserWorkspaces(staffId, role, userDept)
+        uWorkspaces.forEach(w => userWsIds.add(w.id))
+
+        if (staffId) {
+          const { data: tmData } = await supabase
+            .from('team_members')
+            .select('team_id')
+            .eq('staff_id', staffId)
+          tmData?.forEach((m: any) => userTeamIds.add(m.team_id))
+        }
+      } catch (err) {
+        console.warn('Squad membership preload warning:', err)
+      }
+
+      // Map channels to teams and membership status
+      const channelInfoMap = new Map<string, { channelName: string; teamName: string; isSquadMember: boolean }>()
+      const refreshChannelsMap = async () => {
+        try {
+          const { data: chList } = await supabase
+            .from('channels')
+            .select('id, name, team_id, teams (id, name, is_private, workspace_id)')
+          chList?.forEach((c: any) => {
+            const team = c.teams
+            const teamId = team?.id || c.team_id
+            const teamName = team?.name || 'Squad'
+            const wsId = team?.workspace_id
+
+            const isMember = role === 'superadmin' ||
+              userTeamIds.has(teamId) ||
+              (!team?.is_private && userWsIds.has(wsId)) ||
+              c.id === 'ch-announcements'
+
+            channelInfoMap.set(c.id, {
+              channelName: c.name,
+              teamName: teamName,
+              isSquadMember: Boolean(isMember)
+            })
+          })
+        } catch {}
+      }
+      await refreshChannelsMap()
+
+      // Map staff & profile IDs to real names for friendly notifications
+      const senderNameMap = new Map<string, string>()
+      try {
+        const { data: staffList } = await supabase.from('staff').select('id, profile_id, full_name')
+        staffList?.forEach((s: any) => {
+          if (s.id && s.full_name) senderNameMap.set(s.id, s.full_name)
+          if (s.profile_id && s.full_name) senderNameMap.set(s.profile_id, s.full_name)
+        })
+        const { data: profilesList } = await supabase.from('profiles').select('id, full_name')
+        profilesList?.forEach((p: any) => {
+          if (p.id && p.full_name && !senderNameMap.has(p.id)) {
+            senderNameMap.set(p.id, p.full_name)
+          }
+        })
+      } catch {}
 
       realtimeChannel = supabase
         .channel('workspace-topbar-realtime')
@@ -995,6 +1065,12 @@ export default function Layout({
             navigateTo: wsPage,
           }
           setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+          sendLocalNotification({
+            title: newNotif.title,
+            body: newNotif.message,
+            tag: `wstask-${t.id}`,
+            url: `/#${wsPage}`,
+          })
         })
         .on('postgres_changes', {
           event: 'UPDATE',
@@ -1014,44 +1090,84 @@ export default function Layout({
             navigateTo: wsPage,
           }
           setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+          sendLocalNotification({
+            title: newNotif.title,
+            body: newNotif.message,
+            tag: `ws-taskdone-${t.id}`,
+            url: `/#${wsPage}`,
+          })
         })
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
           table: 'chat_messages',
-        }, (payload: any) => {
+        }, async (payload: any) => {
           const msg = payload.new
           if (!msg) return
-          const isTagged = Array.isArray(msg.mentions) && (msg.mentions.includes(authUser.id) || (staffId && msg.mentions.includes(staffId)))
-          const isAnnouncement = msg.channel_id === 'ch-announcements' && msg.sender_id !== staffId
 
-          if (isTagged) {
-            const preview = (msg.content || '').replace(/\*\*/g, '').replace(/@[\w\s.-]+/g, '').trim().slice(0, 80)
-            const newNotif: HRISNotification = {
-              id: `ws-mention-rt-${msg.id}`,
-              title: '💬 You were mentioned in chat',
-              message: preview ? `"${preview}${preview.length >= 80 ? '…' : ''}"` : 'In workspace chat',
-              timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              type: 'info',
-              read: false,
-              source: 'workspace',
-              navigateTo: wsPage,
-            }
-            setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
-          } else if (isAnnouncement) {
-            const preview = (msg.content || '').replace(/\*\*/g, '').trim().slice(0, 80)
-            const newNotif: HRISNotification = {
-              id: `ws-ann-rt-${msg.id}`,
-              title: '📢 New Company Announcement',
-              message: `"${preview}${preview.length >= 80 ? '…' : ''}"`,
-              timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              type: 'info',
-              read: false,
-              source: 'workspace',
-              navigateTo: wsPage,
-            }
-            setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+          // 1. Skip if message was sent by the currently logged-in user
+          const isMe = (msg.sender_id && (msg.sender_id === staffId || msg.sender_id === authUser.id))
+          if (isMe) return
+
+          // 2. Resolve channel & squad details
+          let chInfo = channelInfoMap.get(msg.channel_id)
+          if (!chInfo) {
+            await refreshChannelsMap()
+            chInfo = channelInfoMap.get(msg.channel_id)
           }
+
+          const channelName = chInfo?.channelName || 'general'
+          const teamName = chInfo?.teamName || 'Squad'
+          const isSquadMember = chInfo ? chInfo.isSquadMember : true
+
+          // Only notify squad members of this group
+          if (!isSquadMember) return
+
+          // 3. Resolve sender display name
+          const senderName = senderNameMap.get(msg.sender_id) || msg.sender_name || 'Team member'
+
+          // 4. Clean text preview
+          const cleanText = (msg.content || '').replace(/\*\*/g, '').replace(/@[\w\s.-]+/g, '').trim()
+          const preview = cleanText.length > 80 ? cleanText.slice(0, 80) + '…' : cleanText || 'Sent a message'
+
+          // 5. Detect mentions and announcements
+          const isTagged = Array.isArray(msg.mentions) && (msg.mentions.includes(authUser.id) || (staffId && msg.mentions.includes(staffId)))
+          const isAnnouncement = msg.channel_id === 'ch-announcements'
+
+          const notifTitle = isTagged
+            ? `💬 ${senderName} mentioned you in #${channelName}`
+            : isAnnouncement
+            ? `📢 Announcement from ${senderName}`
+            : `💬 ${teamName} · #${channelName}`
+
+          const notifBody = isTagged
+            ? `"${preview}"`
+            : `${senderName}: "${preview}"`
+
+          const newNotif: HRISNotification = {
+            id: `ws-msg-rt-${msg.id}`,
+            title: notifTitle,
+            message: notifBody,
+            timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: 'info',
+            read: false,
+            source: 'workspace',
+            navigateTo: wsPage,
+          }
+
+          setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
+
+          // 6. Push native browser/device notification to every squad member!
+          sendLocalNotification({
+            title: notifTitle,
+            body: notifBody,
+            tag: `squad-msg-${msg.channel_id}`,
+            url: `/#${wsPage}`,
+            data: {
+              channelId: msg.channel_id,
+              messageId: msg.id,
+            }
+          })
         })
         .subscribe()
     })()
