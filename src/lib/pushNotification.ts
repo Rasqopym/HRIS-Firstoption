@@ -118,7 +118,7 @@ export function runRoutineReminders(role: string, customHolidays: any[] = []) {
 
   // 1. Staff Morning Clock-In Reminder (8:00 AM - 9:30 AM on weekdays)
   if (role === 'staff' && dow !== 0 && dow !== 6) {
-    if (hours === 8 && minutes >= 0 && !getReminded('morning_clockin')) {
+    if ((hours === 8 || (hours === 9 && minutes <= 30)) && !getReminded('morning_clockin')) {
       sendLocalNotification({
         title: 'Good Morning! ⏰ Shift Clock-In',
         body: 'Remember to clock in for your workday shift and verify your workplace location.',
@@ -128,8 +128,8 @@ export function runRoutineReminders(role: string, customHolidays: any[] = []) {
       setReminded('morning_clockin')
     }
 
-    // Evening Clock-Out Reminder (4:45 PM - 6:00 PM)
-    if (hours === 17 && !getReminded('evening_clockout')) {
+    // Evening Clock-Out Reminder (4:45 PM - 6:30 PM)
+    if (((hours === 16 && minutes >= 45) || hours === 17 || (hours === 18 && minutes <= 30)) && !getReminded('evening_clockout')) {
       sendLocalNotification({
         title: 'Workday Wrap-Up: Clock-Out Reminder',
         body: 'Please make sure to clock out and log any field site visits or overtime before leaving.',

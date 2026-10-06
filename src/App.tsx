@@ -183,17 +183,25 @@ export default function App() {
 
     restoreSession()
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true)
         setIsLoggedIn(false)
       } else if (event === 'SIGNED_OUT') {
-        setIsLoggedIn(false)
-        setIsRecoveryMode(false)
-        setAuthenticatedRole('superadmin')
-        setViewRole('superadmin')
-        setPage('sa-dashboard')
-        try { window.location.hash = '' } catch (e) {}
+        // Guard against transient network hiccups during background token refreshes
+        const { data: check } = await supabase.auth.getSession()
+        if (!check.session) {
+          setIsLoggedIn(false)
+          setIsRecoveryMode(false)
+          setAuthenticatedRole('superadmin')
+          setViewRole('superadmin')
+          setPage('sa-dashboard')
+          try { window.location.hash = '' } catch (e) {}
+        }
+      } else if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+        if (session?.user && !isLoggedIn) {
+          setIsLoggedIn(true)
+        }
       }
     })
 
@@ -367,8 +375,10 @@ export default function App() {
     resolveIdentity()
   }, [role, isLoggedIn])
 
-  // Idle session timeout (60 minutes of inactivity)
-  const IDLE_TIMEOUT_MS = 60 * 60 * 1000 // 60 minutes
+  // Persistent session timeout: 24 hours of continuous inactivity
+  // Extended so users remain logged in across their shifts, background app usage,
+  // and continue receiving routine reminders and real-time push notifications.
+  const IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000 // 24 hours
   const DEBOUNCE_MS = 5000 // Only reset timer if 5+ seconds have passed since last reset
   const lastActivityRef = useRef<number>(Date.now())
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -392,19 +402,39 @@ export default function App() {
           clearTimeout(timeoutRef.current)
         }
         timeoutRef.current = setTimeout(() => {
-          console.log('Session timeout: logging out due to inactivity')
+          console.log('Session timeout: logging out due to 24h inactivity')
           handleLogout()
         }, IDLE_TIMEOUT_MS)
       }
     }
 
-    // Track user activity events
-    const events = ['mousemove', 'keydown', 'click', 'scroll']
+    // Comprehensive activity events across desktop and mobile touch devices
+    const events = [
+      'mousemove',
+      'mousedown',
+      'keydown',
+      'click',
+      'scroll',
+      'touchstart',
+      'touchmove',
+      'touchend',
+      'pointerdown',
+      'pointermove',
+      'focus',
+    ]
     const handleActivity = () => resetTimer()
 
     events.forEach(event => {
-      window.addEventListener(event, handleActivity)
+      window.addEventListener(event, handleActivity, { passive: true })
     })
+
+    // When returning from background or unlocking device, refresh activity instead of false idle timeout
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        resetTimer()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
 
     // Initial timer start
     resetTimer()
@@ -414,6 +444,7 @@ export default function App() {
       events.forEach(event => {
         window.removeEventListener(event, handleActivity)
       })
+      document.removeEventListener('visibilitychange', handleVisibility)
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
