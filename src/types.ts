@@ -18,6 +18,7 @@ export interface StaffMember {
   id: string
   staffId: string
   staffTableId?: string
+  profile_id?: string
   name: string
   email: string
   role: Role

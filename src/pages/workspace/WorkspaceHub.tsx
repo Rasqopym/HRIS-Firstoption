@@ -41,7 +41,6 @@ import { uploadCompressedImage, formatFileSize, extractClipboardImage } from '..
 import { extractTaskFromMessage, ExtractedTaskDraft } from '../../lib/taskExtractor'
 import { staff as mockStaff } from '../../data/mock'
 import { supabase } from '../../lib/supabase'
-import { sendLocalNotification } from '../../lib/pushNotification'
 import {
   IconChat,
   IconKanban,
@@ -318,7 +317,7 @@ export default function WorkspaceHub({
       try {
         const { data: sData, error: sErr } = await supabase
           .from('staff')
-          .select('id, full_name, staff_code, photo_url, departments(name), email')
+          .select('id, full_name, staff_code, photo_url, departments(name), email, profile_id')
 
         if (!sErr && sData && sData.length > 0) {
           mapped = sData.map(s => {
@@ -329,6 +328,7 @@ export default function WorkspaceHub({
             return {
               id: s.id,
               staffId: s.staff_code || s.id,
+              profile_id: s.profile_id || undefined,
               name: s.full_name,
               email: s.email || '',
               role: 'staff',
@@ -562,11 +562,12 @@ export default function WorkspaceHub({
   const activeSquadStaffList: StaffMember[] = useMemo(() => {
     if (!selectedTeam || teamMembers.length === 0) return []
     return teamMembers.map(tm => {
-      const st = tm.staff || staffList.find(s => s.id === tm.staff_id)
+      const st = tm.staff || staffList.find(s => s.id === tm.staff_id || s.profile_id === tm.staff_id)
       if (st) {
         return {
           ...st,
           role: (tm.role === 'lead' ? 'lead' : st.role || 'staff') as any,
+          profile_id: st.profile_id || (tm.staff as any)?.profile_id || undefined,
         }
       }
       return {
@@ -797,14 +798,32 @@ export default function WorkspaceHub({
       : (role === 'superadmin' ? 'HRIS Admin' : role === 'hr' ? 'HR Manager' : 'Staff Member')
     const senderPhoto = currentStaffPhoto
 
-    // Extract mentioned staff
-    const mentionedStaff = staffList.filter(s => {
-      const nameMatch = inputText.toLowerCase().includes(`@${s.name.toLowerCase()}`)
-      const codeMatch = s.staffId && inputText.toLowerCase().includes(`@${s.staffId.toLowerCase()}`)
-      const firstNameMatch = inputText.toLowerCase().includes(`@${s.name.toLowerCase().split(' ')[0]}`)
+    // Extract mentioned staff candidates across both directory and squad members
+    const allStaffCandidates = [...staffList, ...activeSquadStaffList]
+    const candidateMap = new Map<string, StaffMember>()
+    allStaffCandidates.forEach(s => {
+      if (s.id && !candidateMap.has(s.id)) candidateMap.set(s.id, s)
+    })
+    const uniqueCandidates = Array.from(candidateMap.values())
+
+    const mentionedStaff = uniqueCandidates.filter(s => {
+      if (s.id === 'gemini-ai') return false
+      const lowerInput = inputText.toLowerCase()
+      const nameMatch = s.name && lowerInput.includes(`@${s.name.toLowerCase()}`)
+      const codeMatch = s.staffId && lowerInput.includes(`@${s.staffId.toLowerCase()}`)
+      const firstName = s.name ? s.name.split(' ')[0].toLowerCase() : ''
+      const firstNameMatch = firstName.length > 2 && lowerInput.includes(`@${firstName}`)
       return nameMatch || codeMatch || firstNameMatch
     })
-    const mentionedIds = mentionedStaff.map(s => s.id)
+
+    const mentionedIdsSet = new Set<string>()
+    mentionedStaff.forEach(s => {
+      if (s.id) mentionedIdsSet.add(s.id)
+      if (s.profile_id) mentionedIdsSet.add(s.profile_id)
+      if ((s as any).staff_db_id) mentionedIdsSet.add((s as any).staff_db_id)
+      if (s.staffId) mentionedIdsSet.add(s.staffId)
+    })
+    const mentionedIds = Array.from(mentionedIdsSet)
 
     setSendingMessage(true)
     const rawInput = inputText.trim()
@@ -857,12 +876,6 @@ export default function WorkspaceHub({
 
           if (autoTask && autoTask.id) {
             autoCreatedTaskIds.push(autoTask.id)
-            try {
-              sendLocalNotification({
-                title: 'Team Task Auto-Created',
-                body: `"${autoTask.title}" scheduled for ${taskDraft.assigneeName || assignedStaff?.name || 'team'}`,
-              })
-            } catch (notifErr) {}
           }
         } catch (taskErr) {
           console.error('Auto task creation failed:', taskErr)
@@ -896,19 +909,6 @@ export default function WorkspaceHub({
       setLiveTaskDraft(null)
       setShowMentionMenu(false)
       scrollToBottom()
-
-      // Dispatch local notification if members were tagged
-      if (mentionedStaff.length > 0) {
-        try {
-          const names = mentionedStaff.map(s => s.name).join(', ')
-          sendLocalNotification({
-            title: `Workspace Tag: #${selectedChannel.name}`,
-            body: `${senderName} tagged ${names}: "${inputText.trim().substring(0, 80)}"`,
-          })
-        } catch (notifErr) {
-          console.warn('Local notification error:', notifErr)
-        }
-      }
     } catch (err) {
       console.error('Failed to send chat message:', err)
     } finally {
@@ -1056,14 +1056,6 @@ export default function WorkspaceHub({
     // Mark message as having spawned a task
     setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, action_tasks: [...(m.action_tasks || []), created.id] } : m)))
     setTaskDraftModal(null)
-
-    // Trigger local push notification for task creation
-    try {
-      sendLocalNotification({
-        title: 'New Team Task Created',
-        body: `"${created.title}" scheduled for ${draft.assigneeName || assignedStaff?.name || 'team'}`,
-      })
-    } catch (e) {}
 
     alert(`✓ Task created successfully and scheduled on calendar: "${created.title}" (Due: ${created.due_date})`)
   }

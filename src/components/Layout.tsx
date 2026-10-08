@@ -970,31 +970,68 @@ export default function Layout({
       if (!authUser) return
 
       let staffId: string | null = null
+      let userProfileId: string | null = authUser.id
+      let currentStaffFullName: string = ''
+      let currentStaffCode: string = ''
       let userDept = ''
       try {
         const { data: sRow } = await supabase
           .from('staff')
-          .select('id, departments(name)')
+          .select('id, profile_id, staff_code, full_name, departments(name)')
           .or(`profile_id.eq.${authUser.id},id.eq.${authUser.id}`)
           .maybeSingle()
-        staffId = sRow?.id || null
-        userDept = (sRow?.departments as any)?.name || ''
+
+        let matchedStaff = sRow
+        if (!matchedStaff && authUser.email) {
+          const { data: byEmail } = await supabase
+            .from('staff')
+            .select('id, profile_id, staff_code, full_name, departments(name)')
+            .ilike('email', authUser.email)
+            .maybeSingle()
+          matchedStaff = byEmail
+        }
+
+        if (matchedStaff) {
+          staffId = matchedStaff.id
+          if (matchedStaff.profile_id) userProfileId = matchedStaff.profile_id
+          currentStaffFullName = matchedStaff.full_name || ''
+          currentStaffCode = matchedStaff.staff_code || ''
+          userDept = (matchedStaff.departments as any)?.name || ''
+        }
+
+        if (!currentStaffFullName) {
+          const { data: pRow } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', authUser.id)
+            .maybeSingle()
+          if (pRow?.full_name) {
+            currentStaffFullName = pRow.full_name
+          }
+        }
       } catch {}
 
       const wsPage: any = role === 'staff' ? 'st-workspace' : role === 'hr' ? 'hr-workspace' : 'sa-workspace'
 
       // Preload user's squad memberships and channel information
+      const myIds = new Set<string>()
+      myIds.add(authUser.id)
+      if (staffId) myIds.add(staffId)
+      if (userProfileId) myIds.add(userProfileId)
+      if (currentStaffCode) myIds.add(currentStaffCode)
+
       const userTeamIds = new Set<string>()
       const userWsIds = new Set<string>()
       try {
         const uWorkspaces = await getUserWorkspaces(staffId, role, userDept)
         uWorkspaces.forEach(w => userWsIds.add(w.id))
 
-        if (staffId) {
+        const queryIds = Array.from(myIds).filter(Boolean)
+        if (queryIds.length > 0) {
           const { data: tmData } = await supabase
             .from('team_members')
             .select('team_id')
-            .eq('staff_id', staffId)
+            .in('staff_id', queryIds)
           tmData?.forEach((m: any) => userTeamIds.add(m.team_id))
         }
       } catch (err) {
@@ -1032,10 +1069,11 @@ export default function Layout({
       // Map staff & profile IDs to real names for friendly notifications
       const senderNameMap = new Map<string, string>()
       try {
-        const { data: staffList } = await supabase.from('staff').select('id, profile_id, full_name')
+        const { data: staffList } = await supabase.from('staff').select('id, profile_id, full_name, staff_code')
         staffList?.forEach((s: any) => {
           if (s.id && s.full_name) senderNameMap.set(s.id, s.full_name)
           if (s.profile_id && s.full_name) senderNameMap.set(s.profile_id, s.full_name)
+          if (s.staff_code && s.full_name) senderNameMap.set(s.staff_code, s.full_name)
         })
         const { data: profilesList } = await supabase.from('profiles').select('id, full_name')
         profilesList?.forEach((p: any) => {
@@ -1106,10 +1144,31 @@ export default function Layout({
           if (!msg) return
 
           // 1. Skip if message was sent by the currently logged-in user
-          const isMe = (msg.sender_id && (msg.sender_id === staffId || msg.sender_id === authUser.id))
+          const isMe = msg.sender_id && myIds.has(msg.sender_id)
           if (isMe) return
 
-          // 2. Resolve channel & squad details
+          // 2. Resolve sender display name
+          const senderName = senderNameMap.get(msg.sender_id) || msg.sender_name || 'Team member'
+
+          // 3. Detect mentions and tags
+          const mentionsArray = Array.isArray(msg.mentions) ? msg.mentions : []
+          let isTagged = mentionsArray.some((mId: string) => myIds.has(mId))
+
+          // Fallback mention check by text if sender typed @Name or @FirstName
+          if (!isTagged && msg.content && currentStaffFullName) {
+            const lowerContent = msg.content.toLowerCase()
+            const fullNameLower = currentStaffFullName.toLowerCase()
+            const firstName = fullNameLower.split(' ')[0]
+            if (
+              lowerContent.includes(`@${fullNameLower}`) ||
+              (firstName.length > 2 && lowerContent.includes(`@${firstName}`)) ||
+              (currentStaffCode && lowerContent.includes(`@${currentStaffCode.toLowerCase()}`))
+            ) {
+              isTagged = true
+            }
+          }
+
+          // 4. Resolve channel & squad details
           let chInfo = channelInfoMap.get(msg.channel_id)
           if (!chInfo) {
             await refreshChannelsMap()
@@ -1120,18 +1179,14 @@ export default function Layout({
           const teamName = chInfo?.teamName || 'Squad'
           const isSquadMember = chInfo ? chInfo.isSquadMember : true
 
-          // Only notify squad members of this group
-          if (!isSquadMember) return
+          // CRITICAL: If not explicitly tagged, only notify squad members of this group
+          // If explicitly tagged, ALWAYS notify regardless of squad membership caching!
+          if (!isTagged && !isSquadMember) return
 
-          // 3. Resolve sender display name
-          const senderName = senderNameMap.get(msg.sender_id) || msg.sender_name || 'Team member'
-
-          // 4. Clean text preview
+          // 5. Clean text preview
           const cleanText = (msg.content || '').replace(/\*\*/g, '').replace(/@[\w\s.-]+/g, '').trim()
           const preview = cleanText.length > 80 ? cleanText.slice(0, 80) + '…' : cleanText || 'Sent a message'
 
-          // 5. Detect mentions and announcements
-          const isTagged = Array.isArray(msg.mentions) && (msg.mentions.includes(authUser.id) || (staffId && msg.mentions.includes(staffId)))
           const isAnnouncement = msg.channel_id === 'ch-announcements'
 
           const notifTitle = isTagged
@@ -1140,16 +1195,14 @@ export default function Layout({
             ? `📢 Announcement from ${senderName}`
             : `💬 ${teamName} · #${channelName}`
 
-          const notifBody = isTagged
-            ? `"${preview}"`
-            : `${senderName}: "${preview}"`
+          const notifBody = `${senderName}: "${preview}"`
 
           const newNotif: HRISNotification = {
             id: `ws-msg-rt-${msg.id}`,
             title: notifTitle,
             message: notifBody,
             timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            type: 'info',
+            type: isTagged ? 'warning' : 'info',
             read: false,
             source: 'workspace',
             navigateTo: wsPage,
@@ -1157,15 +1210,16 @@ export default function Layout({
 
           setNotifs(prev => [newNotif, ...prev.filter(x => x.id !== newNotif.id)])
 
-          // 6. Push native browser/device notification to every squad member!
+          // 6. Push native browser/device notification
           sendLocalNotification({
             title: notifTitle,
             body: notifBody,
-            tag: `squad-msg-${msg.channel_id}`,
+            tag: isTagged ? `mention-${msg.id}` : `squad-msg-${msg.channel_id}`,
             url: `/#${wsPage}`,
             data: {
               channelId: msg.channel_id,
               messageId: msg.id,
+              isMention: isTagged,
             }
           })
         })
