@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 import { useCompanySettings } from '../hooks/useCompanySettings'
 import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus } from '../lib/pushNotification'
+import { checkAndAutoClockOut } from '../lib/attendanceAutoClockout'
 import { getUserWorkspaces } from '../lib/workspaceManager'
 
 interface LayoutProps {
@@ -951,9 +952,14 @@ export default function Layout({
         setNotifs(items)
         localStorage.setItem('hris_pending_actions_count', String(items.filter(i => !i.read).length))
 
-        // Trigger routine push reminders
+        // Trigger routine push reminders & auto clock-out checks
         try {
-          runRoutineReminders(role)
+          const { data: { user } } = await supabase.auth.getUser()
+          const currentSId = user ? (localStorage.getItem(`hris_staff_id_${user.id}`) || localStorage.getItem('hris_last_active_staff_id') || user.id) : null
+          runRoutineReminders(role, [], currentSId)
+          if (currentSId) {
+            checkAndAutoClockOut(currentSId)
+          }
         } catch (e) {}
       } catch (err) {
         console.error('Error fetching notifications:', err)

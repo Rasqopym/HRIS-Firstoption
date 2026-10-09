@@ -8,10 +8,9 @@ import {
   evaluateLateness,
   formatTime12Hour,
   formatDistance,
-  calculateVisitDuration,
-  type OfficeLocation
+  type OfficeLocation,
 } from '../../lib/geofence'
-import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
+import { checkAndAutoClockOut, submitDepartureAdjustment } from '../../lib/attendanceAutoClockout'
 
 const STATUS_TEXT: Record<AttendanceStatus, string> = {
   present: 'Present', absent: 'Absent', on_leave: 'On Leave',
@@ -73,6 +72,11 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
         overtimeHours: rec.overtime_hours || rec.overtimeHours || 0,
         onSite: rec.on_site ?? rec.onSite ?? false,
         overtimeApproval: rec.overtime_approval || rec.overtimeApproval || 'none',
+        autoClockedOut: Boolean(rec.auto_clocked_out ?? rec.autoClockedOut),
+        adjustmentRequested: Boolean(rec.adjustment_requested ?? rec.adjustmentRequested),
+        adjustmentStatus: rec.adjustment_status || rec.adjustmentStatus || 'none',
+        adjustmentReason: rec.adjustment_reason || rec.adjustmentReason,
+        adjustmentRequestedDeparture: rec.adjustment_requested_departure || rec.adjustmentRequestedDeparture,
       })
     } else if (isWeekend) {
       days.push({
@@ -142,6 +146,13 @@ export default function AttendanceSelf() {
   const [siteVisitName, setSiteVisitName] = useState('')
   const [siteVisitPurpose, setSiteVisitPurpose] = useState('')
   const [siteActionLoading, setSiteActionLoading] = useState(false)
+
+  // Departure Adjustment Modal State (For forgotten clock-outs / auto-closed shifts)
+  const [showAdjustModal, setShowAdjustModal] = useState(false)
+  const [adjustDay, setAdjustDay] = useState<ExtendedDayAttendance | null>(null)
+  const [adjustDepartureTime, setAdjustDepartureTime] = useState('17:00')
+  const [adjustReason, setAdjustReason] = useState('')
+  const [adjustLoading, setAdjustLoading] = useState(false)
 
   // Real-time clock
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -734,6 +745,11 @@ export default function AttendanceSelf() {
       const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
       const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
 
+      // Check and close any past forgotten shifts automatically
+      try {
+        await checkAndAutoClockOut(staff.id, settings.work_end_time)
+      } catch {}
+
       let cachedRecords: Record<string, any> = {}
       try {
         const rawCache = localStorage.getItem(`hris_self_attendance_${staff.id}`)
@@ -774,6 +790,41 @@ export default function AttendanceSelf() {
     fetchAttendance()
   }, [staff, selectedMonth, selectedYear, customHolidays])
 
+  const handleOpenAdjustmentModal = (day: ExtendedDayAttendance) => {
+    setAdjustDay(day)
+    setAdjustDepartureTime(day.clockOutTime ? day.clockOutTime.slice(0, 5) : (settings.work_end_time || '17:00'))
+    setAdjustReason(day.adjustmentReason || '')
+    setShowAdjustModal(true)
+  }
+
+  const handleSubmitAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!staff || !adjustDay) return
+
+    setAdjustLoading(true)
+    setError('')
+    try {
+      const ok = await submitDepartureAdjustment(
+        staff.id,
+        staff.full_name,
+        adjustDay.date,
+        adjustDepartureTime,
+        adjustReason.trim() || 'Adjusted departure time'
+      )
+      if (ok) {
+        setSuccessMsg(`✓ Departure time for ${adjustDay.date} updated to ${formatTime12Hour(adjustDepartureTime)}`)
+        setShowAdjustModal(false)
+        await fetchAttendance()
+      } else {
+        setError('Failed to submit departure adjustment.')
+      }
+    } catch {
+      setError('An error occurred while saving adjustment.')
+    } finally {
+      setAdjustLoading(false)
+    }
+  }
+
   if (staffLoading || loading) {
     return (
       <div className="p-6 flex items-center justify-center min-h-[60vh]">
@@ -796,6 +847,13 @@ export default function AttendanceSelf() {
   const isCurrentMonth = selectedMonth === new Date().getMonth() && selectedYear === new Date().getFullYear()
   const hasClockedInToday = isCurrentMonth && todayRecord && todayRecord.status === 'present' && !!todayRecord.clockInTime
   const hasClockedOutToday = hasClockedInToday && !!todayRecord?.clockOutTime
+
+  // Detect any past unclosed shifts or auto-clockout days
+  const unclosedOrAutoDays = days.filter(d => 
+    (d.status === 'present' && !d.clockOutTime && d.date < todayStr) || 
+    d.autoClockedOut
+  )
+  const recentUnclosedDay = unclosedOrAutoDays[unclosedOrAutoDays.length - 1]
 
   // Today's site visits
   const todayVisits = todayRecord?.siteVisits || []
@@ -828,6 +886,40 @@ export default function AttendanceSelf() {
           </button>
         </div>
       </div>
+
+      {/* ── Auto Clock-Out / Forgotten Clock-Out Notice Card ── */}
+      {recentUnclosedDay && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </div>
+            <div>
+              <div className="font-bold text-amber-950 text-sm flex items-center gap-2">
+                <span>Forgotten Clock-Out on {new Date(recentUnclosedDay.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">
+                  {recentUnclosedDay.autoClockedOut ? 'Auto Closed (5:00 PM)' : 'Pending Departure'}
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 mt-0.5">
+                {recentUnclosedDay.autoClockedOut 
+                  ? `Your shift was automatically closed at standard official close (${recentUnclosedDay.clockOutTime ? formatTime12Hour(recentUnclosedDay.clockOutTime) : '5:00 PM'}). If you left earlier or stayed late, you can adjust your departure.`
+                  : `You did not clock out on this day before leaving. Would you like to record your actual departure time?`}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleOpenAdjustmentModal(recentUnclosedDay)}
+            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-colors flex items-center gap-1.5 whitespace-nowrap self-start sm:self-auto"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <span>Adjust Departure Time</span>
+          </button>
+        </div>
+      )}
 
       {/* ── Real-Time Clock In / Out Hero Widget ── */}
       {isCurrentMonth && (
@@ -1238,6 +1330,86 @@ export default function AttendanceSelf() {
         </div>
       )}
 
+      {/* ── Departure Adjustment Modal (Forgot to Clock Out) ── */}
+      {showAdjustModal && adjustDay && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 anim-fade-in" onClick={() => setShowAdjustModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 text-slate-800" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Adjust Departure Time</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Record your exact departure for {new Date(adjustDay.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                </p>
+              </div>
+              <button onClick={() => setShowAdjustModal(false)} className="text-slate-400 hover:text-slate-600">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitAdjustment} className="space-y-4">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1">
+                <div className="flex justify-between text-slate-600">
+                  <span>Shift Date:</span>
+                  <span className="font-semibold text-slate-800">{adjustDay.date}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Clock In Time:</span>
+                  <span className="font-semibold text-slate-800">{adjustDay.clockInTime ? formatTime12Hour(adjustDay.clockInTime) : '—'}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Current Recorded Departure:</span>
+                  <span className="font-semibold text-amber-700">{adjustDay.clockOutTime ? formatTime12Hour(adjustDay.clockOutTime) : 'Not Clocked Out'}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+                  Actual Departure Time (24h) *
+                </label>
+                <input
+                  type="time"
+                  required
+                  value={adjustDepartureTime}
+                  onChange={e => setAdjustDepartureTime(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-blue-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">
+                  Reason for Adjustment / Note *
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  placeholder="e.g. Forgot to clock out before leaving, stayed late finishing reports..."
+                  value={adjustReason}
+                  onChange={e => setAdjustReason(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={adjustLoading}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold transition-colors shadow-xs"
+                >
+                  {adjustLoading ? 'Saving...' : 'Save & Update Departure'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ── Monthly Summary Stats Cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
@@ -1325,7 +1497,18 @@ export default function AttendanceSelf() {
                     {day.clockInTime && (
                       <div className="text-[9px] text-slate-500 text-center font-mono">
                         {formatTime12Hour(day.clockInTime)}
+                        {day.clockOutTime && ` – ${formatTime12Hour(day.clockOutTime)}`}
                       </div>
+                    )}
+                    {day.autoClockedOut && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAdjustmentModal(day)}
+                        className="text-[9px] w-full text-amber-800 bg-amber-100/90 hover:bg-amber-200 rounded px-1 py-0.2 border border-amber-300 text-center font-bold transition-colors cursor-pointer"
+                        title="Auto-closed at 5:00 PM. Click to adjust departure time."
+                      >
+                        ⚡ Auto 5PM ✎
+                      </button>
                     )}
                   </div>
                 )}

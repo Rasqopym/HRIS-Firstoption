@@ -105,7 +105,7 @@ export function getStaffConfirmationStatus(dateEmployedStr?: string): Confirmati
 }
 
 // Routine reminders check (clock-in, clock-out, pending tasks, and staff 3-month confirmation)
-export function runRoutineReminders(role: string, customHolidays: any[] = []) {
+export function runRoutineReminders(role: string, customHolidays: any[] = [], currentStaffId?: string | null) {
   const now = new Date()
   const hours = now.getHours()
   const minutes = now.getMinutes()
@@ -116,9 +116,33 @@ export function runRoutineReminders(role: string, customHolidays: any[] = []) {
   const getReminded = (key: string) => localStorage.getItem(`hris_remind_${key}_${todayStr}`)
   const setReminded = (key: string) => localStorage.setItem(`hris_remind_${key}_${todayStr}`, 'true')
 
+  // Check live attendance status from localStorage for the current staff member
+  let isClockedInToday = false
+  let isClockedOutToday = false
+  if (currentStaffId) {
+    const keys = [
+      `hris_self_attendance_${currentStaffId}`,
+      `hris_attendance_daily_${currentStaffId}`
+    ]
+    for (const k of keys) {
+      try {
+        const raw = localStorage.getItem(k)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed[todayStr]) {
+            const rec = parsed[todayStr]
+            if (rec.clock_in_time || rec.clockInTime) isClockedInToday = true
+            if (rec.clock_out_time || rec.clockOutTime) isClockedOutToday = true
+          }
+        }
+      } catch {}
+    }
+  }
+
   // 1. Staff Morning Clock-In Reminder (8:00 AM - 9:30 AM on weekdays)
-  if (role === 'staff' && dow !== 0 && dow !== 6) {
-    if ((hours === 8 || (hours === 9 && minutes <= 30)) && !getReminded('morning_clockin')) {
+  // Only remind if they haven't already clocked in today
+  if (dow !== 0 && dow !== 6) {
+    if (!isClockedInToday && (hours === 8 || (hours === 9 && minutes <= 30)) && !getReminded('morning_clockin')) {
       sendLocalNotification({
         title: 'Good Morning! ⏰ Shift Clock-In',
         body: 'Remember to clock in for your workday shift and verify your workplace location.',
@@ -128,15 +152,40 @@ export function runRoutineReminders(role: string, customHolidays: any[] = []) {
       setReminded('morning_clockin')
     }
 
-    // Evening Clock-Out Reminder (4:45 PM - 6:30 PM)
-    if (((hours === 16 && minutes >= 45) || hours === 17 || (hours === 18 && minutes <= 30)) && !getReminded('evening_clockout')) {
-      sendLocalNotification({
-        title: 'Workday Wrap-Up: Clock-Out Reminder',
-        body: 'Please make sure to clock out and log any field site visits or overtime before leaving.',
-        tag: 'evening-clockout',
-        url: '/#st-attendance'
-      })
-      setReminded('evening_clockout')
+    // 2. Evening Clock-Out Reminders (Only for staff who clocked in but haven't clocked out)
+    if (isClockedInToday && !isClockedOutToday) {
+      // A. Shift End Alert (4:55 PM - 5:25 PM)
+      if (((hours === 16 && minutes >= 55) || (hours === 17 && minutes <= 25)) && !getReminded('closing_clockout')) {
+        sendLocalNotification({
+          title: 'Workday Closing: Clock-Out Reminder ⏰',
+          body: 'Ready to head out? Remember to clock out on your dashboard before leaving the office.',
+          tag: 'closing-clockout',
+          url: '/#st-attendance'
+        })
+        setReminded('closing_clockout')
+      }
+
+      // B. Second Nudge if still clocked in after hours (6:00 PM - 6:45 PM)
+      if ((hours === 18 && minutes >= 0 && minutes <= 45) && !getReminded('evening_still_in')) {
+        sendLocalNotification({
+          title: 'Still Clocked In? 🕒',
+          body: 'You are currently still clocked in for today. If you have finished work, please remember to clock out!',
+          tag: 'evening-still-in',
+          url: '/#st-attendance'
+        })
+        setReminded('evening_still_in')
+      }
+
+      // C. Late Evening Final Notice before auto-clockout cutoff (8:00 PM - 8:45 PM)
+      if ((hours === 20 && minutes >= 0 && minutes <= 45) && !getReminded('night_pending_clockout')) {
+        sendLocalNotification({
+          title: 'Unclosed Shift Notice ⚠️',
+          body: 'You have not clocked out today. Open shifts will be automatically closed at official close (5:00 PM).',
+          tag: 'night-pending-clockout',
+          url: '/#st-attendance'
+        })
+        setReminded('night_pending_clockout')
+      }
     }
   }
 

@@ -5,6 +5,7 @@ import type { DayAttendance, AttendanceStatus, SiteVisit } from '../../types'
 import { formatTime12Hour, formatDistance, calculateVisitDuration } from '../../lib/geofence'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
+import { batchClockOutPendingStaff } from '../../lib/attendanceAutoClockout'
 
 const STATUS_COLORS: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-500',
@@ -53,7 +54,7 @@ interface StaffMember {
 }
 
 type ViewMode = 'today' | 'calendar'
-type StatusFilterType = 'all' | 'present' | 'on_time' | 'late' | 'field' | 'absent' | 'on_leave'
+type StatusFilterType = 'all' | 'present' | 'on_time' | 'late' | 'field' | 'absent' | 'on_leave' | 'missing_clockout'
 
 function buildMonth(year: number, month: number, existingRecords: Record<string, any>, customHolidays: PublicHoliday[] = []): ExtendedDayAttendance[] {
   const days: ExtendedDayAttendance[] = []
@@ -176,7 +177,7 @@ export default function AttendanceDaily() {
   useEffect(() => {
     const filterParam = sessionStorage.getItem('hris_attendance_filter')
     if (filterParam) {
-      if (['all', 'present', 'on_time', 'late', 'field', 'absent', 'on_leave'].includes(filterParam)) {
+      if (['all', 'present', 'on_time', 'late', 'field', 'absent', 'on_leave', 'missing_clockout'].includes(filterParam)) {
         setStatusFilter(filterParam as StatusFilterType)
       }
       sessionStorage.removeItem('hris_attendance_filter')
@@ -623,10 +624,14 @@ export default function AttendanceDaily() {
     let field = 0
     let absent = 0
     let onLeave = 0
+    let missingClockOut = 0
 
     rosterItems.forEach(item => {
       if (item.computedStatus === 'present') {
         present++
+        if (!item.clockOutTime) {
+          missingClockOut++
+        }
         if (item.isLate) {
           late++
           lateMinutesTotal += (item.lateMinutes || 0)
@@ -654,9 +659,48 @@ export default function AttendanceDaily() {
       field,
       absent,
       onLeave,
+      missingClockOut,
       presenceRate,
     }
   }, [rosterItems])
+
+  // Quick & Batch Auto Clock-Out Handlers for Forgotten Clock-Outs
+  const [batchClockOutLoading, setBatchClockOutLoading] = useState(false)
+  const [batchNotice, setBatchNotice] = useState<string>('')
+
+  const handleQuickClockOut = async (staffId: string) => {
+    setBatchClockOutLoading(true)
+    try {
+      await batchClockOutPendingStaff(targetDate, [staffId], '17:00', 'HR Manager')
+      await fetchTodayData(targetDate)
+    } finally {
+      setBatchClockOutLoading(false)
+    }
+  }
+
+  const handleBatchAutoClockOutAll = async () => {
+    const pendingStaffIds = rosterItems
+      .filter(item => item.computedStatus === 'present' && !item.clockOutTime)
+      .map(item => item.staff.id)
+
+    if (pendingStaffIds.length === 0) {
+      alert('All present staff members already have their clock-out recorded for this date.')
+      return
+    }
+
+    const confirmMsg = `Are you sure you want to clock out ${pendingStaffIds.length} staff member(s) who haven't clocked out? Their departure time will be set to official close (5:00 PM).`
+    if (!window.confirm(confirmMsg)) return
+
+    setBatchClockOutLoading(true)
+    try {
+      const count = await batchClockOutPendingStaff(targetDate, pendingStaffIds, '17:00', 'HR Manager')
+      await fetchTodayData(targetDate)
+      setBatchNotice(`✓ Successfully recorded 5:00 PM clock-out for ${count} staff member(s).`)
+      setTimeout(() => setBatchNotice(''), 4000)
+    } finally {
+      setBatchClockOutLoading(false)
+    }
+  }
 
   // Unique Department List
   const departmentList = useMemo(() => {
@@ -684,6 +728,8 @@ export default function AttendanceDaily() {
         if (item.computedStatus !== 'absent' && item.computedStatus !== 'unmarked') return false
       } else if (statusFilter === 'on_leave') {
         if (item.computedStatus !== 'on_leave') return false
+      } else if (statusFilter === 'missing_clockout') {
+        if (item.computedStatus !== 'present' || item.clockOutTime) return false
       }
 
       // 2. Department Filter
@@ -926,7 +972,7 @@ export default function AttendanceDaily() {
           </div>
 
           {/* ── Real-Time KPI Metric Cards ── */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             {/* Total Staff */}
             <div
               onClick={() => setStatusFilter('all')}
@@ -1004,6 +1050,31 @@ export default function AttendanceDaily() {
               </div>
             </div>
 
+            {/* Missing Clock-Out (Actionable!) */}
+            <div
+              onClick={() => setStatusFilter(statusFilter === 'missing_clockout' ? 'all' : 'missing_clockout')}
+              className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                statusFilter === 'missing_clockout'
+                  ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-500/30'
+                  : rosterStats.missingClockOut > 0
+                  ? 'bg-amber-50/90 text-amber-950 border-amber-300 hover:bg-amber-100 shadow-2xs'
+                  : 'bg-white text-slate-800 border-slate-200/80 hover:bg-slate-50 shadow-2xs'
+              }`}
+            >
+              <div className={`text-[11px] font-bold uppercase tracking-wider flex items-center justify-between ${statusFilter === 'missing_clockout' ? 'text-amber-100' : rosterStats.missingClockOut > 0 ? 'text-amber-800' : 'text-slate-500'}`}>
+                <span>Missing Clock-Out</span>
+                {rosterStats.missingClockOut > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                )}
+              </div>
+              <div className={`text-xl sm:text-2xl font-bold font-mono-data mt-1 ${statusFilter === 'missing_clockout' ? 'text-white' : rosterStats.missingClockOut > 0 ? 'text-amber-700' : 'text-slate-600'}`}>
+                {rosterStats.missingClockOut}
+              </div>
+              <div className={`text-[10px] mt-0.5 ${statusFilter === 'missing_clockout' ? 'text-amber-100' : rosterStats.missingClockOut > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'}`}>
+                {rosterStats.missingClockOut > 0 ? 'Forgot clock-out' : 'All closed'}
+              </div>
+            </div>
+
             {/* Field & Site Visits */}
             <div
               onClick={() => setStatusFilter('field')}
@@ -1065,6 +1136,53 @@ export default function AttendanceDaily() {
             </div>
           </div>
 
+          {/* Missing Clock-Out Resolution Banner & Bulk Action */}
+          {rosterStats.missingClockOut > 0 && (
+            <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-amber-950 flex items-center gap-2">
+                    <span>{rosterStats.missingClockOut} Staff Member{rosterStats.missingClockOut > 1 ? 's' : ''} Still Clocked In (Forgot to Clock Out)</span>
+                    <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">Pending Departure</span>
+                  </h4>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Close uncompleted shifts now at standard official close (5:00 PM) to ensure precise payroll and work-hour calculations.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter(statusFilter === 'missing_clockout' ? 'all' : 'missing_clockout')}
+                  className="px-3 py-1.5 rounded-xl border border-amber-300 bg-white hover:bg-amber-50 text-amber-900 text-xs font-semibold transition-colors shadow-2xs"
+                >
+                  {statusFilter === 'missing_clockout' ? 'Show All Staff' : 'Filter These Staff'}
+                </button>
+                <button
+                  type="button"
+                  disabled={batchClockOutLoading}
+                  onClick={handleBatchAutoClockOutAll}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <span>{batchClockOutLoading ? 'Closing...' : `Auto Clock-Out All (${rosterStats.missingClockOut}) at 5:00 PM`}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {batchNotice && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-medium">
+              {batchNotice}
+            </div>
+          )}
+
           {/* ── Filter Bar: Status Tabs, Department Dropdown & Search ── */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -1113,6 +1231,20 @@ export default function AttendanceDaily() {
                   }`}
                 >
                   Late ({rosterStats.late})
+                </button>
+
+                <button
+                  onClick={() => setStatusFilter('missing_clockout')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
+                    statusFilter === 'missing_clockout'
+                      ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                      : rosterStats.missingClockOut > 0
+                      ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>Missing Clock-Out ({rosterStats.missingClockOut})</span>
+                  {rosterStats.missingClockOut > 0 && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
                 </button>
 
                 <button
@@ -1335,14 +1467,38 @@ export default function AttendanceDaily() {
                           {/* Clock Out */}
                           <td className="py-3 px-4 font-mono">
                             {item.clockOutTime ? (
-                              <div className="font-semibold text-slate-800 flex items-center gap-1">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
-                                <span>{formatTime12Hour(item.clockOutTime)}</span>
+                              <div className="flex flex-col gap-0.5">
+                                <div className="font-semibold text-slate-800 flex items-center gap-1">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                                  <span>{formatTime12Hour(item.clockOutTime)}</span>
+                                </div>
+                                {item.record?.auto_clocked_out && (
+                                  <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 w-fit">
+                                    Auto Close (5:00 PM)
+                                  </span>
+                                )}
+                                {item.record?.adjustment_requested && (
+                                  <span className="text-[9px] font-bold text-purple-700 bg-purple-50 px-1 py-0.2 rounded border border-purple-200 w-fit">
+                                    Adjusted
+                                  </span>
+                                )}
                               </div>
                             ) : isPresent ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                Active Shift
-                              </span>
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center gap-1 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                  Missing Clock-Out
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickClockOut(item.staff.id)}
+                                  disabled={batchClockOutLoading}
+                                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold text-[10px] transition-colors shadow-2xs whitespace-nowrap"
+                                  title="Close this shift at official close (5:00 PM)"
+                                >
+                                  Close 5PM
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-slate-400">—</span>
                             )}

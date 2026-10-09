@@ -153,6 +153,11 @@ export interface DayAttendance {
   overtimeHours: number
   onSite: boolean
   overtimeApproval: 'none' | 'pending' | 'approved' | 'rejected'
+  autoClockedOut?: boolean
+  adjustmentRequested?: boolean
+  adjustmentStatus?: 'none' | 'pending' | 'approved' | 'rejected'
+  adjustmentReason?: string
+  adjustmentRequestedDeparture?: string
 }
 
 export interface MonthlyAttendanceSummary {
