@@ -538,6 +538,55 @@ export default function TaskBoard({
     setShowCreateModal(false)
   }
 
+  const handleAiPolishNewTask = async () => {
+    if (!newTaskTitle.trim() || aiGenerating) return
+    setAiGenerating(true)
+    try {
+      const res = await polishTaskDetails({
+        title: newTaskTitle.trim(),
+        description: newTaskDesc.trim() || undefined,
+      })
+      if (res.polishedTitle) setNewTaskTitle(res.polishedTitle)
+      if (res.polishedDescription) setNewTaskDesc(res.polishedDescription)
+      if (res.acceptanceCriteria && res.acceptanceCriteria.length > 0) {
+        setNewTaskChecklist(prev => Array.from(new Set([...prev, ...res.acceptanceCriteria])))
+      }
+    } catch (err: any) {
+      console.warn('AI Polish failed:', err)
+      alert(err?.message || 'Could not polish task with AI.')
+    } finally {
+      setAiGenerating(false)
+    }
+  }
+
+  const handleAiBreakdownNewTask = async () => {
+    if (!newTaskTitle.trim() || aiGenerating) return
+    setAiGenerating(true)
+    try {
+      const res = await generateTaskBreakdown({
+        title: newTaskTitle.trim(),
+        description: newTaskDesc.trim() || undefined,
+        squadContext: teamName || workspaceName || 'Workspace',
+      })
+      if (res.refinedTitle) setNewTaskTitle(res.refinedTitle)
+      if (res.refinedDescription) setNewTaskDesc(res.refinedDescription)
+      if (res.suggestedEstimatedHours) setNewTaskHours(String(res.suggestedEstimatedHours))
+      if (res.suggestedPriority) setNewTaskPriority(res.suggestedPriority)
+      if (res.suggestedKpiCategory) setNewTaskKpi(res.suggestedKpiCategory)
+      const subtaskItems = (res.subtasks || []).map(st => st.title).filter(Boolean)
+      const criteriaItems = res.acceptanceCriteria || []
+      const combined = Array.from(new Set([...newTaskChecklist, ...subtaskItems, ...criteriaItems]))
+      if (combined.length > 0) {
+        setNewTaskChecklist(combined)
+      }
+    } catch (err: any) {
+      console.warn('AI Breakdown failed:', err)
+      alert(err?.message || 'Could not generate subtasks with AI.')
+    } finally {
+      setAiGenerating(false)
+    }
+  }
+
   const toggleChecklistItem = async (task: WorkspaceTask, checkId: string) => {
     const updatedChecklist = task.checklist.map(item => {
       if (item.id === checkId) {

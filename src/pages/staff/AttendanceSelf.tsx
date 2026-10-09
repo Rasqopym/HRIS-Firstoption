@@ -8,8 +8,10 @@ import {
   evaluateLateness,
   formatTime12Hour,
   formatDistance,
+  calculateVisitDuration,
   type OfficeLocation,
 } from '../../lib/geofence'
+import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { checkAndAutoClockOut, submitDepartureAdjustment } from '../../lib/attendanceAutoClockout'
 
 const STATUS_TEXT: Record<AttendanceStatus, string> = {
