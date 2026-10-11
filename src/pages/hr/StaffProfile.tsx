@@ -957,7 +957,7 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
                 >
                   Generate ID
                 </button>
-                {(currentUserRole === 'superadmin' || currentUserRole === 'hr') && (
+                {currentUserRole === 'superadmin' && (
                   <button
                     onClick={() => {
                       setDeleteError('')

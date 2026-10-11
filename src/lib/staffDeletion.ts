@@ -24,6 +24,20 @@ export async function deleteStaffCompletely({
   email?: string | null
   actorName?: string
 }): Promise<DeleteStaffResult> {
+  // Check permission: only Super Admin can delete staff
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return { success: false, deletedStaffCount: 0, deletedProfile: false, error: 'Unauthorized: No active session.' }
+    }
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    if (profile?.role !== 'super_admin') {
+      return { success: false, deletedStaffCount: 0, deletedProfile: false, error: 'Permission denied: Only Super Admin can delete staff.' }
+    }
+  } catch (authErr: any) {
+    console.warn('Auth verification note:', authErr)
+  }
+
   const cleanEmail = email && email !== '—' ? email.trim().toLowerCase() : null
   const matchedStaffIds = new Set<string>()
   if (staffId) matchedStaffIds.add(staffId)
@@ -89,15 +103,26 @@ export async function deleteStaffCompletely({
 
   // 3. Delete records from public.staff
   let deletedStaffCount = 0
+  const staffDeleteErrors: string[] = []
+
   for (const sId of sIds) {
     const { error: delErr } = await supabase.from('staff').delete().eq('id', sId)
-    if (!delErr) deletedStaffCount++
+    if (delErr) {
+      console.error(`Error deleting staff record ${sId}:`, delErr)
+      staffDeleteErrors.push(delErr.message)
+    } else {
+      deletedStaffCount++
+    }
   }
+
   if (targetProfileId) {
-    await supabase.from('staff').delete().eq('profile_id', targetProfileId)
+    const { error: pStaffErr } = await supabase.from('staff').delete().eq('profile_id', targetProfileId)
+    if (pStaffErr) staffDeleteErrors.push(pStaffErr.message)
   }
+
   if (cleanEmail) {
-    await supabase.from('staff').delete().ilike('email', cleanEmail)
+    const { error: eStaffErr } = await supabase.from('staff').delete().ilike('email', cleanEmail)
+    if (eStaffErr) staffDeleteErrors.push(eStaffErr.message)
   }
 
   // 4. Cascade cleanup for Profile / Auth User
@@ -107,12 +132,19 @@ export async function deleteStaffCompletely({
       await supabase.from('audit_log').update({ actor_id: null }).eq('actor_id', targetProfileId)
     } catch {}
 
-    // Invoke backend Edge Function or RPC to delete Auth User + Profile
+    // Invoke backend Edge Function to delete Auth User + Profile with Service Role Key
     try {
-      await supabase.functions.invoke('delete-user', {
+      const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('delete-user', {
         body: { user_id: targetProfileId, staff_id: staffId || sIds[0] || null }
       })
-    } catch {}
+      if (edgeErr) {
+        console.warn('delete-user edge function warning:', edgeErr)
+      } else if (edgeData?.success) {
+        deletedProfile = true
+      }
+    } catch (eErr) {
+      console.warn('Edge function invoke exception:', eErr)
+    }
 
     const { error: pDelErr } = await supabase.from('profiles').delete().eq('id', targetProfileId)
     if (!pDelErr) deletedProfile = true
@@ -136,6 +168,15 @@ export async function deleteStaffCompletely({
       severity: 'critical' as any,
     })
   } catch {}
+
+  if (staffDeleteErrors.length > 0 && deletedStaffCount === 0 && !deletedProfile) {
+    return {
+      success: false,
+      deletedStaffCount,
+      deletedProfile,
+      error: `Failed to delete employee: ${staffDeleteErrors[0]}`,
+    }
+  }
 
   return {
     success: true,

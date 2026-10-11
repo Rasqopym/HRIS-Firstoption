@@ -384,7 +384,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
                         >
                           View Profile
                         </button>
-                        {(currentUserRole === 'superadmin' || currentUserRole === 'hr') && (
+                        {currentUserRole === 'superadmin' && (
                           <button
                             onClick={() => {
                               setDeleteError('')
@@ -431,7 +431,7 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
               onClick={() => handleView(s)}
               className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer card-hover relative group"
             >
-              {(currentUserRole === 'superadmin' || currentUserRole === 'hr') && (
+              {currentUserRole === 'superadmin' && (
                 <button
                   onClick={e => {
                     e.stopPropagation()
