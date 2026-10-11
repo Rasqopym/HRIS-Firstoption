@@ -186,13 +186,14 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
     }
 
     if (!profile) {
-      setError('Logged in, but no profile found. Contact Super Admin.')
+      setError('This account does not have an active profile or has been removed. Access denied.')
+      await supabase.auth.signOut()
       setLoading(false)
       return
     }
 
     if (profile.status !== 'active') {
-      setError('This account has been deactivated. Contact Super Admin.')
+      setError('This account has been deactivated or removed. Contact Super Admin.')
       await supabase.auth.signOut()
       setLoading(false)
       return
@@ -211,6 +212,7 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
       onLogin(mappedRole)
     } catch (err) {
       setError(`Unrecognized role: ${profile.role}. Contact Super Admin.`)
+      await supabase.auth.signOut()
       setLoading(false)
       return
     }
