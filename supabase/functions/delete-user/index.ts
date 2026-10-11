@@ -50,11 +50,35 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    if (staff_id) {
-      await supabaseAdmin.from('staff').delete().eq('id', staff_id)
+    // Find all matching staff IDs
+    const staffIdsToDelete = new Set<string>()
+    if (staff_id) staffIdsToDelete.add(staff_id)
+    if (user_id) {
+      const { data: matchedByProf } = await supabaseAdmin.from('staff').select('id').eq('profile_id', user_id)
+      matchedByProf?.forEach((s: any) => staffIdsToDelete.add(s.id))
     }
+
+    // Cascade delete on foreign keys to prevent constraint errors
+    for (const sId of Array.from(staffIdsToDelete)) {
+      await supabaseAdmin.from('attendance_records').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('daily_standups').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('task_activity_logs').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('team_members').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('workspace_members').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('chat_messages').delete().eq('sender_id', sId)
+      await supabaseAdmin.from('leave_requests').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('appraisals').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('appraisals').update({ evaluator_id: null }).eq('evaluator_id', sId)
+      await supabaseAdmin.from('staff_documents').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('payslips').delete().eq('staff_id', sId)
+      await supabaseAdmin.from('tasks').update({ assignee_id: null }).eq('assignee_id', sId)
+      await supabaseAdmin.from('tasks').update({ creator_id: null }).eq('creator_id', sId)
+      await supabaseAdmin.from('staff').delete().eq('id', sId)
+    }
+
     if (user_id) {
       await supabaseAdmin.from('staff').delete().eq('profile_id', user_id)
+      await supabaseAdmin.from('audit_log').update({ actor_id: null }).eq('actor_id', user_id)
       await supabaseAdmin.from('profiles').delete().eq('id', user_id)
       try {
         await supabaseAdmin.auth.admin.deleteUser(user_id)

@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { dbRoleToApp, appRoleToDb } from '../../lib/roleMap'
 import { logAction } from '../../lib/auditLog'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
+import { deleteStaffCompletely } from '../../lib/staffDeletion'
 
 interface DepartmentItem {
   id: string
@@ -405,60 +406,11 @@ export default function UserManagement() {
       if (action === 'delete') {
         for (const id of ids) {
           const userToDelete = users.find(u => u.id === id)
-          let dbDeleted = false
-
-          // 1. Attempt PostgreSQL RPC function admin_delete_user
-          try {
-            const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_delete_user', {
-              p_user_id: id,
-              p_staff_id: userToDelete?.staffTableId || null,
-            })
-            if (!rpcErr && rpcData?.success) {
-              dbDeleted = true
-            }
-          } catch (rpcCatch) {
-            console.warn('RPC delete notice:', rpcCatch)
-          }
-
-          // 2. Attempt Edge Function delete-user
-          if (!dbDeleted) {
-            try {
-              const { data: fnData, error: fnErr } = await supabase.functions.invoke('delete-user', {
-                body: { user_id: id, staff_id: userToDelete?.staffTableId }
-              })
-              if (!fnErr && fnData?.success) {
-                dbDeleted = true
-              }
-            } catch (fnCatch) {
-              console.warn('Edge function delete-user notice:', fnCatch)
-            }
-          }
-
-          // 3. Fallback direct table deletes
-          try {
-            await supabase.from('audit_log').update({ actor_id: null }).eq('actor_id', id)
-          } catch (e) {}
-
-          if (userToDelete?.staffTableId) {
-            await supabase.from('staff').delete().eq('id', userToDelete.staffTableId)
-          }
-          await supabase.from('staff').delete().eq('profile_id', id)
-          if (userToDelete?.email && userToDelete.email !== '—') {
-            await supabase.from('staff').delete().eq('email', userToDelete.email)
-          }
-
-          const { error: profDelError } = await supabase.from('profiles').delete().eq('id', id)
-          if (!profDelError) {
-            dbDeleted = true
-          }
-
-          // 4. Log audit trail
-          await logAction({
-            action: 'DELETE',
-            entity: 'User',
-            entityId: id,
-            details: `Permanently deleted user ${userToDelete?.name || id} (${userToDelete?.email || ''})`,
-            severity: 'critical' as any,
+          await deleteStaffCompletely({
+            staffId: userToDelete?.staffTableId || null,
+            profileId: id,
+            email: userToDelete?.email || null,
+            actorName: 'Super Admin',
           })
         }
 

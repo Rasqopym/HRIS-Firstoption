@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
-import type { StaffMember, StaffStatus, Page } from '../../types'
+import type { StaffMember, StaffStatus, Page, Role } from '../../types'
+import { dbRoleToApp } from '../../lib/roleMap'
 import { getStaffConfirmationStatus } from '../../lib/pushNotification'
+import { deleteStaffCompletely } from '../../lib/staffDeletion'
 
 interface Props {
   onNavigate: (p: Page) => void
@@ -23,10 +25,31 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
   const [filterStatus, setFilterStatus] = useState<StaffStatus | 'all'>('all')
   const [filterConfirmation, setFilterConfirmation] = useState<'all' | 'confirmed' | 'pending' | 'due'>('all')
   const [view, setView] = useState<'table' | 'grid'>('table')
+  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null)
+  const [staffToDelete, setStaffToDelete] = useState<StaffMember | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // 0. Fetch current user role
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', user.id)
+              .maybeSingle()
+            if (profile?.role) {
+              setCurrentUserRole(dbRoleToApp(profile.role))
+            }
+          }
+        } catch (roleErr) {
+          console.warn('Could not determine current user role:', roleErr)
+        }
+
         // 1. Fetch departments
         const { data: deptData } = await supabase
           .from('departments')
@@ -100,8 +123,11 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
           return {
             id: s.id,
             staffId: s.staff_code || `FO-${String(s.id).slice(0, 4).toUpperCase()}`,
+            staffTableId: s.id,
+            profile_id: s.profile_id || undefined,
             name: s.full_name,
             email: s.email,
+            role: 'staff',
             department: s.departments?.name || 'General Operations',
             jobTitle: roleTitle,
             status: (s.status || 'active') as StaffStatus,
@@ -145,6 +171,33 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
   const handleView = (s: StaffMember) => {
     onSelectStaff(s.id)
     onNavigate('hr-profile')
+  }
+
+  const handleDeleteStaff = async () => {
+    if (!staffToDelete) return
+    setIsDeleting(true)
+    setDeleteError('')
+
+    try {
+      const res = await deleteStaffCompletely({
+        staffId: staffToDelete.id,
+        profileId: staffToDelete.profile_id,
+        email: staffToDelete.email,
+        staffName: staffToDelete.name,
+      })
+
+      if (!res.success) {
+        throw new Error(res.error || 'Failed to delete staff record')
+      }
+
+      setStaff(prev => prev.filter(item => item.id !== staffToDelete.id && item.email !== staffToDelete.email))
+      setStaffToDelete(null)
+    } catch (err: any) {
+      console.error('Error deleting staff:', err)
+      setDeleteError(err?.message || 'Failed to delete staff')
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   if (loading) {
@@ -324,12 +377,26 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
                       <div>{s.employmentDate || 'N/A'}</div>
                     </td>
                     <td className="py-3.5 px-4" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleView(s)}
-                        className="px-2.5 py-1 text-xs font-medium rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
-                      >
-                        View Profile
-                      </button>
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <button
+                          onClick={() => handleView(s)}
+                          className="px-2.5 py-1 text-xs font-medium rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                        >
+                          View Profile
+                        </button>
+                        {(currentUserRole === 'superadmin' || currentUserRole === 'hr') && (
+                          <button
+                            onClick={() => {
+                              setDeleteError('')
+                              setStaffToDelete(s)
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title={`Delete / Offboard ${s.name}`}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -362,8 +429,21 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
             <div
               key={s.id}
               onClick={() => handleView(s)}
-              className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer card-hover"
+              className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer card-hover relative group"
             >
+              {(currentUserRole === 'superadmin' || currentUserRole === 'hr') && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation()
+                    setDeleteError('')
+                    setStaffToDelete(s)
+                  }}
+                  className="absolute top-3 right-3 p-1.5 rounded-lg text-slate-300 group-hover:text-slate-400 hover:!text-red-600 hover:bg-red-50 transition-colors"
+                  title={`Delete / Offboard ${s.name}`}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                </button>
+              )}
               <div className="flex flex-col items-center text-center">
                 <img src={s.photo} alt={s.name} className="w-16 h-16 rounded-full object-cover ring-4 ring-slate-100 mb-3" />
                 <div className="font-semibold text-slate-800 text-sm">{s.name}</div>
@@ -403,6 +483,69 @@ export default function StaffDirectory({ onNavigate, onSelectStaff }: Props) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Delete / Offboard Staff Confirmation Modal */}
+      {staffToDelete && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 anim-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </div>
+            
+            <h3 className="font-display font-semibold text-slate-800 text-lg mb-1">
+              Delete Staff Member?
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-500 mb-4">
+              Are you sure you want to permanently delete <strong className="text-slate-800">{staffToDelete.name}</strong> ({staffToDelete.email})?
+            </p>
+
+            <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3 text-left mb-5">
+              <p className="text-xs text-amber-800 leading-relaxed font-medium">
+                ⚠️ This will permanently remove their employee record, system login account, and clean up linked attendance and task associations across the HRIS.
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl p-3 mb-4 text-left">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setStaffToDelete(null)
+                  setDeleteError('')
+                }}
+                className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteStaff}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Yes, Delete Staff</span>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
