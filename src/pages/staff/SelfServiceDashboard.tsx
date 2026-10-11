@@ -203,7 +203,7 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
           const { data: attDb } = await supabase
             .from('attendance_records')
             .select('*')
-            .or(`staff_id.eq.${staff.id},staff_id.eq.${staff.staff_code}`)
+            .eq('staff_id', staff.id)
             .gte('attendance_date', startDateStr)
 
           if (attDb && attDb.length > 0) {
@@ -246,9 +246,9 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
 
         // Construct 14-Day Activity Dataset
         const dailyItems: DailyAttendanceChartItem[] = []
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
         for (let i = 13; i >= 0; i--) {
-          const d = new Date()
-          d.setDate(today.getDate() - i)
+          const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i)
           const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
           const dow = d.getDay()
           const isWeekend = dow === 0 || dow === 6
@@ -299,7 +299,7 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
             status = 'public_holiday'
           } else if (isWeekend) {
             status = 'weekend'
-          } else if (d < today) {
+          } else if (dateStr < todayStr) {
             status = 'absent'
           }
 
@@ -340,9 +340,19 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
           let fieldCount = 0
           let leaveCount = 0
           let otSum = 0
+          let evaluatedWorkingDays = 0
 
           for (let day = 1; day <= maxDay; day++) {
             const dateKey = `${y}-${String(monthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+            const curDate = new Date(y, monthIdx, day)
+            const dow = curDate.getDay()
+            const isWeekend = dow === 0 || dow === 6
+            const isHol = isPublicHoliday(dateKey, customHolidays)
+
+            if (!isWeekend && !isHol) {
+              evaluatedWorkingDays++
+            }
+
             const r = staffRecordsMap[dateKey]
             if (r && r.status === 'present') {
               presentCount++
@@ -352,13 +362,20 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
                 onTimeCount++
               }
               const vCount = Array.isArray(r.site_visits) ? r.site_visits.length : (r.siteVisits?.length || 0)
-              if (r.work_mode === 'field' || vCount > 0) {
+              if (r.work_mode === 'field' || r.workMode === 'field' || vCount > 0) {
                 fieldCount += (vCount > 0 ? vCount : 1)
               }
-              otSum += (r.overtime_hours || r.overtimeHours || 0)
+              const isOtApproved = r.overtime_approval === 'approved' || r.overtimeApproval === 'approved'
+              if (isOtApproved) {
+                otSum += (r.overtime_hours || r.overtimeHours || 0)
+              }
             } else if (r && r.status === 'on_leave') {
               leaveCount++
             }
+          }
+
+          if (evaluatedWorkingDays === 0) {
+            evaluatedWorkingDays = Math.max(1, totalWorkingDays)
           }
 
           // Effective working days excluding approved leave days
