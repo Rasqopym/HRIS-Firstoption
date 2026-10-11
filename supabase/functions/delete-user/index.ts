@@ -67,8 +67,21 @@ Deno.serve(async (req) => {
       await supabaseAdmin.from('workspace_members').delete().eq('staff_id', sId)
       await supabaseAdmin.from('chat_messages').delete().eq('sender_id', sId)
       await supabaseAdmin.from('leave_requests').delete().eq('staff_id', sId)
+
+      // Appraisal tables cleanup
+      await supabaseAdmin.from('appraisal_supervisor_responses').delete().eq('reviewer_id', sId)
+      await supabaseAdmin.from('appraisal_supervisor_responses').delete().eq('employee_id', sId)
+      await supabaseAdmin.from('appraisal_360_responses').delete().eq('reviewer_id', sId)
+      await supabaseAdmin.from('appraisal_360_responses').delete().eq('employee_id', sId)
+      await supabaseAdmin.from('appraisal_kpi_responses').delete().eq('reviewer_id', sId)
+      await supabaseAdmin.from('appraisal_kpi_responses').delete().eq('employee_id', sId)
+      await supabaseAdmin.from('appraisal_qualitative_responses').delete().eq('reviewer_id', sId)
+      await supabaseAdmin.from('appraisal_qualitative_responses').delete().eq('employee_id', sId)
+      await supabaseAdmin.from('appraisal_self_responses').delete().eq('employee_id', sId)
+      await supabaseAdmin.from('appraisal_final_summary').delete().eq('employee_id', sId)
       await supabaseAdmin.from('appraisals').delete().eq('staff_id', sId)
       await supabaseAdmin.from('appraisals').update({ evaluator_id: null }).eq('evaluator_id', sId)
+
       await supabaseAdmin.from('staff_documents').delete().eq('staff_id', sId)
       await supabaseAdmin.from('payslips').delete().eq('staff_id', sId)
       await supabaseAdmin.from('tasks').update({ assignee_id: null }).eq('assignee_id', sId)
