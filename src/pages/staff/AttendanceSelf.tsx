@@ -778,6 +778,19 @@ export default function AttendanceSelf() {
         console.warn('Supabase fetch attendance skipped:', e)
       }
 
+      // Ensure local departure adjustments are never clobbered by stale database responses
+      Object.keys(dbRecords).forEach(dateKey => {
+        const adjustedDeparture = localStorage.getItem(`hris_departure_adjusted_${staff.id}_${dateKey}`)
+        if (adjustedDeparture) {
+          dbRecords[dateKey].clock_out_time = adjustedDeparture
+          dbRecords[dateKey].adjustment_requested = true
+          dbRecords[dateKey].auto_clocked_out = false
+        } else if (cachedRecords[dateKey]?.clock_out_time && !dbRecords[dateKey].clock_out_time) {
+          dbRecords[dateKey].clock_out_time = cachedRecords[dateKey].clock_out_time
+          dbRecords[dateKey].auto_clocked_out = false
+        }
+      })
+
       const mergedRecords = { ...cachedRecords, ...dbRecords }
       const builtDays = buildMonth(selectedYear, selectedMonth, mergedRecords, customHolidays)
       setDays(builtDays)
@@ -806,6 +819,7 @@ export default function AttendanceSelf() {
     setAdjustLoading(true)
     setError('')
     try {
+      const finalTime = adjustDepartureTime.length === 5 ? `${adjustDepartureTime}:00` : adjustDepartureTime
       const ok = await submitDepartureAdjustment(
         staff.id,
         staff.full_name,
@@ -816,6 +830,15 @@ export default function AttendanceSelf() {
       if (ok) {
         setSuccessMsg(`✓ Departure time for ${adjustDay.date} updated to ${formatTime12Hour(adjustDepartureTime)}`)
         setShowAdjustModal(false)
+        // Optimistically update days state immediately so banner vanishes instantly
+        setDays(prev => prev.map(d => d.date === adjustDay.date ? {
+          ...d,
+          clockOutTime: finalTime,
+          autoClockedOut: false,
+          adjustmentRequested: true,
+          adjustmentStatus: 'approved',
+          adjustmentReason: adjustReason.trim(),
+        } : d))
         await fetchAttendance()
       } else {
         setError('Failed to submit departure adjustment.')
@@ -825,6 +848,24 @@ export default function AttendanceSelf() {
     } finally {
       setAdjustLoading(false)
     }
+  }
+
+  const [dismissedNoticeDates, setDismissedNoticeDates] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('hris_dismissed_unclosed_notices') || '[]')
+    } catch {
+      return []
+    }
+  })
+
+  const handleDismissNotice = (dateStr: string) => {
+    setDismissedNoticeDates(prev => {
+      const updated = Array.from(new Set([...prev, dateStr]))
+      try {
+        localStorage.setItem('hris_dismissed_unclosed_notices', JSON.stringify(updated))
+      } catch {}
+      return updated
+    })
   }
 
   if (staffLoading || loading) {
@@ -850,11 +891,16 @@ export default function AttendanceSelf() {
   const hasClockedInToday = isCurrentMonth && todayRecord && todayRecord.status === 'present' && !!todayRecord.clockInTime
   const hasClockedOutToday = hasClockedInToday && !!todayRecord?.clockOutTime
 
-  // Detect any past unclosed shifts or auto-clockout days
-  const unclosedOrAutoDays = days.filter(d => 
-    (d.status === 'present' && !d.clockOutTime && d.date < todayStr) || 
-    d.autoClockedOut
-  )
+  // Detect any past unclosed shifts that haven't been resolved or dismissed
+  const unclosedOrAutoDays = days.filter(d => {
+    if (dismissedNoticeDates.includes(d.date)) return false
+    if (d.adjustmentRequested) return false
+    if (d.clockOutTime) return false
+    try {
+      if (staff && localStorage.getItem(`hris_departure_adjusted_${staff.id}_${d.date}`)) return false
+    } catch {}
+    return (d.status === 'present' && !d.clockOutTime && d.date < todayStr)
+  })
   const recentUnclosedDay = unclosedOrAutoDays[unclosedOrAutoDays.length - 1]
 
   // Today's site visits
@@ -892,16 +938,16 @@ export default function AttendanceSelf() {
       {/* ── Auto Clock-Out / Forgotten Clock-Out Notice Card ── */}
       {recentUnclosedDay && (
         <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
-            <div>
-              <div className="font-bold text-amber-950 text-sm flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="font-bold text-amber-950 text-sm flex items-center gap-2 flex-wrap">
                 <span>Forgotten Clock-Out on {new Date(recentUnclosedDay.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
-                <span className="px-2 py-0.2 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900">
                   {recentUnclosedDay.autoClockedOut ? 'Auto Closed (5:00 PM)' : 'Pending Departure'}
                 </span>
               </div>
@@ -912,14 +958,25 @@ export default function AttendanceSelf() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => handleOpenAdjustmentModal(recentUnclosedDay)}
-            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-colors flex items-center gap-1.5 whitespace-nowrap self-start sm:self-auto"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            <span>Adjust Departure Time</span>
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => handleOpenAdjustmentModal(recentUnclosedDay)}
+              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-2xs transition-colors flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              <span>Adjust Departure Time</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDismissNotice(recentUnclosedDay.date)}
+              className="px-2.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold transition-colors flex items-center gap-1"
+              title="Dismiss this notice"
+            >
+              <span>Dismiss</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
         </div>
       )}
 

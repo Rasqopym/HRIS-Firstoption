@@ -1384,6 +1384,15 @@ export default function Layout({
     'st-workspace': 'Team Hub & Chat',
     'st-tasks': 'Tasks & Sprints',
     'st-calendar': 'Task Calendar',
+    'sa-workspace': 'Team Hub & Chat',
+    'sa-tasks': 'Tasks & Sprints',
+    'sa-calendar': 'Task Calendar',
+    'sa-appraisals': 'Appraisal Builder',
+    'hr-workspace': 'Team Hub & Chat',
+    'hr-tasks': 'Tasks & Sprints',
+    'hr-calendar': 'Task Calendar',
+    'hr-team-monitoring': 'Team Monitoring',
+    'hr-holidays': 'Public Holidays',
     'workspace': 'Workspace Hub',
     'tasks': 'Tasks & Kanban',
     'calendar': 'Task Calendar',
@@ -1598,7 +1607,11 @@ export default function Layout({
       {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
+<<<<<<< HEAD
         <header className="flex-none flex items-center justify-between gap-2 sm:gap-4 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 shadow-xs sticky top-0 z-30 h-14 sm:h-16 relative">
+=======
+        <header className="flex-none flex items-center justify-between gap-2 sm:gap-4 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 shadow-xs sticky top-0 z-50 h-14 sm:h-16 relative">
+>>>>>>> develop
           {/* Mobile Full-Width Search Overlay */}
           {showSearch && (
             <div className="sm:hidden absolute inset-0 bg-white z-50 flex items-center px-3 gap-2 border-b border-slate-200 shadow-sm animate-fadeIn">
@@ -1614,6 +1627,10 @@ export default function Layout({
               />
               {searchQuery && (
                 <button
+<<<<<<< HEAD
+=======
+                  type="button"
+>>>>>>> develop
                   onClick={() => setSearchQuery('')}
                   className="p-1 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 flex-none"
                   aria-label="Clear search"
@@ -1622,6 +1639,10 @@ export default function Layout({
                 </button>
               )}
               <button
+<<<<<<< HEAD
+=======
+                type="button"
+>>>>>>> develop
                 onClick={() => { setShowSearch(false); setSearchQuery('') }}
                 className="text-xs font-semibold text-slate-600 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors flex-none"
               >
@@ -1646,6 +1667,10 @@ export default function Layout({
                         {items.map(item => (
                           <button
                             key={item.id}
+<<<<<<< HEAD
+=======
+                            type="button"
+>>>>>>> develop
                             onClick={() => {
                               item.onClick()
                               setShowSearch(false)
@@ -1671,6 +1696,10 @@ export default function Layout({
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Hamburger — mobile only */}
             <button
+<<<<<<< HEAD
+=======
+              type="button"
+>>>>>>> develop
               className="md:hidden flex-none p-2 -ml-1 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 active:scale-95 transition-all"
               onClick={() => setMobileOpen(true)}
               aria-label="Open menu"
@@ -1704,6 +1733,10 @@ export default function Layout({
                 />
                 {searchQuery && (
                   <button
+<<<<<<< HEAD
+=======
+                    type="button"
+>>>>>>> develop
                     onClick={() => setSearchQuery('')}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
@@ -1729,6 +1762,10 @@ export default function Layout({
                           {items.map(item => (
                             <button
                               key={item.id}
+<<<<<<< HEAD
+=======
+                              type="button"
+>>>>>>> develop
                               onClick={() => {
                                 item.onClick()
                                 setShowSearch(false)
@@ -1750,6 +1787,7 @@ export default function Layout({
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => setShowSearch(true)}
                 className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl border border-slate-200/80 bg-slate-50/60 hover:bg-slate-100/70 text-slate-400 hover:text-slate-600 text-sm transition-all"
               >
@@ -1766,6 +1804,7 @@ export default function Layout({
           <div className="flex items-center gap-1.5 sm:gap-2">
             {/* Mobile search trigger */}
             <button
+              type="button"
               onClick={() => setShowSearch(true)}
               className="sm:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 active:scale-95 transition-all"
               aria-label="Open search"
@@ -1776,6 +1815,7 @@ export default function Layout({
             {/* Dual Role / Employee View Toggle (Hidden on mobile to keep top bar clean) */}
             {authenticatedRole && authenticatedRole !== 'staff' && (
               <button
+                type="button"
                 onClick={onToggleEmployeeView}
                 className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-xs ${
                   role === 'staff'
@@ -1808,6 +1848,7 @@ export default function Layout({
             {/* Notifications */}
             <div className="relative">
               <button
+                type="button"
                 onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false) }}
                 className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors focus:outline-hidden"
                 title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}` : 'Notifications'}
@@ -1827,6 +1868,7 @@ export default function Layout({
             {/* User menu */}
             <div className="relative">
               <button
+                type="button"
                 onClick={() => { setShowUserMenu(!showUserMenu); setShowNotifications(false) }}
                 className="flex items-center gap-2 p-1 sm:pl-2 sm:pr-2.5 sm:py-1.5 rounded-xl hover:bg-slate-100 transition-colors"
               >
@@ -1858,8 +1900,13 @@ export default function Layout({
                   {authenticatedRole && authenticatedRole !== 'staff' && (
                     <div className="border-b border-slate-100 py-1 bg-slate-50/50">
                       <button
-                        onClick={() => { onToggleEmployeeView?.(); setShowUserMenu(false) }}
-                        className="w-full text-left px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center justify-between"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setShowUserMenu(false)
+                          onToggleEmployeeView?.()
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 active:bg-blue-100 transition-colors flex items-center justify-between cursor-pointer"
                       >
                         <span className="flex items-center gap-2">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1875,6 +1922,7 @@ export default function Layout({
                   <div className="py-1">
                     {role === 'staff' && (
                       <button
+                        type="button"
                         onClick={() => { onNavigate('st-profile'); setShowUserMenu(false) }}
                         className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
                       >
@@ -1883,6 +1931,7 @@ export default function Layout({
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => { onNavigate('profile'); setShowUserMenu(false) }}
                       className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
                     >
@@ -1890,6 +1939,7 @@ export default function Layout({
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">Security</span>
                     </button>
                     <button
+                      type="button"
                       onClick={onLogout}
                       className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                     >
@@ -1916,6 +1966,7 @@ export default function Layout({
                 </span>
               </div>
               <button
+                type="button"
                 onClick={onToggleEmployeeView}
                 className="flex-none ml-2 px-2.5 py-1 bg-white/15 hover:bg-white/25 active:scale-95 rounded-lg text-white text-xs font-semibold transition-all flex items-center gap-1.5 border border-white/10"
               >
@@ -1929,7 +1980,7 @@ export default function Layout({
           {/* Click outside to close menus */}
           {(showUserMenu || showNotifications || showSearch) && (
             <div
-              className="fixed inset-0 z-40"
+              className="fixed inset-0 z-40 bg-transparent"
               onClick={() => { setShowUserMenu(false); setShowNotifications(false); setShowSearch(false); setSearchQuery('') }}
             />
           )}

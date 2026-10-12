@@ -55,17 +55,29 @@ export async function checkAndAutoClockOut(
       const existingNotes = rec.field_notes || ''
       const autoNote = existingNotes ? `${existingNotes} · [Auto Clock-Out (5:00 PM)]` : '[System Auto Clock-Out at 5:00 PM]'
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { auto_clocked_out, adjustment_requested, adjustment_status, adjustment_reason, adjustment_requested_departure, ...cleanRec } = rec
       const updatedRecord = {
-        ...rec,
+        ...cleanRec,
         clock_out_time: standardCloseTime,
-        auto_clocked_out: true,
         field_notes: autoNote,
       }
 
-      // Upsert to Supabase
-      await supabase
-        .from('attendance_records')
-        .upsert(updatedRecord, { onConflict: 'staff_id,attendance_date' })
+      // Upsert to Supabase with fallback to update
+      try {
+        const { error: upsertErr } = await supabase
+          .from('attendance_records')
+          .upsert(updatedRecord, { onConflict: 'staff_id,attendance_date' })
+        if (upsertErr) {
+          await supabase
+            .from('attendance_records')
+            .update({ clock_out_time: standardCloseTime, field_notes: autoNote })
+            .eq('staff_id', rec.staff_id)
+            .eq('attendance_date', rec.attendance_date)
+        }
+      } catch (err) {
+        console.warn('Auto clock-out database sync skipped:', err)
+      }
 
       // Update LocalStorage cache for all candidate keys
       const candidateKeys = [
@@ -75,19 +87,17 @@ export async function checkAndAutoClockOut(
       candidateKeys.forEach(k => {
         try {
           const raw = localStorage.getItem(k)
-          if (raw) {
-            const parsed = JSON.parse(raw)
-            parsed[rec.attendance_date] = {
-              ...(parsed[rec.attendance_date] || {}),
-              clock_out_time: standardCloseTime,
-              clockOutTime: standardCloseTime,
-              auto_clocked_out: true,
-              autoClockedOut: true,
-              field_notes: autoNote,
-              fieldNotes: autoNote,
-            }
-            localStorage.setItem(k, JSON.stringify(parsed))
+          const parsed = raw ? JSON.parse(raw) : {}
+          parsed[rec.attendance_date] = {
+            ...(parsed[rec.attendance_date] || {}),
+            clock_out_time: standardCloseTime,
+            clockOutTime: standardCloseTime,
+            auto_clocked_out: true,
+            autoClockedOut: true,
+            field_notes: autoNote,
+            fieldNotes: autoNote,
           }
+          localStorage.setItem(k, JSON.stringify(parsed))
         } catch {}
       })
 
@@ -232,25 +242,40 @@ export async function submitDepartureAdjustment(
     const existingNotes = currentRec?.field_notes || ''
     const updatedNotes = existingNotes ? `${existingNotes} · ${adjustmentNote}` : adjustmentNote
 
-    const updated = {
+    // Safe standard payload containing only relation-verified columns
+    const standardRecord = {
       staff_id: staffId,
       attendance_date: attendanceDate,
-      status: 'present',
+      status: currentRec?.status || 'present',
       clock_in_time: currentRec?.clock_in_time || '08:00:00',
       clock_out_time: formattedTime,
-      auto_clocked_out: false,
       field_notes: updatedNotes,
-      adjustment_requested: true,
-      adjustment_status: 'approved', // Instant auto-apply with transparent audit trail
-      adjustment_reason: reason,
-      adjustment_requested_departure: formattedTime,
+      work_mode: currentRec?.work_mode || 'office',
     }
 
-    await supabase
-      .from('attendance_records')
-      .upsert(updated, { onConflict: 'staff_id,attendance_date' })
+    try {
+      const { error: upsertErr } = await supabase
+        .from('attendance_records')
+        .upsert(standardRecord, { onConflict: 'staff_id,attendance_date' })
 
-    // Update LocalStorage
+      if (upsertErr) {
+        console.warn('Upsert warning, attempting update fallback:', upsertErr)
+        await supabase
+          .from('attendance_records')
+          .update({ clock_out_time: formattedTime, field_notes: updatedNotes })
+          .eq('staff_id', staffId)
+          .eq('attendance_date', attendanceDate)
+      }
+    } catch (err) {
+      console.warn('Database save warning for departure adjustment:', err)
+    }
+
+    // Persistently mark as adjusted in LocalStorage so notice is never shown again
+    try {
+      localStorage.setItem(`hris_departure_adjusted_${staffId}_${attendanceDate}`, formattedTime)
+    } catch {}
+
+    // Update LocalStorage caches
     const candidateKeys = [
       `hris_self_attendance_${staffId}`,
       `hris_attendance_daily_${staffId}`
@@ -258,32 +283,40 @@ export async function submitDepartureAdjustment(
     candidateKeys.forEach(k => {
       try {
         const raw = localStorage.getItem(k)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          parsed[attendanceDate] = {
-            ...(parsed[attendanceDate] || {}),
-            clock_out_time: formattedTime,
-            clockOutTime: formattedTime,
-            auto_clocked_out: false,
-            autoClockedOut: false,
-            field_notes: updatedNotes,
-            fieldNotes: updatedNotes,
-            adjustment_requested: true,
-            adjustment_reason: reason,
-          }
-          localStorage.setItem(k, JSON.stringify(parsed))
+        const parsed = raw ? JSON.parse(raw) : {}
+        parsed[attendanceDate] = {
+          ...(parsed[attendanceDate] || {}),
+          staff_id: staffId,
+          attendance_date: attendanceDate,
+          status: 'present',
+          clock_in_time: currentRec?.clock_in_time || '08:00:00',
+          clock_out_time: formattedTime,
+          clockOutTime: formattedTime,
+          auto_clocked_out: false,
+          autoClockedOut: false,
+          field_notes: updatedNotes,
+          fieldNotes: updatedNotes,
+          adjustment_requested: true,
+          adjustmentRequested: true,
+          adjustment_status: 'approved',
+          adjustmentStatus: 'approved',
+          adjustment_reason: reason,
+          adjustmentReason: reason,
         }
+        localStorage.setItem(k, JSON.stringify(parsed))
       } catch {}
     })
 
     window.dispatchEvent(new Event('storage'))
 
-    await logAction({
-      action: 'UPDATE',
-      entity: 'Attendance',
-      entityId: staffId,
-      details: `${staffName} adjusted departure time to ${adjustedTime} for ${attendanceDate} (Reason: ${reason})`
-    })
+    try {
+      await logAction({
+        action: 'UPDATE',
+        entity: 'Attendance',
+        entityId: staffId,
+        details: `${staffName} adjusted departure time to ${adjustedTime} for ${attendanceDate} (Reason: ${reason})`
+      })
+    } catch {}
 
     return true
   } catch (err) {
