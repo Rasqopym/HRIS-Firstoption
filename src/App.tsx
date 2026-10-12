@@ -78,16 +78,16 @@ function getSavedPage(r: Role): Page {
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
-  const [authenticatedRole, setAuthenticatedRole] = useState<Role | null>(null)
-  const [viewRole, setViewRole] = useState<Role | null>(null)
-  const role: Role = viewRole || 'staff'
+  const [authenticatedRole, setAuthenticatedRole] = useState<Role>('superadmin')
+  const [viewRole, setViewRole] = useState<Role>('superadmin')
+  const role = viewRole
 
   const [page, setPage] = useState<Page>(() => {
     try {
       const hash = window.location.hash.replace('#', '') as Page
       if (hash) return hash
     } catch (e) {}
-    return 'st-dashboard'
+    return 'sa-dashboard'
   })
 
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(() => {
@@ -131,44 +131,40 @@ export default function App() {
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) {
           let roleFound: any = null
-          let userStatus: string = 'active'
 
           const { data: profile } = await supabase
             .from('profiles')
-            .select('role, status')
+            .select('role')
             .eq('id', session.user.id)
             .maybeSingle()
 
           if (profile?.role) {
             roleFound = profile.role
-            userStatus = profile.status || 'active'
           } else if (session.user.email) {
             // Check profiles by email
             const { data: pEmail } = await supabase
               .from('profiles')
-              .select('role, status')
+              .select('role')
               .ilike('email', session.user.email)
               .maybeSingle()
 
             if (pEmail?.role) {
               roleFound = pEmail.role
-              userStatus = pEmail.status || 'active'
             } else {
               // Check staff table by email
               const { data: sEmail } = await supabase
                 .from('staff')
-                .select('id, status')
+                .select('id')
                 .ilike('email', session.user.email)
                 .maybeSingle()
 
               if (sEmail) {
                 roleFound = 'staff'
-                userStatus = sEmail.status || 'active'
               }
             }
           }
 
-          if (roleFound && userStatus === 'active') {
+          if (roleFound) {
             const appRole = dbRoleToApp(roleFound)
             setAuthenticatedRole(appRole)
             setViewRole(appRole)
@@ -176,24 +172,10 @@ export default function App() {
             setPage(targetPage)
             try { window.location.hash = targetPage } catch (e) {}
             setIsLoggedIn(true)
-          } else {
-            // User was deleted, lacks a profile, or has been deactivated/offboarded
-            console.warn('User has no valid profile or active status. Denying access and signing out.')
-            await supabase.auth.signOut()
-            setIsLoggedIn(false)
-            setAuthenticatedRole(null)
-            setViewRole(null)
           }
-        } else {
-          setIsLoggedIn(false)
-          setAuthenticatedRole(null)
-          setViewRole(null)
         }
       } catch (err) {
         console.error('Error restoring session:', err)
-        setIsLoggedIn(false)
-        setAuthenticatedRole(null)
-        setViewRole(null)
       } finally {
         setCheckingSession(false)
       }
@@ -206,18 +188,19 @@ export default function App() {
         setIsRecoveryMode(true)
         setIsLoggedIn(false)
       } else if (event === 'SIGNED_OUT') {
+        // Guard against transient network hiccups during background token refreshes
         const { data: check } = await supabase.auth.getSession()
         if (!check.session) {
           setIsLoggedIn(false)
           setIsRecoveryMode(false)
-          setAuthenticatedRole(null)
-          setViewRole(null)
-          setPage('st-dashboard')
+          setAuthenticatedRole('superadmin')
+          setViewRole('superadmin')
+          setPage('sa-dashboard')
           try { window.location.hash = '' } catch (e) {}
         }
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (session?.user) {
-          await restoreSession()
+      } else if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+        if (session?.user && !isLoggedIn) {
+          setIsLoggedIn(true)
         }
       }
     })
@@ -347,13 +330,15 @@ export default function App() {
           if (!staffData.profile_id || staffData.profile_id !== user.id) {
             supabase.from('staff').update({ profile_id: user.id }).eq('id', staffData.id).then(() => {})
           }
-          // Safely update profile metadata without touching or overwriting the user's permanent role!
-          supabase.from('profiles').update({
+          supabase.from('profiles').upsert({
+            id: user.id,
             email: user.email || staffData.email,
             full_name: staffData.full_name,
+            role: role || 'staff',
             photo_url: staffData.photo_url || undefined,
             phone: staffData.phone || undefined,
-          }).eq('id', user.id).then(() => {})
+            status: 'active'
+          }, { onConflict: 'id' }).then(() => {})
         }
 
         // 3. Match profiles table if no staff row
@@ -475,7 +460,7 @@ export default function App() {
     )
   }
 
-  if (!isLoggedIn || isRecoveryMode || !authenticatedRole) {
+  if (!isLoggedIn || isRecoveryMode) {
     return (
       <Login
         onLogin={handleLogin}

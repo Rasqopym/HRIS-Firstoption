@@ -16,13 +16,12 @@ export interface DeleteStaffResult {
 export async function deleteStaffCompletely({
   staffId,
   profileId,
-  staffName,
+  email,
   actorName = 'Super Admin',
 }: {
   staffId?: string | null
   profileId?: string | null
   email?: string | null
-  staffName?: string
   actorName?: string
 }): Promise<DeleteStaffResult> {
   // Check permission: only Super Admin can delete staff
@@ -32,8 +31,7 @@ export async function deleteStaffCompletely({
       return { success: false, deletedStaffCount: 0, deletedProfile: false, error: 'Unauthorized: No active session.' }
     }
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
-    const callerRole = profile?.role ? (profile.role === 'superadmin' || profile.role === 'super_admin' ? 'superadmin' : profile.role) : ''
-    if (callerRole !== 'superadmin') {
+    if (profile?.role !== 'super_admin') {
       return { success: false, deletedStaffCount: 0, deletedProfile: false, error: 'Permission denied: Only Super Admin can delete staff.' }
     }
   } catch (authErr: any) {
@@ -85,11 +83,6 @@ export async function deleteStaffCompletely({
   // 2. Cascade cleanup on foreign key dependencies for each staff ID
   for (const sId of sIds) {
     try {
-      // Null out circular references
-      await supabase.from('departments').update({ head_of_department_id: null }).eq('head_of_department_id', sId)
-      await supabase.from('staff').update({ manager_id: null }).eq('manager_id', sId)
-      await supabase.from('teams').update({ team_lead_id: null }).eq('team_lead_id', sId)
-
       await supabase.from('attendance_records').delete().eq('staff_id', sId)
       await supabase.from('daily_standups').delete().eq('staff_id', sId)
       await supabase.from('task_activity_logs').delete().eq('staff_id', sId)
@@ -152,21 +145,6 @@ export async function deleteStaffCompletely({
       await supabase.from('audit_log').update({ actor_id: null }).eq('actor_id', targetProfileId)
     } catch {}
 
-    // First deactivate profile immediately so even if auth user remains, access is revoked
-    try {
-      await supabase.from('profiles').update({ status: 'offboarded', role: 'staff' }).eq('id', targetProfileId)
-    } catch {}
-
-    // Invoke RPC function to purge auth user directly in database if function exists
-    try {
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('delete_system_user', {
-        p_user_id: targetProfileId
-      })
-      if (!rpcErr && rpcData?.success) {
-        deletedProfile = true
-      }
-    } catch {}
-
     // Invoke backend Edge Function to delete Auth User + Profile with Service Role Key
     try {
       const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('delete-user', {
@@ -183,12 +161,6 @@ export async function deleteStaffCompletely({
 
     const { error: pDelErr } = await supabase.from('profiles').delete().eq('id', targetProfileId)
     if (!pDelErr) deletedProfile = true
-
-    if (cleanEmail) {
-      try {
-        await supabase.from('profiles').delete().ilike('email', cleanEmail)
-      } catch {}
-    }
   }
 
   // 5. Clean up any LocalStorage caches

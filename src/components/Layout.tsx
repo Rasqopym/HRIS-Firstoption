@@ -1608,11 +1608,7 @@ export default function Layout({
       {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-<<<<<<< HEAD
-        <header className="flex-none flex items-center justify-between gap-2 sm:gap-4 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 shadow-xs sticky top-0 z-30 h-14 sm:h-16 relative">
-=======
         <header className="flex-none flex items-center justify-between gap-2 sm:gap-4 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 shadow-xs sticky top-0 z-50 h-14 sm:h-16 relative">
->>>>>>> develop
           {/* Mobile Full-Width Search Overlay */}
           {showSearch && (
             <div className="sm:hidden absolute inset-0 bg-white z-50 flex items-center px-3 gap-2 border-b border-slate-200 shadow-sm animate-fadeIn">
@@ -1628,10 +1624,7 @@ export default function Layout({
               />
               {searchQuery && (
                 <button
-<<<<<<< HEAD
-=======
                   type="button"
->>>>>>> develop
                   onClick={() => setSearchQuery('')}
                   className="p-1 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 flex-none"
                   aria-label="Clear search"
@@ -1640,10 +1633,7 @@ export default function Layout({
                 </button>
               )}
               <button
-<<<<<<< HEAD
-=======
                 type="button"
->>>>>>> develop
                 onClick={() => { setShowSearch(false); setSearchQuery('') }}
                 className="text-xs font-semibold text-slate-600 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors flex-none"
               >
@@ -1668,10 +1658,7 @@ export default function Layout({
                         {items.map(item => (
                           <button
                             key={item.id}
-<<<<<<< HEAD
-=======
                             type="button"
->>>>>>> develop
                             onClick={() => {
                               item.onClick()
                               setShowSearch(false)
@@ -1697,10 +1684,7 @@ export default function Layout({
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Hamburger — mobile only */}
             <button
-<<<<<<< HEAD
-=======
               type="button"
->>>>>>> develop
               className="md:hidden flex-none p-2 -ml-1 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 active:scale-95 transition-all"
               onClick={() => setMobileOpen(true)}
               aria-label="Open menu"
@@ -1734,10 +1718,7 @@ export default function Layout({
                 />
                 {searchQuery && (
                   <button
-<<<<<<< HEAD
-=======
                     type="button"
->>>>>>> develop
                     onClick={() => setSearchQuery('')}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
@@ -1763,10 +1744,7 @@ export default function Layout({
                           {items.map(item => (
                             <button
                               key={item.id}
-<<<<<<< HEAD
-=======
                               type="button"
->>>>>>> develop
                               onClick={() => {
                                 item.onClick()
                                 setShowSearch(false)
