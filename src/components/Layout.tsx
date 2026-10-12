@@ -1418,6 +1418,7 @@ export default function Layout({
   const displayPhoto = currentUser?.photo || userPhoto || null
   const displayEmail = currentUser?.email || userEmail || ''
   const displayInitials = getInitials(displayName)
+  const authRoleLabel = (authenticatedRole && roleLabels[authenticatedRole]) || 'Admin'
 
   return (
     <div className="flex h-screen bg-slate-50/80 overflow-hidden">
@@ -1800,12 +1801,12 @@ export default function Layout({
                     ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-105 ring-2 ring-emerald-400/30'
                     : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
                 }`}
-                title={role === 'staff' ? `Switch back to ${roleLabels[authenticatedRole]} Portal` : 'Switch to Staff Self-Service Portal (My Payslips, Attendance, Leave...)'}
+                title={role === 'staff' ? `Switch back to ${authRoleLabel} Portal` : 'Switch to Staff Self-Service Portal (My Payslips, Attendance, Leave...)'}
               >
                 {role === 'staff' ? (
                   <>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
-                    <span>Back to {roleLabels[authenticatedRole]}</span>
+                    <span>Back to {authRoleLabel}</span>
                   </>
                 ) : (
                   <>
@@ -1888,7 +1889,7 @@ export default function Layout({
                       >
                         <span className="flex items-center gap-2">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                          {role === 'staff' ? `Return to ${roleLabels[authenticatedRole]}` : 'Switch to Employee View'}
+                          {role === 'staff' ? `Return to ${authRoleLabel}` : 'Switch to Employee View'}
                         </span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">
                           {role === 'staff' ? 'Admin' : 'Self-Service'}
@@ -1948,7 +1949,7 @@ export default function Layout({
                 onClick={onToggleEmployeeView}
                 className="flex-none ml-2 px-2.5 py-1 bg-white/15 hover:bg-white/25 active:scale-95 rounded-lg text-white text-xs font-semibold transition-all flex items-center gap-1.5 border border-white/10"
               >
-                <span>Return to {roleLabels[authenticatedRole]}</span>
+                <span>Return to {authRoleLabel}</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
