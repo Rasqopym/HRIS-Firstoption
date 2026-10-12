@@ -239,15 +239,12 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
 
       const { error } = await supabase
         .from('profiles')
-        .upsert({
-          id: targetUserId,
+        .update({
           full_name: fullName,
           phone,
-          email: profile.email || user?.email || '',
-          role: profile.role || 'staff',
-          status: profile.status || 'active',
           photo_url: photoUrl || profile.photo_url || undefined,
-        }, { onConflict: 'id' })
+        })
+        .eq('id', targetUserId)
 
       if (error) throw error
 

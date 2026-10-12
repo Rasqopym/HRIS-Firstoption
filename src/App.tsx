@@ -347,15 +347,13 @@ export default function App() {
           if (!staffData.profile_id || staffData.profile_id !== user.id) {
             supabase.from('staff').update({ profile_id: user.id }).eq('id', staffData.id).then(() => {})
           }
-          supabase.from('profiles').upsert({
-            id: user.id,
+          // Safely update profile metadata without touching or overwriting the user's permanent role!
+          supabase.from('profiles').update({
             email: user.email || staffData.email,
             full_name: staffData.full_name,
-            role: role || 'staff',
             photo_url: staffData.photo_url || undefined,
             phone: staffData.phone || undefined,
-            status: 'active'
-          }, { onConflict: 'id' }).then(() => {})
+          }).eq('id', user.id).then(() => {})
         }
 
         // 3. Match profiles table if no staff row

@@ -742,19 +742,36 @@ export default function UserManagement() {
     try {
       const dbRole = appRoleToDb(editingRole.newRole)
       
-      // Get the profile ID from the staff record
       const user = users.find(u => u.id === editingRole.userId)
       if (!user) throw new Error('User not found')
       
-      // Since we're now fetching from staff table, the id is staff.id
-      // We need to find the corresponding profile id
-      // For now, we'll use the staff id as the profile id since they should be linked
+      // 1. Update profiles table by ID
       const { error } = await supabase
         .from('profiles')
         .update({ role: dbRole })
         .eq('id', editingRole.userId)
 
-      if (error) throw error
+      if (error) console.warn('Profile role update by ID warning:', error)
+
+      // 2. Also update by email to ensure match if profile UUID differed
+      if (user.email && user.email !== '—') {
+        await supabase
+          .from('profiles')
+          .update({ role: dbRole })
+          .ilike('email', user.email.trim())
+      }
+
+      // 3. If user has a linked staff record with profile_id, update that profile_id too
+      if (user.staffTableId) {
+        const { data: sRow } = await supabase
+          .from('staff')
+          .select('profile_id')
+          .eq('id', user.staffTableId)
+          .maybeSingle()
+        if (sRow?.profile_id && sRow.profile_id !== editingRole.userId) {
+          await supabase.from('profiles').update({ role: dbRole }).eq('id', sRow.profile_id)
+        }
+      }
 
       // Update local state
       setUsers(us => us.map(u =>
