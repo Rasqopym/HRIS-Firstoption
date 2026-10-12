@@ -1384,6 +1384,15 @@ export default function Layout({
     'st-workspace': 'Team Hub & Chat',
     'st-tasks': 'Tasks & Sprints',
     'st-calendar': 'Task Calendar',
+    'sa-workspace': 'Team Hub & Chat',
+    'sa-tasks': 'Tasks & Sprints',
+    'sa-calendar': 'Task Calendar',
+    'sa-appraisals': 'Appraisal Builder',
+    'hr-workspace': 'Team Hub & Chat',
+    'hr-tasks': 'Tasks & Sprints',
+    'hr-calendar': 'Task Calendar',
+    'hr-team-monitoring': 'Team Monitoring',
+    'hr-holidays': 'Public Holidays',
     'workspace': 'Workspace Hub',
     'tasks': 'Tasks & Kanban',
     'calendar': 'Task Calendar',
@@ -1598,25 +1607,102 @@ export default function Layout({
       {/* Main area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="flex-none flex items-center gap-2 md:gap-3 bg-white border-b border-slate-200/80 px-3 md:px-6 shadow-sm" style={{ height: 60 }}>
-          {/* Hamburger — mobile only */}
-          <button
-            className="md:hidden flex-none p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-            </svg>
-          </button>
+        <header className="flex-none flex items-center justify-between gap-2 sm:gap-4 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 shadow-xs sticky top-0 z-50 h-14 sm:h-16 relative">
+          {/* Mobile Full-Width Search Overlay */}
+          {showSearch && (
+            <div className="sm:hidden absolute inset-0 bg-white z-50 flex items-center px-3 gap-2 border-b border-slate-200 shadow-sm animate-fadeIn">
+              <span className="text-slate-400 pl-1 flex-none">
+                <IconSearch />
+              </span>
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search staff, payroll, logs..."
+                className="flex-1 bg-transparent py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 flex-none"
+                  aria-label="Clear search"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { setShowSearch(false); setSearchQuery('') }}
+                className="text-xs font-semibold text-slate-600 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors flex-none"
+              >
+                Cancel
+              </button>
+              {searchQuery.trim().length >= 2 && (
+                <div className="absolute left-0 right-0 top-full bg-white shadow-xl border-b border-slate-200 max-h-[70vh] overflow-y-auto z-50">
+                  {searching ? (
+                    <div className="px-4 py-4 text-sm text-slate-400 text-center">Searching...</div>
+                  ) : searchResults.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-slate-400 text-center">No results found</div>
+                  ) : (
+                    Object.entries(
+                      searchResults.reduce((acc: Record<string, typeof searchResults>, r) => {
+                        acc[r.category] = acc[r.category] || []
+                        acc[r.category].push(r)
+                        return acc
+                      }, {})
+                    ).map(([category, items]) => (
+                      <div key={category}>
+                        <div className="px-4 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50/80">{category}</div>
+                        {items.map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              item.onClick()
+                              setShowSearch(false)
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0"
+                          >
+                            <span className="flex-none text-slate-400">{item.icon}</span>
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-slate-800 truncate">{item.primary}</div>
+                              <div className="text-xs text-slate-500 truncate">{item.secondary}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-          {/* Breadcrumb/title */}
-          <div className="flex items-center gap-2 text-sm text-slate-500 min-w-0">
-            <span className="font-medium text-slate-800 truncate">{pageTitles[page] || 'Page'}</span>
+          {/* Left section: Hamburger & Breadcrumb */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Hamburger — mobile only */}
+            <button
+              type="button"
+              className="md:hidden flex-none p-2 -ml-1 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 active:scale-95 transition-all"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
+
+            {/* Breadcrumb/title */}
+            <div className="min-w-0 flex items-center">
+              <span className="font-semibold text-slate-800 text-sm sm:text-base tracking-tight truncate">
+                {pageTitles[page] || 'Page'}
+              </span>
+            </div>
           </div>
 
-          {/* Search */}
-          <div className="flex-1 mx-2 md:mx-4 md:max-w-sm relative">
+          {/* Center: Desktop Search */}
+          <div className="hidden sm:block flex-1 max-w-xs md:max-w-sm mx-2 md:mx-4 relative">
             {showSearch ? (
               <div className="relative anim-fade z-50">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -1626,11 +1712,20 @@ export default function Layout({
                   autoFocus
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search..."
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="Search staff, payroll, logs..."
+                  className="w-full pl-9 pr-8 py-1.5 text-sm rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                )}
                 {searchQuery.trim().length >= 2 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-slate-100 max-h-80 overflow-y-auto">
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white rounded-xl shadow-xl border border-slate-100 max-h-80 overflow-y-auto">
                     {searching ? (
                       <div className="px-4 py-4 text-sm text-slate-400 text-center">Searching...</div>
                     ) : searchResults.length === 0 ? (
@@ -1644,16 +1739,20 @@ export default function Layout({
                         }, {})
                       ).map(([category, items]) => (
                         <div key={category}>
-                          <div className="px-4 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{category}</div>
+                          <div className="px-4 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-50/80">{category}</div>
                           {items.map(item => (
                             <button
                               key={item.id}
-                              onClick={item.onClick}
-                              className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-slate-50 transition-colors"
+                              type="button"
+                              onClick={() => {
+                                item.onClick()
+                                setShowSearch(false)
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0"
                             >
                               <span className="flex-none text-slate-400">{item.icon}</span>
                               <div className="min-w-0">
-                                <div className="text-sm text-slate-800 truncate">{item.primary}</div>
+                                <div className="text-sm font-medium text-slate-800 truncate">{item.primary}</div>
                                 <div className="text-xs text-slate-500 truncate">{item.secondary}</div>
                               </div>
                             </button>
@@ -1666,22 +1765,37 @@ export default function Layout({
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => setShowSearch(true)}
-                className="flex items-center gap-2 text-slate-400 hover:text-slate-600 text-sm transition-colors"
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl border border-slate-200/80 bg-slate-50/60 hover:bg-slate-100/70 text-slate-400 hover:text-slate-600 text-sm transition-all"
               >
-                <IconSearch />
-                <span className="hidden sm:inline text-slate-400">Quick search...</span>
-                <span className="hidden md:inline ml-2 text-xs border border-slate-200 rounded px-1 py-0.5 text-slate-300">⌘K</span>
+                <div className="flex items-center gap-2">
+                  <IconSearch />
+                  <span className="text-slate-400 text-xs md:text-sm">Quick search...</span>
+                </div>
+                <span className="hidden md:inline text-[11px] font-medium border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-400 bg-white shadow-2xs">⌘K</span>
               </button>
             )}
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            {/* Dual Role / Employee View Toggle */}
+          {/* Right section: Mobile search button + Actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Mobile search trigger */}
+            <button
+              type="button"
+              onClick={() => setShowSearch(true)}
+              className="sm:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 active:scale-95 transition-all"
+              aria-label="Open search"
+            >
+              <IconSearch />
+            </button>
+
+            {/* Dual Role / Employee View Toggle (Hidden on mobile to keep top bar clean) */}
             {authenticatedRole && authenticatedRole !== 'staff' && (
               <button
+                type="button"
                 onClick={onToggleEmployeeView}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-xs ${
+                className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-xs ${
                   role === 'staff'
                     ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:brightness-105 ring-2 ring-emerald-400/30'
                     : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
@@ -1696,7 +1810,7 @@ export default function Layout({
                 ) : (
                   <>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    <span className="hidden sm:inline">Employee View</span>
+                    <span>Employee View</span>
                   </>
                 )}
               </button>
@@ -1712,14 +1826,15 @@ export default function Layout({
             {/* Notifications */}
             <div className="relative">
               <button
+                type="button"
                 onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false) }}
-                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors focus:outline-hidden"
+                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors focus:outline-hidden"
                 title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}` : 'Notifications'}
               >
                 <IconBell />
                 {unreadCount > 0 && (
                   <span
-                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-gradient-to-r from-red-600 to-rose-600 text-white text-[10px] font-bold leading-none rounded-full flex items-center justify-center ring-2 ring-white shadow-xs pointer-events-none tabular-nums"
+                    className="absolute top-1 right-1 min-w-[17px] h-[17px] px-1 bg-gradient-to-r from-red-600 to-rose-600 text-white text-[10px] font-bold leading-none rounded-full flex items-center justify-center ring-2 ring-white shadow-xs pointer-events-none tabular-nums"
                     aria-label={`${unreadCount} unread notifications`}
                   >
                     {unreadCount > 99 ? '99+' : unreadCount}
@@ -1731,38 +1846,45 @@ export default function Layout({
             {/* User menu */}
             <div className="relative">
               <button
+                type="button"
                 onClick={() => { setShowUserMenu(!showUserMenu); setShowNotifications(false) }}
-                className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                className="flex items-center gap-2 p-1 sm:pl-2 sm:pr-2.5 sm:py-1.5 rounded-xl hover:bg-slate-100 transition-colors"
               >
                 {displayPhoto ? (
-                  <img src={displayPhoto} alt={displayName} className="w-7 h-7 rounded-full object-cover" />
+                  <img src={displayPhoto} alt={displayName} className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover ring-2 ring-slate-200/80" />
                 ) : (
                   <div 
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-medium"
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold shadow-xs ring-2 ring-white"
                     style={{ backgroundColor: getAvatarColor(displayName) }}
                   >
                     {displayInitials}
                   </div>
                 )}
-                <div className="text-left hidden sm:block">
-                  <div className="text-sm font-medium text-slate-800 leading-tight">{displayName.split(' ')[0]}</div>
-                  <div className="text-xs text-slate-500 leading-tight">{roleLabels[role]}</div>
+                <div className="text-left hidden md:block">
+                  <div className="text-xs font-semibold text-slate-800 leading-tight max-w-[120px] truncate">{displayName.split(' ')[0]}</div>
+                  <div className="text-[11px] text-slate-500 leading-tight truncate">{roleLabels[role]}</div>
                 </div>
+                <svg className="hidden sm:block text-slate-400 w-3 h-3 ml-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg shadow-lg border border-slate-100 py-1 z-50">
-                  <div className="px-4 py-2 border-b border-slate-100">
-                    <div className="text-sm font-medium text-slate-800">{displayName}</div>
-                    <div className="text-xs text-slate-500">{displayEmail}</div>
+                <div className="absolute right-0 top-full mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-100 py-1.5 z-50 animate-fadeIn">
+                  <div className="px-4 py-2.5 border-b border-slate-100">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{displayName}</div>
+                    <div className="text-xs text-slate-500 truncate">{displayEmail}</div>
                   </div>
                   
                   {/* Quick Switch Option in Menu */}
                   {authenticatedRole && authenticatedRole !== 'staff' && (
                     <div className="border-b border-slate-100 py-1 bg-slate-50/50">
                       <button
-                        onClick={() => { onToggleEmployeeView?.(); setShowUserMenu(false) }}
-                        className="w-full text-left px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors flex items-center justify-between"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setShowUserMenu(false)
+                          onToggleEmployeeView?.()
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 active:bg-blue-100 transition-colors flex items-center justify-between cursor-pointer"
                       >
                         <span className="flex items-center gap-2">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1775,9 +1897,10 @@ export default function Layout({
                     </div>
                   )}
 
-                  <div className="border-t border-slate-100 py-1">
+                  <div className="py-1">
                     {role === 'staff' && (
                       <button
+                        type="button"
                         onClick={() => { onNavigate('st-profile'); setShowUserMenu(false) }}
                         className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
                       >
@@ -1786,6 +1909,7 @@ export default function Layout({
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => { onNavigate('profile'); setShowUserMenu(false) }}
                       className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
                     >
@@ -1793,6 +1917,7 @@ export default function Layout({
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">Security</span>
                     </button>
                     <button
+                      type="button"
                       onClick={onLogout}
                       className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                     >
@@ -1809,16 +1934,19 @@ export default function Layout({
         <main className="flex-1 overflow-y-auto relative bg-slate-50/60 pb-16 md:pb-0">
           {/* Employee View Active Banner */}
           {role === 'staff' && authenticatedRole && authenticatedRole !== 'staff' && (
-            <div className="bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-950 text-white px-4 py-2 text-xs flex items-center justify-between shadow-xs sticky top-0 z-30 border-b border-blue-500/20">
+            <div className="bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-950 text-white px-3 sm:px-4 py-2 text-xs flex items-center justify-between shadow-xs sticky top-0 z-30 border-b border-blue-500/20">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-none" />
                 <span className="truncate">
-                  Viewing <strong>Employee Self-Service Portal</strong> ({displayName}) · Apply for leave, clock in, view personal payslips & appraisal.
+                  <span className="hidden sm:inline">Viewing </span>
+                  <strong>Employee Portal</strong>
+                  <span className="hidden md:inline"> ({displayName}) · Personal attendance, leave & payslips</span>
                 </span>
               </div>
               <button
+                type="button"
                 onClick={onToggleEmployeeView}
-                className="flex-none ml-3 px-2.5 py-1 bg-white/15 hover:bg-white/25 rounded text-white text-xs font-semibold transition-colors flex items-center gap-1.5"
+                className="flex-none ml-2 px-2.5 py-1 bg-white/15 hover:bg-white/25 active:scale-95 rounded-lg text-white text-xs font-semibold transition-all flex items-center gap-1.5 border border-white/10"
               >
                 <span>Return to {roleLabels[authenticatedRole]}</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1830,7 +1958,7 @@ export default function Layout({
           {/* Click outside to close menus */}
           {(showUserMenu || showNotifications || showSearch) && (
             <div
-              className="fixed inset-0 z-40"
+              className="fixed inset-0 z-40 bg-transparent"
               onClick={() => { setShowUserMenu(false); setShowNotifications(false); setShowSearch(false); setSearchQuery('') }}
             />
           )}
