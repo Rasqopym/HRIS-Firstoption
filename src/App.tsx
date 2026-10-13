@@ -78,8 +78,20 @@ function getSavedPage(r: Role): Page {
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
-  const [authenticatedRole, setAuthenticatedRole] = useState<Role>('superadmin')
-  const [viewRole, setViewRole] = useState<Role>('superadmin')
+  const [authenticatedRole, setAuthenticatedRole] = useState<Role>(() => {
+    try {
+      const saved = localStorage.getItem('hris_authenticated_role') as Role
+      if (saved) return saved
+    } catch (e) {}
+    return 'superadmin'
+  })
+  const [viewRole, setViewRole] = useState<Role>(() => {
+    try {
+      const saved = localStorage.getItem('hris_view_role') as Role
+      if (saved) return saved
+    } catch (e) {}
+    return 'superadmin'
+  })
   const role = viewRole
 
   const [page, setPage] = useState<Page>(() => {
@@ -131,6 +143,8 @@ export default function App() {
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) {
           let roleFound: any = null
+          const userEmail = (session.user.email || '').trim().toLowerCase()
+          const isRootSuperAdmin = userEmail === 'rasqopym@gmail.com'
 
           const { data: profile } = await supabase
             .from('profiles')
@@ -140,37 +154,97 @@ export default function App() {
 
           if (profile?.role) {
             roleFound = profile.role
-          } else if (session.user.email) {
-            // Check profiles by email
+          }
+
+          // Check profiles by email if id query didn't find an admin role
+          if ((!roleFound || roleFound === 'staff') && userEmail) {
             const { data: pEmail } = await supabase
               .from('profiles')
               .select('role')
-              .ilike('email', session.user.email)
+              .ilike('email', userEmail)
               .maybeSingle()
 
-            if (pEmail?.role) {
+            if (pEmail?.role && pEmail.role !== 'staff') {
               roleFound = pEmail.role
-            } else {
-              // Check staff table by email
-              const { data: sEmail } = await supabase
-                .from('staff')
-                .select('id')
-                .ilike('email', session.user.email)
-                .maybeSingle()
+            } else if (!roleFound && pEmail?.role) {
+              roleFound = pEmail.role
+            }
+          }
 
-              if (sEmail) {
-                roleFound = 'staff'
-              }
+          // Check user_metadata for role
+          if ((!roleFound || roleFound === 'staff') && session.user.user_metadata?.role) {
+            const metaRole = session.user.user_metadata.role
+            if (metaRole && metaRole !== 'staff') {
+              roleFound = metaRole
+            }
+          }
+
+          // Root superadmin check (guarantees Opeyemi is never locked out)
+          if (isRootSuperAdmin) {
+            roleFound = 'super_admin'
+            try {
+              await supabase.from('profiles').upsert({
+                id: session.user.id,
+                email: userEmail,
+                role: 'super_admin',
+                status: 'active'
+              }, { onConflict: 'id' })
+            } catch (e) {}
+          }
+
+          // Fallback to staff directory table
+          if (!roleFound && userEmail) {
+            const { data: sEmail } = await supabase
+              .from('staff')
+              .select('id')
+              .ilike('email', userEmail)
+              .maybeSingle()
+
+            if (sEmail) {
+              roleFound = 'staff'
             }
           }
 
           if (roleFound) {
             const appRole = dbRoleToApp(roleFound)
-            setAuthenticatedRole(appRole)
-            setViewRole(appRole)
-            const targetPage = getSavedPage(appRole)
-            setPage(targetPage)
-            try { window.location.hash = targetPage } catch (e) {}
+            
+            // Check if user previously had an administrative role saved in localStorage
+            let finalAuthRole = appRole
+            try {
+              const savedAuth = localStorage.getItem('hris_authenticated_role') as Role | null
+              if (savedAuth && savedAuth !== 'staff' && (appRole === 'staff' || isRootSuperAdmin)) {
+                finalAuthRole = isRootSuperAdmin ? 'superadmin' : savedAuth
+              }
+            } catch (e) {}
+
+            try {
+              localStorage.setItem('hris_authenticated_role', finalAuthRole)
+            } catch (e) {}
+            setAuthenticatedRole(finalAuthRole)
+
+            // Check if user is currently viewing the Employee Portal (viewRole === 'staff')
+            const currentHash = window.location.hash.replace('#', '')
+            const isStaffHash = currentHash.startsWith('st-')
+            let savedViewRole: Role | null = null
+            try {
+              savedViewRole = localStorage.getItem('hris_view_role') as Role | null
+            } catch (e) {}
+
+            if (finalAuthRole !== 'staff' && (savedViewRole === 'staff' || isStaffHash)) {
+              // Retain Employee Portal view while preserving superadmin credentials
+              setViewRole('staff')
+              try { localStorage.setItem('hris_view_role', 'staff') } catch (e) {}
+              const targetPage = (currentHash as Page) || getSavedPage('staff')
+              setPage(targetPage)
+              try { window.location.hash = targetPage } catch (e) {}
+            } else {
+              setViewRole(finalAuthRole)
+              try { localStorage.setItem('hris_view_role', finalAuthRole) } catch (e) {}
+              const targetPage = getSavedPage(finalAuthRole)
+              setPage(targetPage)
+              try { window.location.hash = targetPage } catch (e) {}
+            }
+
             setIsLoggedIn(true)
           }
         }
@@ -196,7 +270,11 @@ export default function App() {
           setAuthenticatedRole('superadmin')
           setViewRole('superadmin')
           setPage('sa-dashboard')
-          try { window.location.hash = '' } catch (e) {}
+          try {
+            window.location.hash = ''
+            localStorage.removeItem('hris_authenticated_role')
+            localStorage.removeItem('hris_view_role')
+          } catch (e) {}
         }
       } else if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
         if (session?.user && !isLoggedIn) {
@@ -226,6 +304,8 @@ export default function App() {
     setPage(targetPage)
     try {
       window.location.hash = targetPage
+      localStorage.setItem('hris_authenticated_role', r)
+      localStorage.setItem('hris_view_role', r)
       localStorage.setItem(`hris_active_page_${r}`, targetPage)
     } catch (e) {}
     setIsLoggedIn(true)
@@ -238,6 +318,8 @@ export default function App() {
     setPage(targetPage)
     try {
       window.location.hash = targetPage
+      localStorage.setItem('hris_authenticated_role', r)
+      localStorage.setItem('hris_view_role', r)
       localStorage.setItem(`hris_active_page_${r}`, targetPage)
     } catch (e) {}
     handleSelectStaff(null)
@@ -247,12 +329,24 @@ export default function App() {
   const handleToggleEmployeeView = () => {
     if (viewRole === 'staff') {
       // Return to original administrative role
-      setViewRole(authenticatedRole)
-      const targetPage = getSavedPage(authenticatedRole)
+      let targetRole = authenticatedRole
+      if (!targetRole || targetRole === 'staff') {
+        try {
+          const stored = localStorage.getItem('hris_authenticated_role') as Role | null
+          if (stored && stored !== 'staff') targetRole = stored
+          else targetRole = 'superadmin'
+        } catch (e) {
+          targetRole = 'superadmin'
+        }
+      }
+      setAuthenticatedRole(targetRole)
+      setViewRole(targetRole)
+      const targetPage = getSavedPage(targetRole)
       setPage(targetPage)
       try {
         window.location.hash = targetPage
-        localStorage.setItem(`hris_active_page_${authenticatedRole}`, targetPage)
+        localStorage.setItem('hris_view_role', targetRole)
+        localStorage.setItem(`hris_active_page_${targetRole}`, targetPage)
       } catch (e) {}
     } else {
       // Switch to staff self-service view
@@ -261,6 +355,7 @@ export default function App() {
       setPage(targetPage)
       try {
         window.location.hash = targetPage
+        localStorage.setItem('hris_view_role', 'staff')
         localStorage.setItem('hris_active_page_staff', targetPage)
       } catch (e) {}
     }
@@ -274,7 +369,11 @@ export default function App() {
     setAuthenticatedRole('superadmin')
     setViewRole('superadmin')
     setPage('sa-dashboard')
-    try { window.location.hash = '' } catch (e) {}
+    try {
+      window.location.hash = ''
+      localStorage.removeItem('hris_authenticated_role')
+      localStorage.removeItem('hris_view_role')
+    } catch (e) {}
     handleSelectStaff(null)
     handleSelectPayslip(null)
   }, [])
