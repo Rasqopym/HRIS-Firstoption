@@ -742,19 +742,57 @@ export default function UserManagement() {
     try {
       const dbRole = appRoleToDb(editingRole.newRole)
       
-      // Get the profile ID from the staff record
       const user = users.find(u => u.id === editingRole.userId)
       if (!user) throw new Error('User not found')
+
+      const trimmedEmail = (user.email || '').trim().toLowerCase()
       
-      // Since we're now fetching from staff table, the id is staff.id
-      // We need to find the corresponding profile id
-      // For now, we'll use the staff id as the profile id since they should be linked
-      const { error } = await supabase
+      // 1. Update profiles table by ID
+      const { error: pErr1 } = await supabase
         .from('profiles')
         .update({ role: dbRole })
         .eq('id', editingRole.userId)
 
-      if (error) throw error
+      // 2. Also update profiles table by email
+      if (trimmedEmail && trimmedEmail !== '—') {
+        await supabase
+          .from('profiles')
+          .update({ role: dbRole })
+          .ilike('email', trimmedEmail)
+
+        // If no profile record exists yet, upsert one so the role is cemented in the DB
+        try {
+          await supabase.from('profiles').upsert({
+            id: editingRole.userId,
+            email: trimmedEmail,
+            full_name: user.name !== '—' ? user.name : 'Staff Member',
+            role: dbRole,
+            status: 'active'
+          }, { onConflict: 'id' })
+        } catch (e) {}
+      }
+
+      // 3. Update staff record if linked
+      if (user.staffTableId) {
+        try {
+          await supabase.from('staff').update({
+            job_title: editingRole.newRole === 'superadmin' ? 'Super Admin' :
+                       editingRole.newRole === 'hr' ? 'HR Manager' :
+                       editingRole.newRole === 'accountant' ? 'Chief Accountant' :
+                       editingRole.newRole === 'auditor' ? 'Internal Auditor' : 'Staff Member'
+          }).eq('id', user.staffTableId)
+        } catch (e) {}
+      }
+
+      // 4. Update auth.users metadata if Edge Function is reachable
+      try {
+        await supabase.functions.invoke('update-user', {
+          body: {
+            user_id: editingRole.userId,
+            role: dbRole
+          }
+        })
+      } catch (e) {}
 
       // Update local state
       setUsers(us => us.map(u =>

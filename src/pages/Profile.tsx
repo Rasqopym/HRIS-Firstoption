@@ -79,17 +79,32 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
           .eq('id', user.id)
           .maybeSingle()
 
-        if (profileById && profileById.full_name) {
+        const userEmailLower = (user.email || '').trim().toLowerCase()
+        const isRootAdmin = userEmailLower === 'rasqopym@gmail.com'
+
+        if (profileById) {
           pData = profileById
+          if (isRootAdmin && pData.role !== 'super_admin') {
+            pData.role = 'super_admin'
+            try {
+              await supabase.from('profiles').update({ role: 'super_admin' }).eq('id', user.id)
+            } catch (e) {}
+          }
         } else if (user.email) {
           // 2. Try profiles table by email
           const { data: profileByEmail } = await supabase
             .from('profiles')
             .select('id, full_name, role, email, phone, photo_url, status')
-            .ilike('email', user.email)
+            .ilike('email', userEmailLower)
             .maybeSingle()
-          if (profileByEmail && profileByEmail.full_name) {
+          if (profileByEmail) {
             pData = { ...profileByEmail, id: user.id }
+            if (isRootAdmin && pData.role !== 'super_admin') {
+              pData.role = 'super_admin'
+              try {
+                await supabase.from('profiles').update({ role: 'super_admin' }).eq('id', user.id)
+              } catch (e) {}
+            }
           }
         }
 
@@ -98,14 +113,18 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
           const { data: staffRow } = await supabase
             .from('staff')
             .select('id, full_name, email, phone, photo_url, avatar_url, status, profile_id')
-            .or(`profile_id.eq.${user.id},email.ilike.${user.email || ''},id.eq.${user.id}`)
+            .or(`profile_id.eq.${user.id},email.ilike.${userEmailLower},id.eq.${user.id}`)
             .maybeSingle()
+
+          const determinedRole = isRootAdmin
+            ? 'super_admin'
+            : (user.user_metadata?.role || (staffRow ? 'staff' : 'staff'))
 
           if (staffRow) {
             pData = {
               id: user.id,
               full_name: staffRow.full_name || '',
-              role: 'staff',
+              role: determinedRole,
               email: staffRow.email || user.email || '',
               phone: staffRow.phone || '',
               photo_url: staffRow.photo_url || staffRow.avatar_url || '',
@@ -121,7 +140,7 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
                 id: user.id,
                 email: user.email || staffRow.email,
                 full_name: staffRow.full_name,
-                role: 'staff',
+                role: determinedRole,
                 phone: staffRow.phone || null,
                 photo_url: staffRow.photo_url || staffRow.avatar_url || null,
                 status: staffRow.status || 'active',
@@ -134,10 +153,11 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
 
         // 4. Safe fallback if still not found
         if (!pData) {
+          const fallbackRole = isRootAdmin ? 'super_admin' : (user.user_metadata?.role || 'staff')
           pData = {
             id: user.id,
             full_name: user.user_metadata?.full_name || (user.email ? user.email.split('@')[0] : 'User'),
-            role: 'staff',
+            role: fallbackRole,
             email: user.email || '',
             phone: user.user_metadata?.phone || user.phone || '',
             photo_url: user.user_metadata?.avatar_url || '',
@@ -149,7 +169,7 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
               id: user.id,
               email: user.email,
               full_name: pData.full_name,
-              role: 'staff',
+              role: fallbackRole,
               phone: pData.phone || null,
               photo_url: pData.photo_url || null,
               status: 'active',

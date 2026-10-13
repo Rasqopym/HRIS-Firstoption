@@ -153,17 +153,47 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
       console.warn('Profile direct lookup error:', e)
     }
 
-    // Fallback: If no profile row by auth id, check profiles by email
-    if (!profile && email) {
+    // Check profiles by email if id query didn't find an admin role
+    const normalizedEmail = (email || '').trim().toLowerCase()
+    if ((!profile || profile.role === 'staff') && normalizedEmail) {
       try {
         const { data: pByEmail } = await supabase
           .from('profiles')
           .select('role, status')
-          .ilike('email', email.trim())
+          .ilike('email', normalizedEmail)
           .maybeSingle()
-        if (pByEmail) {
+        if (pByEmail && pByEmail.role && pByEmail.role !== 'staff') {
+          profile = pByEmail
+        } else if (!profile && pByEmail) {
           profile = pByEmail
         }
+      } catch (e) {}
+    }
+
+    // Check auth user metadata for role
+    if ((!profile || profile.role === 'staff') && authData.user.user_metadata?.role) {
+      const metaRole = authData.user.user_metadata.role
+      if (metaRole && metaRole !== 'staff') {
+        profile = {
+          role: metaRole,
+          status: profile?.status || 'active'
+        }
+      }
+    }
+
+    // Primary Super Admin guarantee: rasqopym@gmail.com is always Super Admin
+    if (normalizedEmail === 'rasqopym@gmail.com') {
+      profile = {
+        role: 'super_admin',
+        status: 'active'
+      }
+      try {
+        await supabase.from('profiles').upsert({
+          id: authData.user.id,
+          email: normalizedEmail,
+          role: 'super_admin',
+          status: 'active'
+        }, { onConflict: 'id' })
       } catch (e) {}
     }
 
@@ -205,9 +235,13 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
       details: 'Successful login',
     })
 
-    // Step 3: Send them to the right dashboard
+    // Step 3: Send them to the right dashboard and persist their authenticated role
     try {
       const mappedRole = dbRoleToApp(profile.role)
+      try {
+        localStorage.setItem('hris_authenticated_role', mappedRole)
+        localStorage.setItem('hris_view_role', mappedRole)
+      } catch (e) {}
       onLogin(mappedRole)
     } catch (err) {
       setError(`Unrecognized role: ${profile.role}. Contact Super Admin.`)
