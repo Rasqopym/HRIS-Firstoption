@@ -202,6 +202,7 @@ export interface LeaveRequest {
   submittedAt: string
   approvedBy?: string
   note?: string
+  leaveTypeId?: string
 }
 
 export interface LeaveBalance {

@@ -23,6 +23,10 @@ export default function LeaveManagement() {
   const [addTypeModal, setAddTypeModal] = useState(false)
   const [newType, setNewType] = useState({ name: '', entitlementDays: 21, paid: true, requiresDocument: false })
   const [deleteTypeModal, setDeleteTypeModal] = useState<{ id: string; name: string } | null>(null)
+  const [deleteStrategy, setDeleteStrategy] = useState<'cascade' | 'reassign'>('cascade')
+  const [reassignTargetId, setReassignTargetId] = useState<string>('')
+  const [isDeletingType, setIsDeletingType] = useState(false)
+  const [deleteTypeError, setDeleteTypeError] = useState('')
 
   const filtered = requests.filter(r => statusFilter === 'all' || r.status === statusFilter)
 
@@ -139,6 +143,7 @@ export default function LeaveManagement() {
             submittedAt: r.created_at,
             approvedBy,
             note: r.note,
+            leaveTypeId: r.leave_type_id,
           }
         }))
         
@@ -538,8 +543,14 @@ export default function LeaveManagement() {
                   </td>
                   <td className="py-3 px-4 text-right">
                     <button
-                      onClick={() => setDeleteTypeModal({ id: t.id, name: t.name })}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-red-50 text-red-500 transition-all"
+                      onClick={() => {
+                        setDeleteTypeModal({ id: t.id, name: t.name })
+                        setDeleteStrategy('cascade')
+                        setDeleteTypeError('')
+                        const other = types.find(x => x.id !== t.id)
+                        setReassignTargetId(other ? other.id : '')
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-red-50 text-red-500 transition-all cursor-pointer"
                       title="Delete"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -663,49 +674,247 @@ export default function LeaveManagement() {
       )}
 
       {/* Delete Leave Type modal */}
-      {deleteTypeModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 anim-fade-up">
-            <h3 className="font-display font-semibold text-slate-800 mb-2">Delete Leave Type</h3>
-            <p className="text-sm text-slate-600 mb-4">
-              Delete "{deleteTypeModal.name}"? This cannot be undone.
-            </p>
-            <div className="flex gap-2">
-              <button onClick={() => setDeleteTypeModal(null)} className="flex-1 py-2 rounded-lg border text-sm text-slate-600">Cancel</button>
-              <button
-                onClick={async () => {
-                  const { error } = await supabase
-                    .from('leave_types')
+      {deleteTypeModal && (() => {
+        const attachedRequests = requests.filter(r => 
+          r.leaveTypeId === deleteTypeModal.id || 
+          r.type?.trim().toLowerCase() === deleteTypeModal.name?.trim().toLowerCase()
+        )
+        const otherTypes = types.filter(t => t.id !== deleteTypeModal.id)
+
+        const handleConfirmDelete = async () => {
+          setIsDeletingType(true)
+          setDeleteTypeError('')
+
+          try {
+            const targetId = deleteTypeModal.id
+            const targetName = deleteTypeModal.name
+
+            // 1. If there are attached requests, either reassign or cascade delete
+            if (attachedRequests.length > 0) {
+              if (deleteStrategy === 'reassign' && reassignTargetId) {
+                const destType = types.find(t => t.id === reassignTargetId)
+                // Update Supabase by leave_type_id
+                await supabase
+                  .from('leave_requests')
+                  .update({ leave_type_id: reassignTargetId })
+                  .eq('leave_type_id', targetId)
+
+                // Update by IDs of matched requests
+                const attachedIds = attachedRequests.map(r => r.id).filter(Boolean)
+                if (attachedIds.length > 0) {
+                  await supabase
+                    .from('leave_requests')
+                    .update({ leave_type_id: reassignTargetId })
+                    .in('id', attachedIds)
+                }
+
+                // Update local requests
+                setRequests(prev => prev.map(r => 
+                  (r.leaveTypeId === targetId || r.type?.trim().toLowerCase() === targetName.trim().toLowerCase())
+                    ? { ...r, type: destType?.name || r.type, leaveTypeId: reassignTargetId }
+                    : r
+                ))
+              } else {
+                // Cascade delete requests in Supabase
+                await supabase
+                  .from('leave_requests')
+                  .delete()
+                  .eq('leave_type_id', targetId)
+
+                const attachedIds = attachedRequests.map(r => r.id).filter(Boolean)
+                if (attachedIds.length > 0) {
+                  await supabase
+                    .from('leave_requests')
                     .delete()
-                    .eq('id', deleteTypeModal.id)
-                  
-                  if (error) {
-                    console.error('Failed to delete leave type:', error)
-                    if (error.code === '23503') {
-                      alert("Can't delete: this leave type has existing requests attached to it")
-                    } else {
-                      alert('Failed to delete leave type')
-                    }
-                    return
+                    .in('id', attachedIds)
+                }
+
+                // Clean local requests state
+                setRequests(prev => prev.filter(r => 
+                  r.leaveTypeId !== targetId && r.type?.trim().toLowerCase() !== targetName.trim().toLowerCase()
+                ))
+
+                // Clean localStorage cached requests
+                try {
+                  const keysToClean = ['hris_all_leave_requests', 'hris_self_leave_requests_FO-0002']
+                  for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i)
+                    if (k && k.startsWith('hris_')) keysToClean.push(k)
                   }
-                  
-                  setTypes(prev => prev.filter(t => t.id !== deleteTypeModal.id))
-                  setDeleteTypeModal(null)
-                  
-                  await logAction({
-                    action: 'DELETE',
-                    entity: 'LeaveType',
-                    details: `Deleted leave type "${deleteTypeModal.name}"`
-                  })
-                }}
-                className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium"
-              >
-                Delete
-              </button>
+                  for (const k of Array.from(new Set(keysToClean))) {
+                    const raw = localStorage.getItem(k)
+                    if (raw && raw.startsWith('[')) {
+                      try {
+                        const parsed = JSON.parse(raw)
+                        if (Array.isArray(parsed)) {
+                          const updated = parsed.filter((r: any) => 
+                            r.leave_type_id !== targetId && 
+                            r.type?.trim().toLowerCase() !== targetName.trim().toLowerCase()
+                          )
+                          localStorage.setItem(k, JSON.stringify(updated))
+                        }
+                      } catch (e) {}
+                    }
+                  }
+                } catch (e) {}
+              }
+            }
+
+            // 2. Delete the leave type from Supabase
+            const { error: delError } = await supabase
+              .from('leave_types')
+              .delete()
+              .eq('id', targetId)
+
+            if (delError) {
+              console.error('Failed to delete leave type:', delError)
+              throw new Error(delError.message || 'Failed to delete leave type from database')
+            }
+
+            // 3. Update local types state
+            setTypes(prev => prev.filter(t => t.id !== targetId))
+
+            // Clean localStorage config cache
+            try {
+              const rawCache = localStorage.getItem('hris_leave_types_config')
+              if (rawCache) {
+                const parsed = JSON.parse(rawCache)
+                const updated = parsed.filter((lt: any) => lt.name?.toLowerCase() !== targetName.toLowerCase())
+                localStorage.setItem('hris_leave_types_config', JSON.stringify(updated))
+              }
+            } catch (e) {}
+
+            await logAction({
+              action: 'DELETE',
+              entity: 'LeaveType',
+              details: `Deleted leave type "${targetName}"${attachedRequests.length > 0 ? ` (${deleteStrategy === 'reassign' ? 'reassigned attached requests' : 'deleted attached requests'})` : ''}`
+            })
+
+            setDeleteTypeModal(null)
+          } catch (err: any) {
+            console.error('Error during leave type deletion:', err)
+            setDeleteTypeError(err.message || 'Failed to delete leave type. Please try again.')
+          } finally {
+            setIsDeletingType(false)
+          }
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 anim-fade-up border border-slate-100">
+              <div className="flex items-start gap-3.5 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center flex-none">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                </div>
+                <div>
+                  <h3 className="font-display font-semibold text-slate-800 text-lg">Delete Leave Type</h3>
+                  <p className="text-xs text-slate-500">
+                    Are you sure you want to delete <strong>"{deleteTypeModal.name}"</strong>?
+                  </p>
+                </div>
+              </div>
+
+              {deleteTypeError && (
+                <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
+                  {deleteTypeError}
+                </div>
+              )}
+
+              {attachedRequests.length > 0 ? (
+                <div className="mb-5 p-3.5 rounded-xl bg-amber-50/80 border border-amber-200 text-xs">
+                  <div className="flex items-center gap-2 font-semibold text-amber-900 mb-1.5">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>{attachedRequests.length} Existing Request{attachedRequests.length === 1 ? '' : 's'} Attached</span>
+                  </div>
+                  <p className="text-amber-800 text-[11.5px] leading-relaxed mb-3">
+                    This leave type has existing staff requests attached to it. Choose how to handle them:
+                  </p>
+
+                  <div className="space-y-2.5">
+                    <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all ${deleteStrategy === 'cascade' ? 'bg-white border-red-300 ring-1 ring-red-200' : 'bg-amber-100/40 border-amber-200/80 hover:bg-white'}`}>
+                      <input
+                        type="radio"
+                        name="deleteStrategy"
+                        value="cascade"
+                        checked={deleteStrategy === 'cascade'}
+                        onChange={() => setDeleteStrategy('cascade')}
+                        className="mt-0.5 text-red-600 focus:ring-red-500"
+                      />
+                      <div className="text-slate-800 text-xs">
+                        <span className="font-semibold text-red-700 block">Delete Type & Attached Requests</span>
+                        <span className="text-slate-500 text-[11px]">Permanently erase "{deleteTypeModal.name}" and remove all {attachedRequests.length} request record(s).</span>
+                      </div>
+                    </label>
+
+                    {otherTypes.length > 0 && (
+                      <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all ${deleteStrategy === 'reassign' ? 'bg-white border-blue-300 ring-1 ring-blue-200' : 'bg-amber-100/40 border-amber-200/80 hover:bg-white'}`}>
+                        <input
+                          type="radio"
+                          name="deleteStrategy"
+                          value="reassign"
+                          checked={deleteStrategy === 'reassign'}
+                          onChange={() => setDeleteStrategy('reassign')}
+                          className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1 text-slate-800 text-xs">
+                          <span className="font-semibold text-blue-700 block">Reassign Requests & Delete Type</span>
+                          <span className="text-slate-500 text-[11px] block mb-2">Move the {attachedRequests.length} request(s) to another leave category:</span>
+                          {deleteStrategy === 'reassign' && (
+                            <select
+                              value={reassignTargetId}
+                              onChange={e => setReassignTargetId(e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-500 shadow-2xs"
+                            >
+                              {otherTypes.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+                  This action is permanent and cannot be undone. Are you sure you want to proceed?
+                </p>
+              )}
+
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteTypeModal(null)
+                    setDeleteTypeError('')
+                  }}
+                  className="flex-1 py-2 px-3 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                  disabled={isDeletingType}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDelete}
+                  disabled={isDeletingType}
+                  className="flex-1 py-2 px-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-98 text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-60 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {isDeletingType ? (
+                    <>
+                      <div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : attachedRequests.length > 0 ? (
+                    deleteStrategy === 'reassign' ? 'Reassign & Delete' : 'Delete & Clear Requests'
+                  ) : (
+                    'Delete Type'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
