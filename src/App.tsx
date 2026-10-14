@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Role, Page } from './types'
 import { supabase } from './lib/supabase'
-import { dbRoleToApp } from './lib/roleMap'
+import { dbRoleToApp, appRoleToDb } from './lib/roleMap'
 import { isPasswordRecoveryUrl, establishRecoverySession } from './lib/authRecovery'
 
 import Login from './pages/Login'
@@ -144,7 +144,7 @@ export default function App() {
         if (session?.user) {
           let roleFound: any = null
           const userEmail = (session.user.email || '').trim().toLowerCase()
-          const isRootSuperAdmin = userEmail === 'rasqopym@gmail.com'
+          const isRootSuperAdmin = userEmail === 'rasqopym@gmail.com' || userEmail === 'firstoptions@gmail.com'
 
           const { data: profile } = await supabase
             .from('profiles')
@@ -179,7 +179,7 @@ export default function App() {
             }
           }
 
-          // Root superadmin check (guarantees Opeyemi is never locked out)
+          // Root superadmin check (guarantees Opeyemi & Adepoju are permanently superadmin)
           if (isRootSuperAdmin) {
             roleFound = 'super_admin'
             try {
@@ -424,20 +424,46 @@ export default function App() {
           staffData = byEmail
         }
 
-        // Auto-heal linking in background
+        // Auto-heal linking in background without corrupting user role
         if (staffData && user.id) {
           if (!staffData.profile_id || staffData.profile_id !== user.id) {
             supabase.from('staff').update({ profile_id: user.id }).eq('id', staffData.id).then(() => {})
           }
-          supabase.from('profiles').upsert({
-            id: user.id,
-            email: user.email || staffData.email,
-            full_name: staffData.full_name,
-            role: role || 'staff',
-            photo_url: staffData.photo_url || undefined,
-            phone: staffData.phone || undefined,
-            status: 'active'
-          }, { onConflict: 'id' }).then(() => {})
+          
+          const userEmailLower = (user.email || staffData.email || '').trim().toLowerCase()
+          const isSuperAdminEmail = userEmailLower === 'rasqopym@gmail.com' || userEmailLower === 'firstoptions@gmail.com'
+
+          // Check if profile exists first before updating
+          const { data: existingProf } = await supabase
+            .from('profiles')
+            .select('id, role')
+            .eq('id', user.id)
+            .maybeSingle()
+
+          if (existingProf) {
+            // Update metadata ONLY — NEVER overwrite role with viewRole (which may be 'staff')
+            const updateFields: any = {
+              full_name: staffData.full_name,
+              photo_url: staffData.photo_url || undefined,
+              phone: staffData.phone || undefined,
+            }
+            if (isSuperAdminEmail && existingProf.role !== 'super_admin') {
+              updateFields.role = 'super_admin'
+            }
+            supabase.from('profiles').update(updateFields).eq('id', user.id).then(() => {})
+          } else {
+            // Only set role on net-new profile insert
+            const initialDbRole = isSuperAdminEmail ? 'super_admin' : appRoleToDb(authenticatedRole || 'staff')
+            supabase.from('profiles').insert({
+              id: user.id,
+              email: user.email || staffData.email,
+              full_name: staffData.full_name,
+              role: initialDbRole,
+              photo_url: staffData.photo_url || undefined,
+              phone: staffData.phone || undefined,
+              status: 'active'
+            }).then(() => {})
+          }
         }
 
         // 3. Match profiles table if no staff row
@@ -472,7 +498,7 @@ export default function App() {
     }
 
     resolveIdentity()
-  }, [role, isLoggedIn])
+  }, [isLoggedIn])
 
   // Persistent session timeout: 24 hours of continuous inactivity
   // Extended so users remain logged in across their shifts, background app usage,

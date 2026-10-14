@@ -291,10 +291,16 @@ export default function UserManagement() {
         }
 
         const staffMembers: StaffMember[] = profilesData.map(p => {
-          const appRole = dbRoleToApp(p.role)
+          let appRole = dbRoleToApp(p.role)
+          const pEmail = (p.email || '').trim().toLowerCase()
+          if (pEmail === 'rasqopym@gmail.com' || pEmail === 'firstoptions@gmail.com') {
+            appRole = 'superadmin'
+            if (p.role !== 'super_admin') {
+              supabase.from('profiles').update({ role: 'super_admin' }).eq('id', p.id).then(() => {})
+            }
+          }
           
           // Match staff record by profile_id, email, or full_name
-          const pEmail = (p.email || '').trim().toLowerCase()
           const pName = (p.full_name || '').trim().toLowerCase()
           const matchedStaff = staffRecords.find(s => 
             (s.profile_id && s.profile_id === p.id) || 
@@ -358,6 +364,65 @@ export default function UserManagement() {
             state: '',
           }
         })
+
+        // Also merge any staff records that don't yet have a profile row
+        for (const s of staffRecords) {
+          const sEmail = (s.email || '').trim().toLowerCase()
+          const alreadyIncluded = staffMembers.some(m => 
+            (s.profile_id && m.id === s.profile_id) ||
+            (sEmail && m.email && m.email.trim().toLowerCase() === sEmail) ||
+            (m.staffTableId && m.staffTableId === s.id)
+          )
+
+          if (!alreadyIncluded && (s.full_name || s.email)) {
+            let deducedRole: Role = 'staff'
+            const jTitle = (s.job_title || '').toLowerCase()
+            if (jTitle.includes('super admin') || jTitle.includes('superadmin')) deducedRole = 'superadmin'
+            else if (jTitle.includes('hr') || jTitle.includes('human resource')) deducedRole = 'hr'
+            else if (jTitle.includes('accountant') || jTitle.includes('finance')) deducedRole = 'accountant'
+            else if (jTitle.includes('auditor') || jTitle.includes('audit')) deducedRole = 'auditor'
+
+            if (sEmail === 'rasqopym@gmail.com' || sEmail === 'firstoptions@gmail.com') {
+              deducedRole = 'superadmin'
+            }
+
+            const targetId = s.profile_id || s.id
+            staffMembers.push({
+              id: targetId,
+              staffId: s.staff_code || `FO-${String(s.id).slice(0, 6).toUpperCase()}`,
+              staffTableId: s.id,
+              name: s.full_name || 'Staff Member',
+              email: s.email || '—',
+              role: deducedRole,
+              department: s.departments?.name || 'General Operations',
+              jobTitle: s.job_title || (deducedRole === 'superadmin' ? 'Super Admin' : 'Staff Member'),
+              employmentDate: s.date_employed || '2026-01-15',
+              status: (s.status || 'active') as StaffStatus,
+              lastLogin: 'Never',
+              phone: s.phone || '',
+              photo: null,
+              bankName: '',
+              accountNumber: '',
+              grossSalary: 0,
+              address: '',
+              nextOfKin: '',
+              nextOfKinPhone: '',
+              state: '',
+            })
+
+            // Auto-heal by creating the missing profile row in profiles table
+            if (s.email) {
+              supabase.from('profiles').upsert({
+                id: targetId,
+                email: s.email,
+                full_name: s.full_name,
+                role: appRoleToDb(deducedRole),
+                status: s.status || 'active',
+                phone: s.phone || null
+              }, { onConflict: 'id' }).then(() => {})
+            }
+          }
+        }
 
         setUsers(staffMembers)
         setError('')
@@ -538,6 +603,25 @@ export default function UserManagement() {
       }
 
       setTempPassword(generatedTempPw)
+
+      // Guarantee createdUserId is never empty
+      if (!createdUserId) {
+        createdUserId = crypto.randomUUID()
+      }
+
+      // Ensure profile record is ALWAYS inserted/upserted in profiles table
+      try {
+        await supabase.from('profiles').upsert({
+          id: createdUserId,
+          full_name: form.name.trim(),
+          email: form.email.trim().toLowerCase(),
+          role: appRoleToDb(form.role),
+          status: 'active',
+          phone: form.phone?.trim() || null,
+        }, { onConflict: 'id' })
+      } catch (profErr) {
+        console.warn('Profile upsert warning:', profErr)
+      }
 
       // Insert corresponding staff record to associate department and job title
       const selectedDeptObj = dbDepartments.find(d => d.name === form.department)

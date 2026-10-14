@@ -181,8 +181,8 @@ export default function Login({ onLogin, initialResetPasswordMode = false, onPas
       }
     }
 
-    // Primary Super Admin guarantee: rasqopym@gmail.com is always Super Admin
-    if (normalizedEmail === 'rasqopym@gmail.com') {
+    // Primary Super Admin guarantee: rasqopym@gmail.com & firstoptions@gmail.com are always Super Admin
+    if (normalizedEmail === 'rasqopym@gmail.com' || normalizedEmail === 'firstoptions@gmail.com') {
       profile = {
         role: 'super_admin',
         status: 'active'

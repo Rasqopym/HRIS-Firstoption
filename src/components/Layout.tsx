@@ -1425,7 +1425,7 @@ export default function Layout({
       ? authenticatedRole
       : (typeof localStorage !== 'undefined' && (localStorage.getItem('hris_authenticated_role') as Role)) && localStorage.getItem('hris_authenticated_role') !== 'staff'
       ? (localStorage.getItem('hris_authenticated_role') as Role)
-      : (displayEmail.toLowerCase() === 'rasqopym@gmail.com' || (userEmail || '').toLowerCase() === 'rasqopym@gmail.com')
+      : (['rasqopym@gmail.com', 'firstoptions@gmail.com'].includes(displayEmail.toLowerCase()) || ['rasqopym@gmail.com', 'firstoptions@gmail.com'].includes((userEmail || '').toLowerCase()))
       ? 'superadmin'
       : 'staff'
   )

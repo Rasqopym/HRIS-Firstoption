@@ -80,7 +80,7 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
           .maybeSingle()
 
         const userEmailLower = (user.email || '').trim().toLowerCase()
-        const isRootAdmin = userEmailLower === 'rasqopym@gmail.com'
+        const isRootAdmin = userEmailLower === 'rasqopym@gmail.com' || userEmailLower === 'firstoptions@gmail.com'
 
         if (profileById) {
           pData = profileById
@@ -257,17 +257,19 @@ export default function Profile({ onNavigate }: ProfileProps = {}) {
       const { data: { user } } = await supabase.auth.getUser()
       const targetUserId = user?.id || profile.id
 
+      const updatePayload: any = {
+        full_name: fullName,
+        phone,
+        photo_url: photoUrl || profile.photo_url || undefined,
+      }
+      if (profile.email || user?.email) {
+        updatePayload.email = profile.email || user?.email
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .upsert({
-          id: targetUserId,
-          full_name: fullName,
-          phone,
-          email: profile.email || user?.email || '',
-          role: profile.role || 'staff',
-          status: profile.status || 'active',
-          photo_url: photoUrl || profile.photo_url || undefined,
-        }, { onConflict: 'id' })
+        .update(updatePayload)
+        .eq('id', targetUserId)
 
       if (error) throw error
 
