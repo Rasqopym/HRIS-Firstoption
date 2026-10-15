@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { calculateWorkingDaysInMonth, type PublicHoliday } from './holidays'
 
 interface LineItem {
   componentId: string
@@ -6,10 +7,14 @@ interface LineItem {
   category: 'allowance' | 'deduction'
   rateType: string
   rate: number
+  dailyRate?: number
   quantity?: number
   amount: number
   isTaxable: boolean
   needsManualInput: boolean
+  breakdown?: string
+  attendanceTag?: string
+  isAttendanceProrated?: boolean
 }
 
 interface PayrollCalculation {
@@ -65,7 +70,7 @@ export async function calculatePayrollForStaff(
   // 1. Fetch staff row
   const { data: staff, error: staffError } = await supabase
     .from('staff')
-    .select('id, full_name, gross_salary')
+    .select('id, staff_code, profile_id, email, full_name, gross_salary')
     .eq('id', staffId)
     .single()
 
@@ -193,31 +198,77 @@ export async function calculatePayrollForStaff(
     )
   }
 
-  // 3. Fetch attendance records for the period
-  const { data: attendanceRecords, error: attendanceError } = await supabase
-    .from('attendance_records')
-    .select('status, overtime_hours, overtime_approval, on_site')
-    .eq('staff_id', staffId)
-    .gte('attendance_date', periodStart)
-    .lte('attendance_date', periodEnd)
+  // 3. Determine working days in period (excluding weekends and statutory/custom public holidays)
+  const pStartDate = new Date(periodStart)
+  const periodYear = pStartDate.getFullYear()
+  const periodMonth = pStartDate.getMonth()
 
-  if (attendanceError) {
-    throw new Error(`Failed to fetch attendance records: ${attendanceError.message}`)
+  let customHolidays: PublicHoliday[] = []
+  try {
+    const { data: settingsData } = await supabase
+      .from('company_settings')
+      .select('custom_holidays')
+      .eq('id', 1)
+      .maybeSingle()
+
+    if (settingsData?.custom_holidays && Array.isArray(settingsData.custom_holidays)) {
+      customHolidays = settingsData.custom_holidays
+    } else if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('hris_custom_holidays')
+      if (cached) customHolidays = JSON.parse(cached)
+    }
+  } catch (e) {
+    console.warn('[payrollEngine] Error loading holidays:', e)
   }
 
-  // Calculate attendance metrics
-  const daysPresent = (attendanceRecords || []).filter(
-    r => r.status === 'present'
-  ).length
+  const { totalWorkingDays } = calculateWorkingDaysInMonth(periodYear, periodMonth, customHolidays)
+  const workingDays = totalWorkingDays > 0 ? totalWorkingDays : 22
 
-  const approvedOvertimeHours = (attendanceRecords || []).reduce((sum, r) => {
+  // 3b. Fetch attendance records for the period across candidate identifiers
+  const candidateIds = [staff.id, staff.staff_code, staff.profile_id, staff.email].filter(Boolean) as string[]
+  const attendanceRecordsMap: Record<string, any> = {}
+
+  // Merge client-side localStorage attendance cache if available
+  if (typeof window !== 'undefined') {
+    try {
+      candidateIds.forEach(cid => {
+        const raw1 = localStorage.getItem(`hris_self_attendance_${cid}`)
+        const raw2 = localStorage.getItem(`hris_attendance_daily_${cid}`)
+        if (raw1) Object.assign(attendanceRecordsMap, JSON.parse(raw1))
+        if (raw2) Object.assign(attendanceRecordsMap, JSON.parse(raw2))
+      })
+    } catch (e) {}
+  }
+
+  // Fetch from Supabase
+  try {
+    const { data: dbRecords } = await supabase
+      .from('attendance_records')
+      .select('status, overtime_hours, overtime_approval, on_site, attendance_date, staff_id')
+      .in('staff_id', candidateIds)
+      .gte('attendance_date', periodStart)
+      .lte('attendance_date', periodEnd)
+
+    if (dbRecords && dbRecords.length > 0) {
+      dbRecords.forEach(r => {
+        attendanceRecordsMap[r.attendance_date] = r
+      })
+    }
+  } catch (e) {
+    console.warn('[payrollEngine] Error fetching attendance from Supabase:', e)
+  }
+
+  const allAttendanceList = Object.values(attendanceRecordsMap)
+  const daysPresent = allAttendanceList.filter(r => r.status === 'present').length
+
+  const approvedOvertimeHours = allAttendanceList.reduce((sum, r) => {
     if (r.overtime_approval === 'approved' && r.overtime_hours) {
-      return sum + r.overtime_hours
+      return sum + (Number(r.overtime_hours) || 0)
     }
     return sum
   }, 0)
 
-  const daysOnSite = (attendanceRecords || []).filter(r => r.on_site === true).length
+  const daysOnSite = allAttendanceList.filter(r => r.on_site === true).length
 
   // 3b. Fetch approved leave requests for the period
   let hasApprovedAnnualLeave = false
@@ -319,11 +370,42 @@ export async function calculatePayrollForStaff(
     const rateType = sc.rate_type || component.default_rate_type
     let amount = 0
     let quantity: number | undefined
+    let dailyRate: number | undefined
     let needsManualInput = false
+    let breakdown: string | undefined
+    let attendanceTag: string | undefined
+    let isAttendanceProrated = false
+
+    const isLunchOrTransport = compNameLower.includes('lunch') || compNameLower.includes('transport')
+    const isAttendanceProratedComp = isLunchOrTransport || (sc as any).attendance_based === true || (sc as any).attendanceBased === true
 
     // If Leave Allowance component and staff has NO approved annual leave this period, skip/zero out
     if (compNameLower.includes('leave') && !compNameLower.includes('unpaid') && !hasApprovedAnnualLeave) {
       amount = 0
+    } else if (isAttendanceProratedComp && (rateType === 'percentage_of_gross' || rateType === 'pct_gross')) {
+      // Percentage of Gross prorated by working days in month and days present
+      const monthlyAllocation = sc.rate > 100 ? sc.rate : (staff.gross_salary || 0) * (sc.rate / 100)
+      const computedDailyRate = workingDays > 0 ? (monthlyAllocation / workingDays) : (monthlyAllocation / 22)
+      dailyRate = Math.round(computedDailyRate)
+      // If staff is absent on standard working days, they are not paid for those days.
+      // If staff clocks in on Saturday/weekend, they are compensated with additional daily allowance.
+      amount = Math.round(computedDailyRate * daysPresent)
+      quantity = daysPresent
+      isAttendanceProrated = true
+      const extraWeekendDays = daysPresent > workingDays ? daysPresent - workingDays : 0
+      breakdown = `${sc.rate}% of gross (₦${Math.round(monthlyAllocation).toLocaleString()}) ÷ ${workingDays} working days = ₦${Math.round(computedDailyRate).toLocaleString()}/day × ${daysPresent}d present${extraWeekendDays > 0 ? ` (includes ${extraWeekendDays} weekend shift${extraWeekendDays > 1 ? 's' : ''})` : ''}`
+      attendanceTag = `${daysPresent}d present`
+    } else if (isAttendanceProratedComp && (rateType === 'flat_amount' || rateType === 'flat') && isLunchOrTransport) {
+      // Flat monthly amount prorated by working days
+      const monthlyAllocation = sc.rate
+      const computedDailyRate = workingDays > 0 ? (monthlyAllocation / workingDays) : (monthlyAllocation / 22)
+      dailyRate = Math.round(computedDailyRate)
+      amount = Math.round(computedDailyRate * daysPresent)
+      quantity = daysPresent
+      isAttendanceProrated = true
+      const extraWeekendDays = daysPresent > workingDays ? daysPresent - workingDays : 0
+      breakdown = `₦${Math.round(monthlyAllocation).toLocaleString()}/mo ÷ ${workingDays} working days = ₦${Math.round(computedDailyRate).toLocaleString()}/day × ${daysPresent}d present${extraWeekendDays > 0 ? ` (includes ${extraWeekendDays} weekend shift${extraWeekendDays > 1 ? 's' : ''})` : ''}`
+      attendanceTag = `${daysPresent}d present`
     } else {
       switch (rateType) {
         case 'percentage_of_gross':
@@ -342,21 +424,35 @@ export async function calculatePayrollForStaff(
           break
 
         case 'per_day':
-          if (component.name.toLowerCase().includes('lunch')) {
+          if (isLunchOrTransport) {
             quantity = daysPresent
+            dailyRate = sc.rate
             amount = sc.rate * daysPresent
+            isAttendanceProrated = true
+            breakdown = `₦${sc.rate.toLocaleString()}/day × ${daysPresent} days present`
+            attendanceTag = `${daysPresent}d present`
           } else if (component.name.toLowerCase().includes('site')) {
             quantity = daysOnSite
+            dailyRate = sc.rate
             amount = sc.rate * daysOnSite
+            isAttendanceProrated = true
+            breakdown = `₦${sc.rate.toLocaleString()}/day × ${daysOnSite} days on site`
+            attendanceTag = `${daysOnSite}d on site`
           } else {
             quantity = daysPresent
+            dailyRate = sc.rate
             amount = sc.rate * daysPresent
+            isAttendanceProrated = true
           }
           break
 
         case 'per_hour':
           quantity = approvedOvertimeHours
+          dailyRate = sc.rate
           amount = sc.rate * approvedOvertimeHours
+          isAttendanceProrated = true
+          breakdown = `₦${sc.rate.toLocaleString()}/hr × ${approvedOvertimeHours} OT hrs`
+          attendanceTag = `${approvedOvertimeHours}h OT`
           break
 
         case 'manual_monthly':
@@ -375,16 +471,20 @@ export async function calculatePayrollForStaff(
       category: component.category,
       rateType: rateType,
       rate: sc.rate,
+      dailyRate,
       quantity,
       amount,
       isTaxable: sc.is_taxable,
       needsManualInput,
+      breakdown,
+      attendanceTag,
+      isAttendanceProrated,
     })
   }
 
   // Add automatic Unpaid Leave Salary Deduction item if unpaid leave days exist
   if (unpaidLeaveDays > 0) {
-    const dailyRate = (staff.gross_salary || 165500) / 22
+    const dailyRate = (staff.gross_salary || 165500) / workingDays
     const unpaidDeductionAmount = Math.round(dailyRate * unpaidLeaveDays)
     lineItems.push({
       componentId: 'unpaid-leave-deduction',
@@ -392,6 +492,7 @@ export async function calculatePayrollForStaff(
       category: 'deduction',
       rateType: 'per_day',
       rate: Math.round(dailyRate),
+      dailyRate: Math.round(dailyRate),
       quantity: unpaidLeaveDays,
       amount: unpaidDeductionAmount,
       isTaxable: false,
