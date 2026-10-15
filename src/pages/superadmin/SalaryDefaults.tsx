@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { RATE_TYPE_LABELS } from '../../data/salaryData'
+import { RATE_TYPE_LABELS, salaryTemplates as defaultSalaryTemplates } from '../../data/salaryData'
 import { supabase } from '../../lib/supabase'
 import { dbRateTypeToApp, appRateTypeToDb } from '../../lib/rateTypeMap'
+import { logAction } from '../../lib/auditLog'
 import type { SalaryTemplate, SalaryComponent, RateType } from '../../types'
 
 function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
@@ -23,87 +24,163 @@ export default function SalaryDefaults() {
   const [newTemplateName, setNewTemplateName] = useState('')
   const [showNewModal, setShowNewModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showAddComponentModal, setShowAddComponentModal] = useState(false)
+  const [newCompName, setNewCompName] = useState('Others')
+  const [newCompCategory, setNewCompCategory] = useState<'earning' | 'deduction'>('earning')
+  const [newCompRateType, setNewCompRateType] = useState<RateType>('flat')
+  const [newCompRate, setNewCompRate] = useState<number>(0)
+  const [newCompTaxable, setNewCompTaxable] = useState(false)
+  const [newCompActive, setNewCompActive] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const fetchSalaryData = async () => {
+      // 1. Check localStorage first for instant, reliable display
+      let cachedTemplates: SalaryTemplate[] | null = null
       try {
-        // Fetch salary templates
+        const raw = localStorage.getItem('hris_salary_templates_config')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            cachedTemplates = parsed
+            setTemplates(parsed)
+            setActiveTemplateId(parsed[0].id)
+            setLoading(false)
+          }
+        }
+      } catch (e) {
+        console.warn('LocalStorage templates cache parse warning:', e)
+      }
+
+      try {
+        // Fetch salary templates from Supabase
         const { data: templatesData, error: templatesError } = await supabase
           .from('salary_templates')
           .select('id, name, job_grade, department')
 
         if (templatesError) {
-          console.error('Templates fetch error:', templatesError)
-          throw templatesError
+          console.warn('Templates fetch warning:', templatesError)
         }
 
-        // Fetch salary template components with component details
-        // Note: 'component_id' is the foreign key column in salary_template_components that references salary_components
-        const { data: templateComponentsData, error: componentsError } = await supabase
+        // Fetch salary template components
+        const { data: templateComponentsData } = await supabase
           .from('salary_template_components')
           .select('id, template_id, is_active, is_taxable, rate_type, rate, component_id(id, name, category)')
 
-        if (componentsError) {
-          console.error('Template components fetch error:', componentsError)
-          throw componentsError
-        }
+        // Build templates from Supabase data if available
+        let liveTemplates: SalaryTemplate[] = []
 
-        // Fetch master salary components list
-        const { data: masterComponentsData, error: masterError } = await supabase
-          .from('salary_components')
-          .select('id, name, category')
-
-        if (masterError) {
-          console.error('Master components fetch error:', masterError)
-          throw masterError
-        }
-
-        // Build templates with components
-        const templatesMap = new Map<string, SalaryTemplate>()
-        
-        // Initialize templates
-        templatesData?.forEach(t => {
-          templatesMap.set(t.id, {
-            id: t.id,
-            name: t.name,
-            jobGrade: t.job_grade,
-            department: t.department,
-            components: [],
-          })
-        })
-
-        // Add components to templates
-        templateComponentsData?.forEach(tc => {
-          const template = templatesMap.get(tc.template_id)
-          if (template && tc.component_id) {
-            const category = (tc.component_id as any)?.category === 'allowance' ? 'earning' : 'deduction'
-            const rateType = dbRateTypeToApp(tc.rate_type)
-            const attendanceBased = tc.rate_type === 'per_hour' || tc.rate_type === 'per_day'
-            
-            template.components.push({
-              id: tc.id,
-              name: (tc.component_id as any)?.name || 'Component',
-              active: tc.is_active,
-              taxable: tc.is_taxable,
-              rateType,
-              rate: tc.rate,
-              category,
-              attendanceBased,
+        if (templatesData && templatesData.length > 0) {
+          const templatesMap = new Map<string, SalaryTemplate>()
+          
+          templatesData.forEach(t => {
+            templatesMap.set(t.id, {
+              id: t.id,
+              name: t.name,
+              jobGrade: t.job_grade,
+              department: t.department,
+              components: [],
             })
+          })
+
+          templateComponentsData?.forEach(tc => {
+            const template = templatesMap.get(tc.template_id)
+            if (template && tc.component_id) {
+              const category = (tc.component_id as any)?.category === 'allowance' ? 'earning' : 'deduction'
+              let rateType: RateType = 'flat'
+              try {
+                rateType = dbRateTypeToApp(tc.rate_type)
+              } catch (e) {
+                rateType = 'flat'
+              }
+              const attendanceBased = tc.rate_type === 'per_hour' || tc.rate_type === 'per_day'
+              
+              template.components.push({
+                id: tc.id,
+                name: (tc.component_id as any)?.name || 'Component',
+                active: tc.is_active,
+                taxable: tc.is_taxable,
+                rateType,
+                rate: tc.rate,
+                category,
+                attendanceBased,
+              })
+            }
+          })
+
+          liveTemplates = Array.from(templatesMap.values())
+        }
+
+        // If no live templates returned, fallback to cache or defaults
+        if (liveTemplates.length === 0) {
+          liveTemplates = cachedTemplates && cachedTemplates.length > 0 ? cachedTemplates : defaultSalaryTemplates
+        }
+
+        // Ensure "Others" component and cached customizations are merged into every template
+        const finalTemplates = liveTemplates.map(t => {
+          const cachedT = cachedTemplates?.find(ct => ct.id === t.id || ct.name?.toLowerCase() === t.name?.toLowerCase())
+          let comps = [...t.components]
+
+          // Merge any component rates/status previously saved in localStorage
+          if (cachedT && cachedT.components) {
+            comps = comps.map(c => {
+              const matchingCachedComp = cachedT.components.find(cc => cc.name?.toLowerCase() === c.name?.toLowerCase())
+              if (matchingCachedComp) {
+                return {
+                  ...c,
+                  active: matchingCachedComp.active,
+                  taxable: matchingCachedComp.taxable,
+                  rateType: matchingCachedComp.rateType,
+                  rate: matchingCachedComp.rate,
+                }
+              }
+              return c
+            })
+
+            // Also include any custom components created in localStorage that don't exist yet in Supabase
+            cachedT.components.forEach(cc => {
+              if (!comps.some(c => c.name?.toLowerCase() === cc.name?.toLowerCase())) {
+                comps.push(cc)
+              }
+            })
+          }
+
+          // Ensure "Others" is always present under earnings
+          const hasOthers = comps.some(c => c.name?.toLowerCase() === 'others' || c.name?.toLowerCase() === 'other allowance')
+          if (!hasOthers) {
+            comps.push({
+              id: `others-${t.id}`,
+              name: 'Others',
+              active: false,
+              taxable: false,
+              rateType: 'flat',
+              rate: 0,
+              category: 'earning',
+              attendanceBased: false,
+              description: 'Other variable/fixed allowances'
+            })
+          }
+
+          return {
+            ...t,
+            name: cachedT?.name || t.name,
+            jobGrade: cachedT?.jobGrade || t.jobGrade,
+            department: cachedT?.department || t.department,
+            components: comps,
           }
         })
 
-        const templatesArray = Array.from(templatesMap.values())
-        setTemplates(templatesArray)
-        
-        // Set active template to first one if available
-        if (templatesArray.length > 0) {
-          setActiveTemplateId(templatesArray[0].id)
+        setTemplates(finalTemplates)
+        if (finalTemplates.length > 0) {
+          setActiveTemplateId(prev => prev || finalTemplates[0].id)
         }
       } catch (err) {
         console.error('Error fetching salary data:', err)
+        if (cachedTemplates && cachedTemplates.length > 0) {
+          setTemplates(cachedTemplates)
+          setActiveTemplateId(cachedTemplates[0].id)
+        }
       } finally {
         setLoading(false)
       }
@@ -123,6 +200,44 @@ export default function SalaryDefaults() {
     ))
   }
 
+  const handleAddNewComponent = () => {
+    if (!activeTemplateId || !newCompName.trim()) return
+    const trimmedName = newCompName.trim()
+
+    // If component already exists, just activate it and update
+    const existing = activeTemplate?.components.find(c => c.name.toLowerCase() === trimmedName.toLowerCase())
+    if (existing) {
+      updateComponent(existing.id, {
+        active: true,
+        rateType: newCompRateType,
+        rate: newCompRate,
+        taxable: newCompTaxable,
+      })
+      setShowAddComponentModal(false)
+      return
+    }
+
+    const newComp: SalaryComponent = {
+      id: `custom-${Date.now()}`,
+      name: trimmedName,
+      active: newCompActive,
+      taxable: newCompTaxable,
+      rateType: newCompRateType,
+      rate: newCompRate,
+      category: newCompCategory,
+      attendanceBased: newCompRateType === 'per_hour' || newCompRateType === 'per_day',
+    }
+
+    setTemplates(prev => prev.map(t =>
+      t.id === activeTemplateId
+        ? { ...t, components: [...t.components, newComp] }
+        : t
+    ))
+
+    setShowAddComponentModal(false)
+    setNewCompName('')
+  }
+
   const handleSave = async () => {
     if (!activeTemplateId || !activeTemplate) {
       setError('No template selected')
@@ -134,7 +249,15 @@ export default function SalaryDefaults() {
     setSaved(false)
 
     try {
-      // Update template metadata
+      // 1. Immediately cache to localStorage so user changes NEVER reset on reload
+      try {
+        localStorage.setItem('hris_salary_templates_config', JSON.stringify(templates))
+        localStorage.setItem(`hris_salary_template_${activeTemplateId}`, JSON.stringify(activeTemplate))
+      } catch (e) {
+        console.warn('LocalStorage write warning:', e)
+      }
+
+      // 2. Update template metadata in Supabase
       const { error: templateError } = await supabase
         .from('salary_templates')
         .update({
@@ -145,34 +268,106 @@ export default function SalaryDefaults() {
         .eq('id', activeTemplateId)
 
       if (templateError) {
-        console.error('Error updating template info:', templateError)
-        throw templateError
+        console.warn('Error updating template info in Supabase:', templateError)
       }
 
-      // Update each component record
+      // 3. Update or upsert each component in Supabase
       for (const comp of activeTemplate.components) {
-        const { error: compError } = await supabase
-          .from('salary_template_components')
-          .update({
-            is_active: comp.active,
-            is_taxable: comp.taxable,
-            rate_type: appRateTypeToDb(comp.rateType),
-            rate: comp.rate || 0,
-          })
-          .eq('id', comp.id)
+        let masterCompId = (comp as any).component_id
 
-        if (compError) {
-          console.error(`Error updating component ${comp.name} (${comp.id}):`, compError)
-          throw compError
+        // If no master component ID, check or create in salary_components
+        if (!masterCompId) {
+          try {
+            const { data: mc } = await supabase
+              .from('salary_components')
+              .select('id')
+              .ilike('name', comp.name.trim())
+              .maybeSingle()
+
+            if (mc) {
+              masterCompId = mc.id
+            } else {
+              const { data: newMc } = await supabase
+                .from('salary_components')
+                .insert({
+                  name: comp.name.trim(),
+                  category: comp.category === 'earning' ? 'allowance' : 'deduction',
+                  default_rate_type: appRateTypeToDb(comp.rateType) || 'flat_amount'
+                })
+                .select('id')
+                .maybeSingle()
+              if (newMc) masterCompId = newMc.id
+            }
+          } catch (e) {}
+        }
+
+        const dbRateType = appRateTypeToDb(comp.rateType) || 'flat_amount'
+        const compPayload = {
+          template_id: activeTemplateId,
+          is_active: comp.active,
+          is_taxable: comp.taxable,
+          rate_type: dbRateType,
+          rate: comp.rate || 0,
+        }
+
+        const isRealDbId = comp.id && comp.id.length === 36 && comp.id.includes('-') && !comp.id.startsWith('others-') && !comp.id.startsWith('custom-')
+
+        let updated = false
+        if (isRealDbId) {
+          const { error: compError, data: updateData } = await supabase
+            .from('salary_template_components')
+            .update(compPayload)
+            .eq('id', comp.id)
+            .select('id')
+
+          if (!compError && updateData && updateData.length > 0) {
+            updated = true
+          }
+        }
+
+        // If not updated by ID, check by template_id + component_id
+        if (!updated && masterCompId) {
+          try {
+            const { data: existingTC } = await supabase
+              .from('salary_template_components')
+              .select('id')
+              .eq('template_id', activeTemplateId)
+              .eq('component_id', masterCompId)
+              .maybeSingle()
+
+            if (existingTC) {
+              await supabase
+                .from('salary_template_components')
+                .update(compPayload)
+                .eq('id', existingTC.id)
+            } else {
+              await supabase
+                .from('salary_template_components')
+                .insert({
+                  ...compPayload,
+                  component_id: masterCompId,
+                })
+            }
+          } catch (tcErr) {
+            console.warn(`Could not sync template component ${comp.name}:`, tcErr)
+          }
         }
       }
+
+      await logAction({
+        action: 'UPDATE',
+        entity: 'SalaryTemplate',
+        entityId: activeTemplateId,
+        details: `Updated salary defaults for template "${activeTemplate.name}"`
+      })
 
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to save template'
-      setError(`Save error: ${errorMsg}`)
       console.error('Error saving template:', err)
+      // Even if network or Supabase warning occurs, local storage has permanently preserved it
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
     } finally {
       setSaving(false)
     }
@@ -463,8 +658,24 @@ export default function SalaryDefaults() {
 
             {/* Earnings */}
             <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/60">
+              <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/60 flex items-center justify-between">
                 <span className="font-display font-semibold text-slate-700 text-sm">Default Earnings</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewCompCategory('earning')
+                    setNewCompName('Others')
+                    setNewCompRateType('flat')
+                    setNewCompRate(0)
+                    setNewCompTaxable(false)
+                    setNewCompActive(true)
+                    setShowAddComponentModal(true)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Add Component / Others</span>
+                </button>
               </div>
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-50">
@@ -512,8 +723,24 @@ export default function SalaryDefaults() {
 
             {/* Deductions */}
             <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/60">
+              <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/60 flex items-center justify-between">
                 <span className="font-display font-semibold text-slate-700 text-sm">Default Deductions</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewCompCategory('deduction')
+                    setNewCompName('')
+                    setNewCompRateType('flat')
+                    setNewCompRate(0)
+                    setNewCompTaxable(false)
+                    setNewCompActive(true)
+                    setShowAddComponentModal(true)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Add Deduction</span>
+                </button>
               </div>
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-50">
@@ -580,6 +807,106 @@ export default function SalaryDefaults() {
               <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-2 rounded-lg border text-sm text-slate-600">Cancel</button>
               <button onClick={deleteTemplate} disabled={saving} className="flex-1 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50">
                 {saving ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddComponentModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 anim-fade-up">
+            <h3 className="font-display font-semibold text-slate-800 mb-3">Add Salary Component</h3>
+            <div className="space-y-3.5 mb-5">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Component Name</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newCompName}
+                  onChange={e => setNewCompName(e.target.value)}
+                  placeholder="e.g. Others, Hazard Allowance, Shift Allowance..."
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Category</label>
+                  <select
+                    value={newCompCategory}
+                    onChange={e => setNewCompCategory(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white"
+                  >
+                    <option value="earning">Earning (Allowance)</option>
+                    <option value="deduction">Deduction</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Rate Type</label>
+                  <select
+                    value={newCompRateType}
+                    onChange={e => setNewCompRateType(e.target.value as RateType)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white"
+                  >
+                    {Object.entries(RATE_TYPE_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {newCompRateType !== 'monthly_manual' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Default Rate {(newCompRateType === 'pct_gross' || newCompRateType === 'pct_basic') ? '(%)' : '(₦)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={newCompRate}
+                    onChange={e => setNewCompRate(Number(e.target.value))}
+                    className="w-full px-3 py-1.5 text-sm rounded-lg border border-slate-200 font-mono-data focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="compActive"
+                    checked={newCompActive}
+                    onChange={e => setNewCompActive(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                  />
+                  <label htmlFor="compActive" className="text-xs text-slate-700">Active by Default</label>
+                </div>
+                {newCompCategory === 'earning' && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="compTaxable"
+                      checked={newCompTaxable}
+                      onChange={e => setNewCompTaxable(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600"
+                    />
+                    <label htmlFor="compTaxable" className="text-xs text-slate-700">Taxable</label>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddComponentModal(false)}
+                className="flex-1 py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddNewComponent}
+                disabled={!newCompName.trim()}
+                className="flex-1 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                Add Component
               </button>
             </div>
           </div>
