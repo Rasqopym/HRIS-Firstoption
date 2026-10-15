@@ -12,6 +12,7 @@ const EARNING_COMPONENTS: SalaryComponent[] = [
   { id: 'performance', name: 'Performance Allowance', active: false, taxable: true, rateType: 'monthly_manual', rate: 0, category: 'earning', attendanceBased: false },
   { id: 'commission', name: 'Commission', active: false, taxable: true, rateType: 'monthly_manual', rate: 0, category: 'earning', attendanceBased: false },
   { id: 'leave_allowance', name: 'Leave Allowance', active: true, taxable: false, rateType: 'monthly_manual', rate: 0, category: 'earning', attendanceBased: true, attendanceSource: 'leave_taken', description: 'Accrues based on approved leave taken / entitlement' },
+  { id: 'others', name: 'Others', active: false, taxable: false, rateType: 'flat', rate: 0, category: 'earning', attendanceBased: false, description: 'Other variable/fixed allowances' },
 ]
 
 const DEDUCTION_COMPONENTS: SalaryComponent[] = [
