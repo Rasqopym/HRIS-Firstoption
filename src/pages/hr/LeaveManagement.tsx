@@ -657,7 +657,8 @@ export default function LeaveManagement() {
             </tbody>
           </table>
         </div>
-      )}
+      </div>
+    )}
 
       {/* Approve/Reject modal */}
       {noteModal && (
