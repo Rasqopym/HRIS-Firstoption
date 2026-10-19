@@ -1,11 +1,11 @@
 import type { SalaryComponent, StaffSalaryStructure, SalaryTemplate, TaxBand } from '../types'
 
 const EARNING_COMPONENTS: SalaryComponent[] = [
-  { id: 'basic', name: 'Basic Salary', active: true, taxable: true, rateType: 'pct_gross', rate: 60, category: 'earning', attendanceBased: false },
+  { id: 'basic', name: 'Basic Salary', active: true, taxable: true, rateType: 'pct_gross', rate: 50, category: 'earning', attendanceBased: false },
   { id: 'housing', name: 'Housing Allowance', active: true, taxable: true, rateType: 'pct_gross', rate: 20, category: 'earning', attendanceBased: false },
-  { id: 'transport', name: 'Transport Allowance', active: true, taxable: false, rateType: 'pct_gross', rate: 10, category: 'earning', attendanceBased: false },
+  { id: 'transport', name: 'Transport Allowance', active: true, taxable: false, rateType: 'pct_gross', rate: 10, category: 'earning', attendanceBased: true, attendanceSource: 'days_present', description: '% of Gross ÷ Working Days × Days Present' },
   { id: 'medical', name: 'Medical Allowance', active: true, taxable: false, rateType: 'pct_gross', rate: 10, category: 'earning', attendanceBased: false },
-  { id: 'lunch', name: 'Lunch Allowance', active: true, taxable: false, rateType: 'per_day', rate: 500, category: 'earning', attendanceBased: true, attendanceSource: 'days_present', description: '₦500/day × Days Present' },
+  { id: 'lunch', name: 'Lunch Allowance', active: true, taxable: false, rateType: 'pct_gross', rate: 10, category: 'earning', attendanceBased: true, attendanceSource: 'days_present', description: '% of Gross ÷ Working Days × Days Present' },
   { id: 'overtime', name: 'Overtime Allowance', active: true, taxable: true, rateType: 'per_hour', rate: 1250, category: 'earning', attendanceBased: true, attendanceSource: 'overtime_hours', description: '₦1,250/hr × Approved Overtime Hours' },
   { id: 'site', name: 'Site Allowance', active: false, taxable: false, rateType: 'per_day', rate: 2500, category: 'earning', attendanceBased: true, attendanceSource: 'days_on_site', description: '₦2,500/day × Days on Site' },
   { id: 'duty', name: 'Duty Allowance', active: false, taxable: true, rateType: 'monthly_manual', rate: 0, category: 'earning', attendanceBased: false },

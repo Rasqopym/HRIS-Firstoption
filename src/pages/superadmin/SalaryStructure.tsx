@@ -178,22 +178,23 @@ export default function SalaryStructure({ staffId }: Props) {
                 taxable: saved.is_taxable,
                 rateType: dbRateTypeToApp(saved.rate_type || mc.default_rate_type || 'flat'),
                 rate: saved.rate || 0,
-                attendanceBased: (saved.rate_type || mc.default_rate_type) === 'per_hour' || (saved.rate_type || mc.default_rate_type) === 'per_day',
-                attendanceSource: undefined,
-                description: undefined,
+                attendanceBased: (saved.rate_type || mc.default_rate_type) === 'per_hour' || (saved.rate_type || mc.default_rate_type) === 'per_day' || mc.name.toLowerCase().includes('lunch') || mc.name.toLowerCase().includes('transport'),
+                attendanceSource: (mc.name.toLowerCase().includes('lunch') || mc.name.toLowerCase().includes('transport')) ? 'days_present' : undefined,
+                description: (mc.name.toLowerCase().includes('lunch') || mc.name.toLowerCase().includes('transport')) ? '% of Gross ÷ Working Days × Days Present' : undefined,
               }
             } else {
+              const isProratedAllowance = mc.name.toLowerCase().includes('lunch') || mc.name.toLowerCase().includes('transport')
               return {
                 id: mc.id,
                 name: mc.name,
                 category: mc.category === 'allowance' ? 'earning' : 'deduction',
-                active: isBasicOrPaye,
-                taxable: true,
-                rateType: dbRateTypeToApp(mc.default_rate_type || 'flat'),
-                rate: mc.name.toLowerCase().includes('basic') ? 150000 : 0,
-                attendanceBased: mc.default_rate_type === 'per_hour' || mc.default_rate_type === 'per_day',
-                attendanceSource: undefined,
-                description: undefined,
+                active: isBasicOrPaye || isProratedAllowance,
+                taxable: !isProratedAllowance,
+                rateType: isProratedAllowance ? 'pct_gross' : dbRateTypeToApp(mc.default_rate_type || 'flat'),
+                rate: mc.name.toLowerCase().includes('basic') ? 150000 : (isProratedAllowance ? 10 : 0),
+                attendanceBased: mc.default_rate_type === 'per_hour' || mc.default_rate_type === 'per_day' || isProratedAllowance,
+                attendanceSource: isProratedAllowance ? 'days_present' : undefined,
+                description: isProratedAllowance ? '% of Gross ÷ Working Days × Days Present' : undefined,
               }
             }
           })
@@ -672,7 +673,7 @@ export default function SalaryStructure({ staffId }: Props) {
               {/* Computed note */}
               <div className="text-xs text-slate-400 pl-4 leading-relaxed">
                 {comp.rateType === 'pct_gross'
-                  ? <><span className="font-mono-data text-slate-600">₦{Math.round((staff.gross_salary || 165500) * comp.rate / 100).toLocaleString()}</span> <span className="text-slate-300">({comp.rate}% of gross)</span></>
+                  ? <><span className="font-mono-data text-slate-600">₦{Math.round((staff.gross_salary || 165500) * comp.rate / 100).toLocaleString()}</span> <span className="text-slate-300">({comp.rate}% of gross{comp.attendanceBased ? ' · prorated by attendance' : ''})</span></>
                   : comp.rateType === 'pct_basic'
                   ? `${comp.rate}% of basic`
                   : comp.rateType === 'per_hour'

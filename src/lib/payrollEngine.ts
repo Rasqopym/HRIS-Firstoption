@@ -70,7 +70,7 @@ export async function calculatePayrollForStaff(
   // 1. Fetch staff row
   const { data: staff, error: staffError } = await supabase
     .from('staff')
-    .select('id, staff_code, profile_id, email, full_name, gross_salary')
+    .select('id, staff_code, profile_id, email, full_name, gross_salary, is_confirmed, confirmation_date, date_employed, job_title')
     .eq('id', staffId)
     .single()
 
@@ -291,10 +291,11 @@ export async function calculatePayrollForStaff(
       return typeName.includes('annual')
     })
 
+    // Unpaid leave and AWOL are treated as unpaid deductions
     const unpaidLeaves = activeLeaves.filter((lr: any) => {
       const typeName = (lr.leave_types?.name || '').toLowerCase()
       const isPaid = lr.leave_types?.is_paid
-      return typeName.includes('unpaid') || isPaid === false
+      return typeName.includes('unpaid') || typeName.includes('awol') || isPaid === false
     })
 
     unpaidLeaves.forEach((ul: any) => {
@@ -307,6 +308,60 @@ export async function calculatePayrollForStaff(
   } catch (e) {
     console.warn('Error fetching leave requests for payroll:', e)
   }
+
+  // 3c. Check Annual Leave Bonus Eligibility:
+  // - Staff must be confirmed
+  // - Staff must have at least 1 full year of service
+  // - Only paid once per calendar year
+  const isStaffConfirmed = Boolean((staff as any).is_confirmed)
+  let hasOneYearService = false
+  let serviceDays = 0
+  let serviceYears = 0
+
+  if (staff.date_employed) {
+    const empDate = new Date(staff.date_employed)
+    const pDate = new Date(periodStart)
+    serviceDays = Math.floor((pDate.getTime() - empDate.getTime()) / (1000 * 60 * 60 * 24))
+    serviceYears = Math.floor(serviceDays / 365)
+    hasOneYearService = serviceDays >= 365
+  }
+
+  let alreadyPaidBonusThisYear = false
+  try {
+    const yearStart = `${periodYear}-01-01`
+    const { data: pastPayslips } = await supabase
+      .from('payslips')
+      .select(`
+        id,
+        payroll_periods!inner (start_date),
+        payslip_line_items (amount, salary_components(name))
+      `)
+      .eq('staff_id', staffId)
+      .gte('payroll_periods.start_date', yearStart)
+      .lt('payroll_periods.start_date', periodStart)
+
+    if (pastPayslips && pastPayslips.length > 0) {
+      for (const p of pastPayslips) {
+        const items = (p as any).payslip_line_items || []
+        const foundBonus = items.some((li: any) => {
+          const cName = (li.salary_components?.name || '').toLowerCase()
+          return cName.includes('leave') && !cName.includes('unpaid') && li.amount > 0
+        })
+        if (foundBonus) {
+          alreadyPaidBonusThisYear = true
+          break
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[payrollEngine] Error checking past leave bonus:', e)
+  }
+
+  const isEligibleForLeaveBonus = 
+    hasApprovedAnnualLeave && 
+    isStaffConfirmed && 
+    hasOneYearService && 
+    !alreadyPaidBonusThisYear
 
   // 4. Fetch tax reliefs (default to zero if none)
   const { data: taxReliefs } = await supabase
@@ -378,10 +433,32 @@ export async function calculatePayrollForStaff(
 
     const isLunchOrTransport = compNameLower.includes('lunch') || compNameLower.includes('transport')
     const isAttendanceProratedComp = isLunchOrTransport || (sc as any).attendance_based === true || (sc as any).attendanceBased === true
+    const isLeaveAllowance = compNameLower.includes('leave') && !compNameLower.includes('unpaid')
 
-    // If Leave Allowance component and staff has NO approved annual leave this period, skip/zero out
-    if (compNameLower.includes('leave') && !compNameLower.includes('unpaid') && !hasApprovedAnnualLeave) {
-      amount = 0
+    // Handle Annual Leave Bonus (1 Month Basic Salary):
+    // Requires: approved annual leave this period + confirmed employment + at least 1 full year of service
+    if (isLeaveAllowance) {
+      if (isEligibleForLeaveBonus) {
+        amount = Math.round(basicSalaryAmount) // Exactly 1 Month Basic Salary!
+        quantity = 1
+        dailyRate = Math.round(basicSalaryAmount)
+        isAttendanceProrated = false
+        breakdown = `100% of Basic Salary (₦${Math.round(basicSalaryAmount).toLocaleString()}) — Confirmed staff (${serviceYears} yr(s) service)`
+        attendanceTag = 'Confirmed · >1yr'
+      } else {
+        amount = 0
+        quantity = 0
+        isAttendanceProrated = false
+        if (!hasApprovedAnnualLeave) {
+          breakdown = '₦0 (No approved annual leave this period)'
+        } else if (!isStaffConfirmed) {
+          breakdown = '₦0 (Ineligible: Staff employment is not yet confirmed)'
+        } else if (!hasOneYearService) {
+          breakdown = `₦0 (Ineligible: Requires 1 full year of service. Current tenure: ${Math.max(0, Math.floor(serviceDays / 30))} months)`
+        } else if (alreadyPaidBonusThisYear) {
+          breakdown = `₦0 (Already received Annual Leave Bonus for year ${periodYear})`
+        }
+      }
     } else if (isAttendanceProratedComp && (rateType === 'percentage_of_gross' || rateType === 'pct_gross')) {
       // Percentage of Gross prorated by working days in month and days present
       const monthlyAllocation = sc.rate > 100 ? sc.rate : (staff.gross_salary || 0) * (sc.rate / 100)
@@ -479,6 +556,26 @@ export async function calculatePayrollForStaff(
       breakdown,
       attendanceTag,
       isAttendanceProrated,
+    })
+  }
+
+  // If staff is eligible for Leave Bonus but template had no Leave Allowance component, auto-inject it
+  const hasLeaveLineItem = lineItems.some(li => li.componentName.toLowerCase().includes('leave') && !li.componentName.toLowerCase().includes('unpaid'))
+  if (!hasLeaveLineItem && isEligibleForLeaveBonus) {
+    lineItems.push({
+      componentId: 'leave-allowance-bonus',
+      componentName: 'Annual Leave Bonus (1 Month Basic)',
+      category: 'allowance',
+      rateType: 'flat_amount',
+      rate: Math.round(basicSalaryAmount),
+      dailyRate: Math.round(basicSalaryAmount),
+      quantity: 1,
+      amount: Math.round(basicSalaryAmount),
+      isTaxable: true,
+      needsManualInput: false,
+      breakdown: `100% of Basic Salary (₦${Math.round(basicSalaryAmount).toLocaleString()}) — Confirmed staff (${serviceYears} yr(s) service)`,
+      attendanceTag: 'Confirmed · >1yr',
+      isAttendanceProrated: false,
     })
   }
 
