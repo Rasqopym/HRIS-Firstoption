@@ -653,8 +653,9 @@ export default function LeaveManagement() {
                     </button>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              )
+            })}
+          </tbody>
           </table>
         </div>
       </div>
