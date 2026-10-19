@@ -7,6 +7,9 @@ interface StaffMember {
   id: string
   staff_code: string
   full_name: string
+  profile_id?: string
+  email?: string
+  date_employed?: string
   department_name?: string
 }
 
@@ -127,9 +130,12 @@ export default function AttendanceSummary() {
         }
       } catch (e) {}
 
+      const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
+      const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
+
       const { data: staffData, error: staffError } = await supabase
         .from('staff')
-        .select('id, staff_code, full_name, profile_id, email, departments(name)')
+        .select('id, staff_code, full_name, profile_id, email, date_employed, created_at, departments(name)')
         .eq('status', 'active')
         .order('full_name')
       
@@ -139,17 +145,17 @@ export default function AttendanceSummary() {
         return
       }
 
-      const staffWithDept = staffData.map(s => ({
-        id: s.id,
-        staff_code: s.staff_code,
-        full_name: s.full_name,
-        profile_id: s.profile_id,
-        email: s.email,
-        department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
-      }))
-
-      const firstDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
-      const lastDay = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
+      const staffWithDept = staffData
+        .map(s => ({
+          id: s.id,
+          staff_code: s.staff_code,
+          full_name: s.full_name,
+          profile_id: s.profile_id,
+          email: s.email,
+          date_employed: (s as any).date_employed || ((s as any).created_at ? (s as any).created_at.slice(0, 10) : undefined),
+          department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
+        }))
+        .filter(s => !s.date_employed || s.date_employed <= lastDay)
       
       let attendanceData: any[] = []
       try {
@@ -229,10 +235,28 @@ export default function AttendanceSummary() {
           .filter(r => r.status === 'present' && (r.is_late || r.isLate))
           .reduce((sum, r) => sum + (r.late_minutes || r.lateMinutes || 0), 0)
 
+        // Calculate past working days since employment date for this specific staff member
+        let staffPastWorkingDays = 0
+        for (let d = 1; d <= lastEvaluatedDay; d++) {
+          const dateStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+          if (staff.date_employed && dateStr < staff.date_employed) {
+            continue
+          }
+          const dow = new Date(selectedYear, selectedMonth, d).getDay()
+          if (dow !== 0 && dow !== 6) {
+            const isHoliday = isPublicHoliday(dateStr, fetchedHolidays)
+            if (!isHoliday) {
+              if (!isCurrentMonth || d < today.getDate()) {
+                staffPastWorkingDays++
+              }
+            }
+          }
+        }
+
         const explicitAbsent = records.filter(r => r.status === 'absent').length
         const daysOnLeave = records.filter(r => r.status === 'on_leave').length
-        // Missed weekday working days (excluding approved leave) - weekends are never counted as absent
-        const unrecordedAbsent = Math.max(0, pastWorkingDays - weekdayPresent - daysOnLeave)
+        // Missed weekday working days (excluding approved leave) - pre-employment days and weekends are never counted as absent
+        const unrecordedAbsent = Math.max(0, staffPastWorkingDays - weekdayPresent - daysOnLeave)
         const daysAbsent = Math.max(explicitAbsent, unrecordedAbsent)
         
         const totalOvertimeHours = records.reduce((sum, r) => sum + (r.overtime_hours || r.overtimeHours || 0), 0)

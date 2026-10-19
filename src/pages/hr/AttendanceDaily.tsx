@@ -51,12 +51,19 @@ interface StaffMember {
   profile_id?: string
   email?: string
   department_name?: string
+  date_employed?: string
 }
 
 type ViewMode = 'today' | 'calendar'
 type StatusFilterType = 'all' | 'present' | 'on_time' | 'late' | 'field' | 'absent' | 'on_leave' | 'missing_clockout'
 
-function buildMonth(year: number, month: number, existingRecords: Record<string, any>, customHolidays: PublicHoliday[] = []): ExtendedDayAttendance[] {
+function buildMonth(
+  year: number,
+  month: number,
+  existingRecords: Record<string, any>,
+  customHolidays: PublicHoliday[] = [],
+  employmentDate?: string
+): ExtendedDayAttendance[] {
   const days: ExtendedDayAttendance[] = []
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const today = new Date()
@@ -69,6 +76,7 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
     const dateObj = new Date(dateStr)
     dateObj.setHours(0, 0, 0, 0)
     const isFuture = dateObj > today
+    const isPreEmployment = Boolean(employmentDate && dateStr < employmentDate)
     
     if (existingRecords[dateStr]) {
       const rec = existingRecords[dateStr]
@@ -88,6 +96,16 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
         overtimeHours: rec.overtime_hours || rec.overtimeHours || 0,
         onSite: rec.on_site ?? rec.onSite ?? false,
         overtimeApproval: rec.overtime_approval || rec.overtimeApproval || 'none',
+      })
+    } else if (isPreEmployment) {
+      days.push({
+        date: dateStr,
+        status: 'unmarked',
+        fieldNotes: 'Not Yet Employed',
+        overtimeHours: 0,
+        onSite: false,
+        overtimeApproval: 'none',
+        siteVisits: [],
       })
     } else if (isWeekend) {
       days.push({
@@ -110,16 +128,7 @@ function buildMonth(year: number, month: number, existingRecords: Record<string,
           overtimeApproval: 'none',
           siteVisits: [],
         })
-      } else if (isFuture) {
-        days.push({
-          date: dateStr,
-          status: 'unmarked',
-          overtimeHours: 0,
-          onSite: false,
-          overtimeApproval: 'none',
-          siteVisits: [],
-        })
-      } else if (dateObj.getTime() === today.getTime()) {
+      } else if (isFuture || dateObj.getTime() === today.getTime()) {
         days.push({
           date: dateStr,
           status: 'unmarked',
@@ -284,7 +293,7 @@ export default function AttendanceDaily() {
 
       const { data, error } = await supabase
         .from('staff')
-        .select('id, staff_code, full_name, job_title, photo_url, profile_id, email, departments(name)')
+        .select('id, staff_code, full_name, job_title, photo_url, profile_id, email, date_employed, created_at, departments(name)')
         .eq('status', 'active')
         .order('full_name')
       
@@ -299,6 +308,7 @@ export default function AttendanceDaily() {
           photo_url: s.photo_url,
           profile_id: s.profile_id,
           email: s.email,
+          date_employed: s.date_employed || (s.created_at ? s.created_at.slice(0, 10) : undefined),
           department_name: (s.departments as any)?.name || (s.departments as any)?.[0]?.name || (s as any)?.department || 'Accounting & Finance'
         }))
         setStaffList(staffWithDept)
@@ -484,13 +494,26 @@ export default function AttendanceDaily() {
       }
 
       const mergedRecords = { ...cachedRecords, ...dbRecords }
-      const monthDays = buildMonth(selectedYear, selectedMonth, mergedRecords, customHolidays)
+      const monthDays = buildMonth(selectedYear, selectedMonth, mergedRecords, customHolidays, selectedStaff?.date_employed)
       setDays(monthDays)
       setLoading(false)
     }
 
     fetchAttendance()
-  }, [selectedStaffId, selectedMonth, selectedYear, customHolidays, todayRecords])
+  }, [selectedStaffId, selectedStaff?.date_employed, selectedMonth, selectedYear, customHolidays, todayRecords])
+
+  // ── Eligible Staff for the Selected Month (Hired on or before end of month) ──
+  const calendarStaffList = useMemo(() => {
+    const lastDayOfMonth = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
+    return staffList.filter(s => !s.date_employed || s.date_employed <= lastDayOfMonth)
+  }, [staffList, selectedYear, selectedMonth])
+
+  // If currently selected staff was not employed in the selected month, auto-select first eligible staff
+  useEffect(() => {
+    if (calendarStaffList.length > 0 && !calendarStaffList.some(s => s.id === selectedStaffId)) {
+      setSelectedStaffId(calendarStaffList[0].id)
+    }
+  }, [calendarStaffList, selectedStaffId])
 
   // ── Monthly Calendar Summary Metrics ──
   const presentDays = days.filter(d => d.status === 'present').length
@@ -608,7 +631,7 @@ export default function AttendanceDaily() {
     setBulkResult('')
     try {
       const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate()
-      const targets = bulkTarget === 'all' ? staffList : selectedStaff ? [selectedStaff] : []
+      const targets = bulkTarget === 'all' ? calendarStaffList : selectedStaff ? [selectedStaff] : []
       if (targets.length === 0) {
         alert('No staff members selected')
         setBulkLoading(false)
@@ -672,6 +695,9 @@ export default function AttendanceDaily() {
         const staffLeaves = leaveMap[st.id] || new Set()
 
         datesToProcess.forEach(dStr => {
+          if (st.date_employed && dStr < st.date_employed) {
+            return
+          }
           if (bulkPreserveLeaves && staffLeaves.has(dStr)) {
             return
           }
@@ -742,7 +768,7 @@ export default function AttendanceDaily() {
         if (refreshed) {
           refreshed.forEach(r => { refreshedMap[r.attendance_date] = r })
         }
-        setDays(buildMonth(selectedYear, selectedMonth, refreshedMap, customHolidays))
+        setDays(buildMonth(selectedYear, selectedMonth, refreshedMap, customHolidays, selectedStaff.date_employed))
       }
 
       await logAction({
@@ -770,7 +796,13 @@ export default function AttendanceDaily() {
     const isWeekend = dow === 0 || dow === 6
     const holiday = isPublicHoliday(targetDate, customHolidays)
 
-    return staffList.map(st => {
+    // Filter out staff hired after targetDate
+    const eligibleStaff = staffList.filter(st => {
+      if (!st.date_employed) return true
+      return st.date_employed <= targetDate
+    })
+
+    return eligibleStaff.map(st => {
       const rec = todayRecords[st.id] ||
         (st.staff_code ? todayRecords[st.staff_code] : null) ||
         (st.profile_id ? todayRecords[st.profile_id] : null) ||
@@ -1076,7 +1108,7 @@ export default function AttendanceDaily() {
           <div className="flex items-center gap-2">
             <h2 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">Daily Attendance Registry</h2>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-700">
-              {staffList.length} Active Staff
+              {viewMode === 'today' ? `${rosterStats.total} Staff Employed` : `${staffList.length} Active Staff`}
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
@@ -1833,7 +1865,7 @@ export default function AttendanceDaily() {
 
           {/* Staff Selector Pills */}
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
-            {staffList.map(s => (
+            {calendarStaffList.map(s => (
               <button
                 key={s.id}
                 onClick={() => setSelectedStaffId(s.id)}
@@ -2237,8 +2269,8 @@ export default function AttendanceDaily() {
                       onClick={() => setBulkTarget('all')}
                       className={`p-2.5 rounded-xl border text-left transition-all ${bulkTarget === 'all' ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300 text-blue-900 font-semibold' : 'bg-slate-50 border-slate-200 hover:bg-white text-slate-700'}`}
                     >
-                      <span className="block text-xs">All Active Staff</span>
-                      <span className="text-[11px] text-slate-500 font-normal block">{staffList.length} total staff members</span>
+                      <span className="block text-xs">All Eligible Staff</span>
+                      <span className="text-[11px] text-slate-500 font-normal block">{calendarStaffList.length} staff employed this month</span>
                     </button>
                   </div>
                 </div>
