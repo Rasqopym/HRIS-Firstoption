@@ -24,13 +24,28 @@ export default function LeaveRequest() {
   const yearStart = `${currentYear}-01-01`
   const yearEnd = `${currentYear}-12-31`
 
-  // Cadre determination: Senior Staff (21 days) vs Junior Staff (12 days)
+  // Cadre determination: Automatically linked to Salary Template / Structure, Job Grade, Gross Salary, or Title
+  const staffSalaryTemplate = typeof window !== 'undefined'
+    ? localStorage.getItem(`hris_staff_salary_template_${staff?.id}`) ||
+      localStorage.getItem(`hris_staff_salary_template_${staff?.staff_code}`) ||
+      (staff as any)?.salary_template || ''
+    : (staff as any)?.salary_template || ''
+
+  const staffJobGrade = (staff as any)?.job_grade || (typeof window !== 'undefined'
+    ? localStorage.getItem(`hris_staff_job_grade_${staff?.id}`) || ''
+    : '')
+
   const isSeniorStaff = Boolean(
-    /(director|manager|lead|senior|head|executive|principal|chief|supervisor|partner|officer)/i.test(staff?.job_title || '') ||
-    /(grade [7-9]|grade 10|senior)/i.test((staff as any)?.job_grade || '')
+    // A. Explicit Salary Template Name (from Salary Structure Defaults, e.g. "Senior Staff", "Executive")
+    /(senior|executive|management|lead|director)/i.test(staffSalaryTemplate) ||
+    // B. Job Grade from Salary Structure (e.g. Grade 9-12, Grade 7-8)
+    /(grade\s*(7|8|9|10|11|12|[7-9]\d*)|senior|executive)/i.test(staffJobGrade) ||
+    // C. Gross Salary from Salary Structure (Senior benchmark >= ₦200,000)
+    Number(staff?.gross_salary || 0) >= 200000 ||
+    // D. Job Title / Role Keywords Fallback
+    /(director|manager|lead|senior|head|executive|principal|chief|supervisor|partner|officer)/i.test(staff?.job_title || '')
   )
   const cadreLabel = isSeniorStaff ? 'Senior Staff' : 'Junior Staff'
-  const annualLeaveDays = isSeniorStaff ? 21 : 12
 
   // Tenure & Confirmation: 1 full year service (365 days) + confirmed staff
   const isConfirmed = Boolean(staff?.is_confirmed)
@@ -80,6 +95,12 @@ export default function LeaveRequest() {
           return !n.includes('awol') && !n.includes('absence without')
         })
 
+        const seniorType = mappedTypes.find(t => t.name.toLowerCase().includes('senior') && t.name.toLowerCase().includes('annual'))
+        const juniorType = mappedTypes.find(t => t.name.toLowerCase().includes('junior') && t.name.toLowerCase().includes('annual'))
+        const dynamicAnnualDays = isSeniorStaff
+          ? (seniorType?.entitlementDays ?? 21)
+          : (juniorType?.entitlementDays ?? 12)
+
         // 2. Filter cadre-specific annual leave types if present
         mappedTypes = mappedTypes.filter(t => {
           const n = t.name.toLowerCase()
@@ -92,14 +113,17 @@ export default function LeaveRequest() {
           return true
         })
 
-        // 3. Adapt Annual Leave entitlement and label according to cadre (Senior: 21, Junior: 12)
+        // 3. Adapt Annual Leave entitlement and label according to cadre (Senior vs Junior)
         mappedTypes = mappedTypes.map(t => {
           const n = t.name.toLowerCase()
           if (n.includes('annual')) {
+            const isSen = n.includes('senior')
+            const isJun = n.includes('junior')
+            const entDays = isSen ? (seniorType?.entitlementDays ?? 21) : isJun ? (juniorType?.entitlementDays ?? 12) : dynamicAnnualDays
             return {
               ...t,
               name: isSeniorStaff ? 'Annual Leave (Senior Staff)' : 'Annual Leave (Junior Staff)',
-              entitlementDays: annualLeaveDays,
+              entitlementDays: entDays,
             }
           }
           return t
@@ -107,7 +131,7 @@ export default function LeaveRequest() {
 
         if (mappedTypes.length === 0) {
           mappedTypes = [
-            { id: isSeniorStaff ? 'annual-leave-senior' : 'annual-leave-junior', name: isSeniorStaff ? 'Annual Leave (Senior Staff)' : 'Annual Leave (Junior Staff)', entitlementDays: annualLeaveDays, paid: true, requiresDocument: false },
+            { id: isSeniorStaff ? 'annual-leave-senior' : 'annual-leave-junior', name: isSeniorStaff ? 'Annual Leave (Senior Staff)' : 'Annual Leave (Junior Staff)', entitlementDays: dynamicAnnualDays, paid: true, requiresDocument: false },
             { id: 'sick-leave', name: 'Sick Leave', entitlementDays: 14, paid: true, requiresDocument: true },
             { id: 'casual-leave', name: 'Casual Leave', entitlementDays: 5, paid: true, requiresDocument: false },
             { id: 'compassionate-leave', name: 'Compassionate Leave', entitlementDays: 3, paid: true, requiresDocument: false },

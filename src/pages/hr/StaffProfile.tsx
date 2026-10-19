@@ -1082,6 +1082,22 @@ export default function StaffProfile({ staffId, onNavigate, onSelectStaff }: Pro
               {[
                 { label: 'Department', value: s.departments?.name || s.department || 'Unassigned' },
                 { label: 'Job Title', value: s.job_title || '—' },
+                {
+                  label: 'Staff Cadre',
+                  value: (() => {
+                    const templateName = typeof window !== 'undefined'
+                      ? localStorage.getItem(`hris_staff_salary_template_${s.id}`) || localStorage.getItem(`hris_staff_salary_template_${s.staff_code}`) || s.salary_template || ''
+                      : s.salary_template || ''
+                    const jobGrade = s.job_grade || (typeof window !== 'undefined' ? localStorage.getItem(`hris_staff_job_grade_${s.id}`) || '' : '')
+                    const isSenior = /(senior|executive|management|lead|director)/i.test(templateName) ||
+                      /(grade\s*(7|8|9|10|11|12|[7-9]\d*)|senior|executive)/i.test(jobGrade) ||
+                      Number(s.gross_salary || 0) >= 200000 ||
+                      /(director|manager|lead|senior|head|executive|principal|chief|supervisor|partner|officer)/i.test(s.job_title || '')
+
+                    const source = templateName ? `Template: ${templateName}` : jobGrade ? `Grade: ${jobGrade}` : Number(s.gross_salary || 0) >= 200000 ? 'Salary Structure' : 'Job Title'
+                    return isSenior ? `Senior Cadre (${source})` : `Junior Cadre (${source})`
+                  })()
+                },
                 { label: 'Employment Date', value: s.date_employed?.split('T')[0] || '—' },
                 { 
                   label: 'Confirmation Status', 
