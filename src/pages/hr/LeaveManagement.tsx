@@ -30,6 +30,11 @@ export default function LeaveManagement() {
 
   const filtered = requests.filter(r => statusFilter === 'all' || r.status === statusFilter)
 
+  const seniorLeaveType = types.find(t => t.name.toLowerCase().includes('senior') && t.name.toLowerCase().includes('annual'))
+  const juniorLeaveType = types.find(t => t.name.toLowerCase().includes('junior') && t.name.toLowerCase().includes('annual'))
+  const seniorEntitlement = seniorLeaveType ? seniorLeaveType.entitlementDays : 21
+  const juniorEntitlement = juniorLeaveType ? juniorLeaveType.entitlementDays : 12
+
   const handleDecide = async (id: string, status: 'approved' | 'rejected') => {
     const request = requests.find(r => r.id === id)
     if (!request) return
@@ -472,8 +477,8 @@ export default function LeaveManagement() {
               <div className="p-2.5 rounded-lg bg-white border border-blue-100 shadow-2xs">
                 <strong className="block text-slate-800 font-semibold mb-1 text-xs">Cadre Entitlements:</strong>
                 <span className="text-slate-600 leading-relaxed text-[11.5px]">
-                  <strong>Senior Staff:</strong> 21 days annual leave entitlement.<br />
-                  <strong>Junior Staff:</strong> 12 days annual leave entitlement.
+                  <strong>Senior Staff:</strong> {seniorEntitlement} days annual leave entitlement.<br />
+                  <strong>Junior Staff:</strong> {juniorEntitlement} days annual leave entitlement.
                 </span>
               </div>
               <div className="p-2.5 rounded-lg bg-white border border-blue-100 shadow-2xs">
@@ -523,12 +528,12 @@ export default function LeaveManagement() {
                           )}
                           {isSenior && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
-                              Senior Cadre (21d)
+                              Senior Cadre ({t.entitlementDays}d)
                             </span>
                           )}
                           {isJunior && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">
-                              Junior Cadre (12d)
+                              Junior Cadre ({t.entitlementDays}d)
                             </span>
                           )}
                         </div>

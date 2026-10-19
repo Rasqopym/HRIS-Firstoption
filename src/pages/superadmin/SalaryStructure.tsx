@@ -436,10 +436,22 @@ export default function SalaryStructure({ staffId }: Props) {
 
       setComponents(updatedComponents)
 
+      // Find template
+      const appliedTemplate = templates.find(t => t.id === templateId)
+
       // Save to localStorage cache immediately for instant cross-view sync
       try {
         localStorage.setItem(`hris_salary_structure_${staffId}`, JSON.stringify(updatedComponents))
         localStorage.setItem('hris_salary_structure_shared', JSON.stringify(updatedComponents))
+        if (appliedTemplate) {
+          localStorage.setItem(`hris_staff_salary_template_${staffId}`, appliedTemplate.name)
+          if (staff?.staff_code) {
+            localStorage.setItem(`hris_staff_salary_template_${staff.staff_code}`, appliedTemplate.name)
+          }
+          if (appliedTemplate.job_grade) {
+            localStorage.setItem(`hris_staff_job_grade_${staffId}`, appliedTemplate.job_grade)
+          }
+        }
       } catch (e) {
         console.warn('LocalStorage save error:', e)
       }
