@@ -191,11 +191,11 @@ export default function LeaveManagement() {
           }
         } catch (e) {}
 
-        const mappedTypes: LeaveType[] = typesData.map((t: any) => {
+        let mappedTypes: LeaveType[] = typesData.map((t: any) => {
           const nameLower = t.name.toLowerCase()
           const attracts = cachedTypesConfig[nameLower] !== undefined
             ? cachedTypesConfig[nameLower]
-            : nameLower.includes('annual')
+            : (nameLower.includes('annual') && !nameLower.includes('unpaid'))
           return {
             id: t.id,
             name: t.name,
@@ -205,6 +205,47 @@ export default function LeaveManagement() {
             attractsLeaveAllowance: attracts,
           }
         })
+
+        // Ensure both Senior Staff (21 days) and Junior Staff (12 days) Annual Leave exist
+        const hasSeniorAnnual = mappedTypes.some(t => t.name.toLowerCase().includes('senior') && t.name.toLowerCase().includes('annual'))
+        const hasJuniorAnnual = mappedTypes.some(t => t.name.toLowerCase().includes('junior') && t.name.toLowerCase().includes('annual'))
+        const hasGenericAnnual = mappedTypes.some(t => t.name.toLowerCase() === 'annual leave')
+
+        if (!hasSeniorAnnual && hasGenericAnnual) {
+          mappedTypes = mappedTypes.map(t => {
+            if (t.name.toLowerCase() === 'annual leave') {
+              return { ...t, name: 'Annual Leave (Senior Staff)', entitlementDays: 21, attractsLeaveAllowance: true }
+            }
+            return t
+          })
+          mappedTypes.push({
+            id: 'type-annual-junior',
+            name: 'Annual Leave (Junior Staff)',
+            entitlementDays: 12,
+            paid: true,
+            requiresDocument: false,
+            attractsLeaveAllowance: true,
+          })
+        } else if (!hasSeniorAnnual && !hasJuniorAnnual && !hasGenericAnnual) {
+          mappedTypes.unshift(
+            { id: 'type-annual-senior', name: 'Annual Leave (Senior Staff)', entitlementDays: 21, paid: true, requiresDocument: false, attractsLeaveAllowance: true },
+            { id: 'type-annual-junior', name: 'Annual Leave (Junior Staff)', entitlementDays: 12, paid: true, requiresDocument: false, attractsLeaveAllowance: true }
+          )
+        }
+
+        // Ensure AWOL exists in the list for HR disciplinary management
+        const hasAwol = mappedTypes.some(t => t.name.toLowerCase().includes('awol') || t.name.toLowerCase().includes('absence without'))
+        if (!hasAwol) {
+          mappedTypes.push({
+            id: 'type-awol-unpaid',
+            name: 'AWOL (Absence Without Official Leave)',
+            entitlementDays: 0,
+            paid: false,
+            requiresDocument: false,
+            attractsLeaveAllowance: false,
+          })
+        }
+
         setTypes(mappedTypes)
       }
 
@@ -420,23 +461,78 @@ export default function LeaveManagement() {
 
       {/* Leave Type Config */}
       {tab === 'config' && (
-        <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden max-w-2xl">
-          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
-            <h3 className="font-display font-semibold text-slate-700">Leave Types Configuration</h3>
-            <button onClick={() => setAddTypeModal(true)} className="text-xs text-blue-600 hover:underline">Add Type</button>
+        <div className="space-y-4 max-w-4xl">
+          {/* Policy Overview Callout */}
+          <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200/80 text-xs text-slate-700 space-y-2">
+            <div className="flex items-center gap-2 font-semibold text-blue-900 text-sm">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>Annual Leave Cadres, Bonus Rules & AWOL Disciplinary Handling</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+              <div className="p-2.5 rounded-lg bg-white border border-blue-100 shadow-2xs">
+                <strong className="block text-slate-800 font-semibold mb-1 text-xs">Cadre Entitlements:</strong>
+                <span className="text-slate-600 leading-relaxed text-[11.5px]">
+                  <strong>Senior Staff:</strong> 21 days annual leave entitlement.<br />
+                  <strong>Junior Staff:</strong> 12 days annual leave entitlement.
+                </span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-white border border-blue-100 shadow-2xs">
+                <strong className="block text-slate-800 font-semibold mb-1 text-xs">Annual Leave Bonus:</strong>
+                <span className="text-slate-600 leading-relaxed text-[11.5px]">
+                  Bonus is <strong>100% of 1 Month Basic Salary</strong>. Strictly payable to <strong>confirmed</strong> staff with at least <strong>1 full year of continuous service</strong> upon approved annual leave (once per calendar year).
+                </span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-white border border-blue-100 shadow-2xs">
+                <strong className="block text-slate-800 font-semibold mb-1 text-xs">AWOL (Disciplinary):</strong>
+                <span className="text-slate-600 leading-relaxed text-[11.5px]">
+                  <strong>Hidden from staff self-service</strong>. Exclusively recorded by HR/Management. Processed in payroll as unpaid deductions with ₦0 attendance allowances.
+                </span>
+              </div>
+            </div>
           </div>
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-50">
-              <tr>
-                {['Leave Type', 'Entitlement (days/yr)', 'Paid', 'Attracts Bonus', 'Requires Document', ''].map(h => (
-                  <th key={h} className="py-2.5 px-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {types.map(t => (
-                <tr key={t.id} className="table-row-hover group">
-                  <td className="py-3 px-4 font-medium text-slate-800">{t.name}</td>
+
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+              <h3 className="font-display font-semibold text-slate-700">Leave Types Configuration</h3>
+              <button onClick={() => setAddTypeModal(true)} className="text-xs text-blue-600 hover:underline">Add Type</button>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="border-b border-slate-50">
+                <tr>
+                  {['Leave Type', 'Entitlement (days/yr)', 'Paid', 'Attracts Bonus', 'Requires Document', ''].map(h => (
+                    <th key={h} className="py-2.5 px-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {types.map(t => {
+                  const nameLower = t.name.toLowerCase()
+                  const isAwol = nameLower.includes('awol') || nameLower.includes('absence without')
+                  const isSenior = nameLower.includes('senior') && nameLower.includes('annual')
+                  const isJunior = nameLower.includes('junior') && nameLower.includes('annual')
+
+                  return (
+                    <tr key={t.id} className="table-row-hover group">
+                      <td className="py-3 px-4 font-medium text-slate-800">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{t.name}</span>
+                          {isAwol && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-700 border border-rose-200">
+                              Administrative / HR Only (Hidden from Staff)
+                            </span>
+                          )}
+                          {isSenior && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
+                              Senior Cadre (21d)
+                            </span>
+                          )}
+                          {isJunior && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                              Junior Cadre (12d)
+                            </span>
+                          )}
+                        </div>
+                      </td>
                   <td className="py-3 px-4">
                     <input
                       type="number" value={t.entitlementDays}

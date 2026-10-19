@@ -162,6 +162,23 @@ export default function SalaryDefaults() {
             })
           }
 
+          // Ensure Lunch Allowance and Transport Allowance are attendance-based % of Gross
+          comps = comps.map(c => {
+            const nameLower = (c.name || '').toLowerCase()
+            if (nameLower.includes('lunch') || nameLower.includes('transport')) {
+              const isOldPerDay = c.rateType === 'per_day' || (c.rateType === 'pct_gross' && c.rate > 50)
+              return {
+                ...c,
+                attendanceBased: c.attendanceBased ?? true,
+                attendanceSource: 'days_present',
+                rateType: isOldPerDay ? 'pct_gross' : (c.rateType || 'pct_gross'),
+                rate: isOldPerDay ? 10 : (c.rate ?? 10),
+                description: '% of Gross ÷ Working Days × Days Present',
+              }
+            }
+            return c
+          })
+
           return {
             ...t,
             name: cachedT?.name || t.name,
@@ -225,7 +242,8 @@ export default function SalaryDefaults() {
       rateType: newCompRateType,
       rate: newCompRate,
       category: newCompCategory,
-      attendanceBased: newCompRateType === 'per_hour' || newCompRateType === 'per_day',
+      attendanceBased: newCompRateType === 'per_hour' || newCompRateType === 'per_day' || trimmedName.toLowerCase().includes('lunch') || trimmedName.toLowerCase().includes('transport'),
+      attendanceSource: 'days_present',
     }
 
     setTemplates(prev => prev.map(t =>
@@ -680,7 +698,7 @@ export default function SalaryDefaults() {
               <table className="w-full text-sm">
                 <thead className="border-b border-slate-50">
                   <tr>
-                    {['Component', 'Active Default', 'Taxable Default', 'Rate Type', 'Default Rate'].map(h => (
+                    {['Component', 'Active Default', 'Taxable Default', 'Attendance Prorated', 'Rate Type', 'Default Rate'].map(h => (
                       <th key={h} className="py-2.5 px-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
@@ -690,10 +708,27 @@ export default function SalaryDefaults() {
                     <tr key={comp.id} className={!comp.active ? 'opacity-40' : ''}>
                       <td className="py-3 px-4">
                         <div className="font-medium text-slate-800 text-sm">{comp.name}</div>
-                        {comp.attendanceBased && <span className="text-xs text-blue-500">attendance-based</span>}
+                        {comp.attendanceBased ? (
+                          <div className="text-[11px] font-medium text-blue-600 flex items-center gap-1 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                            ÷ working days × days present
+                          </div>
+                        ) : comp.description ? (
+                          <div className="text-[11px] text-slate-400 mt-0.5">{comp.description}</div>
+                        ) : null}
                       </td>
                       <td className="py-3 px-4"><Toggle value={comp.active} onChange={v => updateComponent(comp.id, { active: v })} /></td>
                       <td className="py-3 px-4"><Toggle value={comp.taxable} onChange={v => updateComponent(comp.id, { taxable: v })} /></td>
+                      <td className="py-3 px-4">
+                        <Toggle
+                          value={comp.attendanceBased ?? false}
+                          onChange={v => updateComponent(comp.id, {
+                            attendanceBased: v,
+                            attendanceSource: v ? 'days_present' : undefined,
+                            description: v ? '% of Gross ÷ Working Days × Days Present' : undefined
+                          })}
+                        />
+                      </td>
                       <td className="py-3 px-4">
                         <select
                           value={comp.rateType}

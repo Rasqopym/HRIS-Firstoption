@@ -12,6 +12,9 @@ interface StaffRecord {
   status: string
   profile_id: string
   gross_salary?: number
+  is_confirmed?: boolean
+  confirmation_date?: string
+  job_grade?: string
   departments?: { name: string }
   profiles?: { email: string; phone: string; photo_url: string }
 }

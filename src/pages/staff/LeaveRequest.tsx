@@ -24,6 +24,29 @@ export default function LeaveRequest() {
   const yearStart = `${currentYear}-01-01`
   const yearEnd = `${currentYear}-12-31`
 
+  // Cadre determination: Senior Staff (21 days) vs Junior Staff (12 days)
+  const isSeniorStaff = Boolean(
+    /(director|manager|lead|senior|head|executive|principal|chief|supervisor|partner|officer)/i.test(staff?.job_title || '') ||
+    /(grade [7-9]|grade 10|senior)/i.test((staff as any)?.job_grade || '')
+  )
+  const cadreLabel = isSeniorStaff ? 'Senior Staff' : 'Junior Staff'
+  const annualLeaveDays = isSeniorStaff ? 21 : 12
+
+  // Tenure & Confirmation: 1 full year service (365 days) + confirmed staff
+  const isConfirmed = Boolean(staff?.is_confirmed)
+  let tenureDays = 0
+  let tenureYears = 0
+  let tenureMonths = 0
+  if (staff?.date_employed) {
+    const empDate = new Date(staff.date_employed)
+    const now = new Date()
+    tenureDays = Math.max(0, Math.floor((now.getTime() - empDate.getTime()) / (1000 * 60 * 60 * 24)))
+    tenureYears = Math.floor(tenureDays / 365)
+    tenureMonths = Math.floor((tenureDays % 365) / 30)
+  }
+  const hasOneYearTenure = tenureDays >= 365
+  const isBonusEligible = isConfirmed && hasOneYearTenure
+
   // Fetch leave types, balances, and requests
   useEffect(() => {
     const fetchData = async () => {
@@ -51,9 +74,40 @@ export default function LeaveRequest() {
           console.warn('Leave types DB fetch skipped:', e)
         }
 
+        // 1. Exclude AWOL (Absence Without Official Leave) - strictly administrative/disciplinary, hidden from staff
+        mappedTypes = mappedTypes.filter(t => {
+          const n = t.name.toLowerCase()
+          return !n.includes('awol') && !n.includes('absence without')
+        })
+
+        // 2. Filter cadre-specific annual leave types if present
+        mappedTypes = mappedTypes.filter(t => {
+          const n = t.name.toLowerCase()
+          if (n.includes('senior') && n.includes('annual')) {
+            return isSeniorStaff
+          }
+          if (n.includes('junior') && n.includes('annual')) {
+            return !isSeniorStaff
+          }
+          return true
+        })
+
+        // 3. Adapt Annual Leave entitlement and label according to cadre (Senior: 21, Junior: 12)
+        mappedTypes = mappedTypes.map(t => {
+          const n = t.name.toLowerCase()
+          if (n.includes('annual')) {
+            return {
+              ...t,
+              name: isSeniorStaff ? 'Annual Leave (Senior Staff)' : 'Annual Leave (Junior Staff)',
+              entitlementDays: annualLeaveDays,
+            }
+          }
+          return t
+        })
+
         if (mappedTypes.length === 0) {
           mappedTypes = [
-            { id: 'annual-leave', name: 'Annual Leave', entitlementDays: 21, paid: true, requiresDocument: false },
+            { id: isSeniorStaff ? 'annual-leave-senior' : 'annual-leave-junior', name: isSeniorStaff ? 'Annual Leave (Senior Staff)' : 'Annual Leave (Junior Staff)', entitlementDays: annualLeaveDays, paid: true, requiresDocument: false },
             { id: 'sick-leave', name: 'Sick Leave', entitlementDays: 14, paid: true, requiresDocument: true },
             { id: 'casual-leave', name: 'Casual Leave', entitlementDays: 5, paid: true, requiresDocument: false },
             { id: 'compassionate-leave', name: 'Compassionate Leave', entitlementDays: 3, paid: true, requiresDocument: false },
@@ -283,6 +337,56 @@ export default function LeaveRequest() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Request Leave
         </button>
+      </div>
+
+      {/* Cadre & Leave Bonus Eligibility Banner */}
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 mb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start md:items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm ${isSeniorStaff ? 'bg-indigo-100 text-indigo-700' : 'bg-blue-100 text-blue-700'}`}>
+              {isSeniorStaff ? 'SR' : 'JR'}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-800 text-sm">{staff?.full_name}</span>
+                <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider ${isSeniorStaff ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                  {cadreLabel} ({annualLeaveDays} Days Annual Leave)
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${isConfirmed ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                  {isConfirmed ? 'Confirmed Staff' : 'Under Probation'}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                <span>Role: <strong className="text-slate-700">{staff?.job_title || 'Staff Member'}</strong></span>
+                <span>•</span>
+                <span>Tenure: <strong className="text-slate-700">{tenureYears > 0 ? `${tenureYears} yr${tenureYears > 1 ? 's' : ''} ` : ''}{tenureMonths} mo(s)</strong> ({staff?.date_employed ? new Date(staff.date_employed).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A'})</span>
+              </div>
+            </div>
+          </div>
+
+          <div className={`p-3 rounded-xl border flex items-center gap-3 text-xs ${isBonusEligible ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-none ${isBonusEligible ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div className="font-semibold flex items-center gap-1.5">
+                <span>Annual Leave Bonus (1 Month Basic):</span>
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${isBonusEligible ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-700'}`}>
+                  {isBonusEligible ? 'ELIGIBLE' : 'NOT YET ELIGIBLE'}
+                </span>
+              </div>
+              <p className="text-[11px] mt-0.5 text-slate-600">
+                {isBonusEligible
+                  ? 'Bonus equivalent to 1 full month basic salary will be paid with payroll when you take approved Annual Leave (once per calendar year).'
+                  : !isConfirmed && !hasOneYearTenure
+                  ? 'Requires both Staff Confirmation and at least 1 full year of continuous service.'
+                  : !isConfirmed
+                  ? 'Staff confirmation is required to qualify for leave bonus.'
+                  : `Requires at least 1 full year of service (${Math.max(0, 365 - tenureDays)} days remaining).`}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Leave balances */}

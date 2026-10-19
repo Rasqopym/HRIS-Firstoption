@@ -490,8 +490,10 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
                 {earnings.map(e => {
                   const isOpen = expandedRows.has(e.id)
                   const hasCalc = e.quantity !== null && e.quantity > 0
+                  const isProratedAllowance = e.salary_components?.name?.toLowerCase().includes('lunch') || e.salary_components?.name?.toLowerCase().includes('transport')
                   const rateType = e.salary_components?.default_rate_type || ''
-                  const rateUnit = RATE_UNIT_MAP[rateType] || ''
+                  const rateUnit = isProratedAllowance ? '/day' : (RATE_UNIT_MAP[rateType] || (e.quantity ? '/day' : ''))
+                  const quantityLabel = isProratedAllowance ? `${e.quantity} day${e.quantity === 1 ? '' : 's'} present` : `${e.quantity}`
                   return (
                     <React.Fragment key={e.id}>
                       <tr className="border-t border-slate-50 first:border-t-0">
@@ -513,9 +515,14 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
                               </button>
                             )}
                             <div>
-                              <div className={`text-slate-700 ${hasCalc ? 'cursor-pointer hover:text-blue-600 transition-colors' : ''}`}
+                              <div className={`text-slate-700 flex items-center gap-1.5 ${hasCalc ? 'cursor-pointer hover:text-blue-600 transition-colors' : ''}`}
                                 onClick={() => hasCalc && toggleRow(e.id)}>
-                                {e.salary_components?.name || 'Unknown'}
+                                <span>{e.salary_components?.name || 'Unknown'}</span>
+                                {isProratedAllowance && e.quantity !== null && (
+                                  <span className="text-[11px] font-mono-data text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100">
+                                    {e.quantity}d present
+                                  </span>
+                                )}
                               </div>
                               {e.was_taxable && <span className="text-xs text-violet-500">taxable</span>}
                             </div>
@@ -533,20 +540,20 @@ export default function PayslipV2({ payslipId: initialPayslipId }: Props) {
                               </div>
                               <div className="space-y-1.5 text-xs text-slate-600">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-slate-500">Rate</span>
+                                  <span className="text-slate-500">{isProratedAllowance ? 'Daily Rate' : 'Rate'}</span>
                                   <span className="font-mono-data font-semibold text-slate-700">
-                                    ₦{e.rate_applied.toLocaleString()}{rateUnit}
+                                    ₦{Number(e.rate_applied || 0).toLocaleString()}{rateUnit}
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <span className="text-slate-500">Quantity</span>
+                                  <span className="text-slate-500">{isProratedAllowance ? 'Days Present' : 'Quantity'}</span>
                                   <span className="font-mono-data font-semibold text-slate-700">
-                                    {e.quantity}
+                                    {quantityLabel}
                                   </span>
                                 </div>
                                 <div className="border-t border-blue-100 pt-1.5 flex items-center justify-between font-semibold">
                                   <span className="text-slate-600">
-                                    ₦{e.rate_applied.toLocaleString()} × {e.quantity}
+                                    ₦{Number(e.rate_applied || 0).toLocaleString()} × {e.quantity} {isProratedAllowance ? 'days' : ''}
                                   </span>
                                   <span className="font-mono-data text-blue-700">{fmt(e.amount)}</span>
                                 </div>

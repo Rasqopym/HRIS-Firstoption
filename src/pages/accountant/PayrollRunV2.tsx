@@ -48,7 +48,11 @@ function mapEngineResultToRow(engineResult: any, staff: StaffMember): StaffPayro
     let breakdown: string | undefined
     let attendanceTag: string | undefined
 
-    if (item.rateType === 'percentage_of_gross' || item.rateType === 'percentage_of_basic' || item.rateType === 'flat_amount') {
+    if (item.isAttendanceProrated) {
+      type = 'attendance'
+      breakdown = item.breakdown || `₦${(item.dailyRate || item.rate || 0).toLocaleString()}/day × ${item.quantity || 0} days present`
+      attendanceTag = item.attendanceTag || `${item.quantity || 0}d present`
+    } else if (item.rateType === 'percentage_of_gross' || item.rateType === 'percentage_of_basic' || item.rateType === 'flat_amount') {
       type = 'fixed'
       if (item.rateType === 'percentage_of_gross') {
         breakdown = `${item.rate}% of gross`
@@ -57,12 +61,12 @@ function mapEngineResultToRow(engineResult: any, staff: StaffMember): StaffPayro
       }
     } else if (item.rateType === 'per_day') {
       type = 'attendance'
-      breakdown = `₦${item.rate.toLocaleString()}/day × ${item.quantity || 0} days`
-      attendanceTag = `${item.quantity || 0}d present`
+      breakdown = item.breakdown || `₦${item.rate.toLocaleString()}/day × ${item.quantity || 0} days`
+      attendanceTag = item.attendanceTag || `${item.quantity || 0}d present`
     } else if (item.rateType === 'per_hour') {
       type = 'attendance'
-      breakdown = `₦${item.rate.toLocaleString()}/hr × ${item.quantity || 0} OT hrs`
-      attendanceTag = `${item.quantity || 0}h OT`
+      breakdown = item.breakdown || `₦${item.rate.toLocaleString()}/hr × ${item.quantity || 0} OT hrs`
+      attendanceTag = item.attendanceTag || `${item.quantity || 0}h OT`
     } else if (item.rateType === 'manual_monthly') {
       type = 'manual'
     }
@@ -423,7 +427,7 @@ export default function PayrollRunV2({ onSelectPayslip, onNavigate }: { onSelect
         payslip_id: payslipId,
         component_id: item.componentId,
         quantity: item.quantity || null,
-        rate_applied: item.rate,
+        rate_applied: item.dailyRate || item.rate,
         amount: item.amount,
         was_taxable: item.isTaxable
       }))

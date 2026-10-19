@@ -246,7 +246,7 @@ export default function AttendanceDaily() {
 
   // Update in calendar
   const updateDay = (date: string, updates: Partial<ExtendedDayAttendance>) => {
-    if (date !== todayStr || !selectedStaff) return
+    if (!selectedStaff) return
 
     const updated = days.map(d => d.date === date ? { ...d, ...updates } : d)
     setDays(updated)
@@ -539,16 +539,229 @@ export default function AttendanceDaily() {
   }
 
   const handleSaveCalendar = async () => {
+    if (!selectedStaff) return
     setSaved(true)
-    if (selectedStaff) {
+    try {
+      const recordsToSave = days
+        .filter(d => d.status !== 'unmarked')
+        .map(d => ({
+          staff_id: selectedStaff.id,
+          attendance_date: d.date,
+          status: d.status,
+          clock_in_time: d.clockInTime || null,
+          clock_out_time: d.clockOutTime || null,
+          is_late: d.isLate || false,
+          late_minutes: d.lateMinutes || 0,
+          work_mode: d.workMode || 'office',
+          matched_location_name: d.matchedLocationName || null,
+          field_client_name: d.fieldClientName || null,
+          field_notes: d.fieldNotes || null,
+          site_visits: d.siteVisits || [],
+          overtime_hours: d.overtimeHours || 0,
+          on_site: d.onSite || false,
+          overtime_approval: d.overtimeApproval || 'none',
+        }))
+
+      if (recordsToSave.length > 0) {
+        await supabase
+          .from('attendance_records')
+          .upsert(recordsToSave, { onConflict: 'staff_id,attendance_date' })
+
+        // Update localStorage
+        const candidateIds = [selectedStaff.id, selectedStaff.staff_code, selectedStaff.profile_id, selectedStaff.email].filter(Boolean) as string[]
+        for (const cid of candidateIds) {
+          const keys = [`hris_attendance_daily_${cid}`, `hris_self_attendance_${cid}`]
+          for (const k of keys) {
+            const existingCache = JSON.parse(localStorage.getItem(k) || '{}')
+            recordsToSave.forEach(r => { existingCache[r.attendance_date] = r })
+            localStorage.setItem(k, JSON.stringify(existingCache))
+          }
+        }
+        window.dispatchEvent(new Event('storage'))
+      }
+
       await logAction({
         action: 'UPDATE',
         entity: 'Attendance',
         entityId: selectedStaffId,
-        details: `Updated attendance for ${selectedStaff.full_name} — ${monthYearLabel}`
+        details: `Saved attendance records for ${selectedStaff.full_name} — ${monthYearLabel} (${recordsToSave.length} days)`
       })
+    } catch (e) {
+      console.warn('Error saving calendar records:', e)
     }
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  // ── Bulk Historical Attendance Initializer for Past Months ──
+  const [bulkModalOpen, setBulkModalOpen] = useState(false)
+  const [bulkTarget, setBulkTarget] = useState<'selected' | 'all'>('selected')
+  const [bulkStatus, setBulkStatus] = useState<AttendanceStatus>('present')
+  const [bulkClockIn, setBulkClockIn] = useState('08:00')
+  const [bulkClockOut, setBulkClockOut] = useState('17:00')
+  const [bulkIncludeSaturdays, setBulkIncludeSaturdays] = useState(false)
+  const [bulkPreserveLeaves, setBulkPreserveLeaves] = useState(true)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkResult, setBulkResult] = useState<string>('')
+
+  const handleBulkFillHistoricalAttendance = async () => {
+    setBulkLoading(true)
+    setBulkResult('')
+    try {
+      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate()
+      const targets = bulkTarget === 'all' ? staffList : selectedStaff ? [selectedStaff] : []
+      if (targets.length === 0) {
+        alert('No staff members selected')
+        setBulkLoading(false)
+        return
+      }
+
+      // Identify dates to fill
+      const datesToProcess: string[] = []
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        const dow = new Date(dateStr).getDay()
+        const isHoliday = isPublicHoliday(dateStr, customHolidays)
+
+        // Skip Sundays, skip Saturdays unless opted-in, skip public holidays
+        if (dow === 0 || isHoliday) continue
+        if (dow === 6 && !bulkIncludeSaturdays) continue
+
+        datesToProcess.push(dateStr)
+      }
+
+      if (datesToProcess.length === 0) {
+        alert('No eligible working days found in this month.')
+        setBulkLoading(false)
+        return
+      }
+
+      // Check existing approved leaves for all targets in this date range if preserving leaves
+      const firstDay = datesToProcess[0]
+      const lastDay = datesToProcess[datesToProcess.length - 1]
+      const targetIds = targets.map(t => t.id)
+
+      let leaveMap: Record<string, Set<string>> = {}
+      if (bulkPreserveLeaves) {
+        try {
+          const { data: leaves } = await supabase
+            .from('leave_requests')
+            .select('staff_id, start_date, end_date')
+            .in('staff_id', targetIds)
+            .eq('status', 'approved')
+            .lte('start_date', lastDay)
+            .gte('end_date', firstDay)
+
+          if (leaves) {
+            leaves.forEach(l => {
+              if (!leaveMap[l.staff_id]) leaveMap[l.staff_id] = new Set()
+              const s = new Date(l.start_date)
+              const e = new Date(l.end_date)
+              for (let cur = new Date(s); cur <= e; cur.setDate(cur.getDate() + 1)) {
+                const curStr = cur.toISOString().split('T')[0]
+                leaveMap[l.staff_id].add(curStr)
+              }
+            })
+          }
+        } catch (e) {}
+      }
+
+      const allRecordsToUpsert: any[] = []
+
+      targets.forEach(st => {
+        const candidateIds = [st.id, st.staff_code, st.profile_id, st.email].filter(Boolean) as string[]
+        const staffLeaves = leaveMap[st.id] || new Set()
+
+        datesToProcess.forEach(dStr => {
+          if (bulkPreserveLeaves && staffLeaves.has(dStr)) {
+            return
+          }
+
+          const rec = {
+            staff_id: st.id,
+            attendance_date: dStr,
+            status: bulkStatus,
+            clock_in_time: bulkStatus === 'present' ? bulkClockIn : null,
+            clock_out_time: bulkStatus === 'present' ? bulkClockOut : null,
+            is_late: false,
+            late_minutes: 0,
+            work_mode: 'office',
+            matched_location_name: 'Historical Record (HR Verified)',
+            field_client_name: null,
+            field_notes: `Historical attendance recorded by HR (${monthYearLabel})`,
+            site_visits: [],
+            overtime_hours: 0,
+            on_site: false,
+            overtime_approval: 'none',
+          }
+
+          allRecordsToUpsert.push(rec)
+
+          try {
+            for (const cid of candidateIds) {
+              const keys = [
+                `hris_attendance_daily_${cid}`,
+                `hris_self_attendance_${cid}`,
+              ]
+              for (const k of keys) {
+                const existingCache = JSON.parse(localStorage.getItem(k) || '{}')
+                existingCache[dStr] = rec
+                localStorage.setItem(k, JSON.stringify(existingCache))
+              }
+            }
+          } catch (e) {}
+        })
+      })
+
+      // Batch upsert into Supabase in chunks of 100
+      const chunkSize = 100
+      for (let i = 0; i < allRecordsToUpsert.length; i += chunkSize) {
+        const chunk = allRecordsToUpsert.slice(i, i + chunkSize)
+        try {
+          await supabase
+            .from('attendance_records')
+            .upsert(chunk, { onConflict: 'staff_id,attendance_date' })
+        } catch (e) {
+          console.warn('Batch attendance upsert chunk error:', e)
+        }
+      }
+
+      window.dispatchEvent(new Event('storage'))
+
+      // Refresh calendar days if selected staff was included
+      if (selectedStaff && (bulkTarget === 'all' || bulkTarget === 'selected')) {
+        const firstDayMonth = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`
+        const lastDayMonth = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`
+        const { data: refreshed } = await supabase
+          .from('attendance_records')
+          .select('*')
+          .gte('attendance_date', firstDayMonth)
+          .lte('attendance_date', lastDayMonth)
+          .eq('staff_id', selectedStaff.id)
+
+        const refreshedMap: Record<string, any> = {}
+        if (refreshed) {
+          refreshed.forEach(r => { refreshedMap[r.attendance_date] = r })
+        }
+        setDays(buildMonth(selectedYear, selectedMonth, refreshedMap, customHolidays))
+      }
+
+      await logAction({
+        action: 'UPDATE',
+        entity: 'Attendance',
+        details: `HR bulk-populated historical attendance for ${monthYearLabel} (${allRecordsToUpsert.length} records created across ${targets.length} staff member(s))`
+      })
+
+      setBulkResult(`✓ Successfully updated ${allRecordsToUpsert.length} historical attendance records for ${targets.length} staff member(s) across ${monthYearLabel}!`)
+      setTimeout(() => {
+        setBulkModalOpen(false)
+        setBulkResult('')
+      }, 2500)
+    } catch (err: any) {
+      console.error('Error during bulk historical fill:', err)
+      alert('Failed to bulk populate attendance: ' + (err.message || 'Error'))
+    } finally {
+      setBulkLoading(false)
+    }
   }
 
   // ── Today's Roster Calculations ──
@@ -846,13 +1059,14 @@ export default function AttendanceDaily() {
   }
 
   const updateCurrentModalRecord = (updates: Partial<ExtendedDayAttendance>) => {
-    if (inspectDate !== todayStr || !inspectStaff || !editingRecord) return
+    if (!inspectStaff || !editingRecord) return
     const updated = { ...editingRecord, ...updates }
     setEditingRecord(updated)
     saveRecordForStaff(inspectStaff, updated)
   }
 
   const isEditingCurrentDay = inspectDate === todayStr
+  const isEditingPastDay = inspectDate < todayStr
 
   return (
     <div className="p-4 sm:p-6 anim-fade-up space-y-6">
@@ -921,9 +1135,13 @@ export default function AttendanceDaily() {
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg>
                 </button>
-                <div className="px-3 py-1 text-xs sm:text-sm font-bold text-slate-800 min-w-[150px] text-center font-mono">
-                  {new Date(targetDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-                </div>
+                <input
+                  type="date"
+                  value={targetDate}
+                  onChange={e => setTargetDate(e.target.value)}
+                  className="px-2 py-1 text-xs sm:text-sm font-bold text-slate-800 bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-blue-400 rounded font-mono cursor-pointer"
+                  title="Select any past or current date"
+                />
                 <button
                   onClick={handleNextDay}
                   className="p-1.5 hover:bg-white rounded-lg text-slate-600 transition-colors"
@@ -1589,6 +1807,15 @@ export default function AttendanceDaily() {
               </div>
 
               <button
+                onClick={() => setBulkModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs"
+                title="Batch populate working days for past months"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Bulk Historical Setup</span>
+              </button>
+
+              <button
                 onClick={handleSaveCalendar}
                 className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 ${
                   saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
@@ -1757,12 +1984,12 @@ export default function AttendanceDaily() {
                   </h3>
                   {isEditingCurrentDay ? (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                      Today (Editable)
+                      Today (Live)
                     </span>
                   ) : (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 flex items-center gap-1">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                      Read Only (Locked)
+                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      Historical Record (HR Adjustment)
                     </span>
                   )}
                 </div>
@@ -1773,11 +2000,11 @@ export default function AttendanceDaily() {
               </button>
             </div>
 
-            {/* Lock Info Banner when not today */}
-            {!isEditingCurrentDay && (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center gap-2">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0 text-slate-400"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                <span>HR adjustments are restricted to the <strong>current day only</strong>. Past and future records are locked for audit integrity.</span>
+            {/* Historical Adjustment Context Banner */}
+            {isEditingPastDay && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0 text-amber-600"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>You are adjusting historical attendance for <strong>{new Date(editingRecord.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>. Changes will automatically update payroll attendance proration and monthly reporting.</span>
               </div>
             )}
 
@@ -1787,9 +2014,8 @@ export default function AttendanceDaily() {
                   <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Status</label>
                   <select
                     value={editingRecord.status}
-                    disabled={!isEditingCurrentDay}
                     onChange={e => updateCurrentModalRecord({ status: e.target.value as AttendanceStatus })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
                   >
                     <option value="present">Present</option>
                     <option value="absent">Absent</option>
@@ -1804,9 +2030,8 @@ export default function AttendanceDaily() {
                   <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Work Mode</label>
                   <select
                     value={editingRecord.workMode || 'office'}
-                    disabled={!isEditingCurrentDay}
                     onChange={e => updateCurrentModalRecord({ workMode: e.target.value as any })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
                   >
                     <option value="office">Office Branch</option>
                     <option value="field">Field / Multi-Site Visits</option>
@@ -1877,29 +2102,26 @@ export default function AttendanceDaily() {
                   <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Clock In Time</label>
                   <input
                     type="time"
-                    disabled={!isEditingCurrentDay}
                     value={editingRecord.clockInTime || ''}
                     onChange={e => updateCurrentModalRecord({ clockInTime: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Clock Out Time</label>
                   <input
                     type="time"
-                    disabled={!isEditingCurrentDay}
                     value={editingRecord.clockOutTime || ''}
                     onChange={e => updateCurrentModalRecord({ clockOutTime: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <label className={`flex items-center gap-2 pt-2 ${isEditingCurrentDay ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                <label className="flex items-center gap-2 pt-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    disabled={!isEditingCurrentDay}
                     checked={editingRecord.isLate || false}
                     onChange={e => updateCurrentModalRecord({ isLate: e.target.checked })}
                     className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-400"
@@ -1913,20 +2135,18 @@ export default function AttendanceDaily() {
                     <input
                       type="number"
                       min="0"
-                      disabled={!isEditingCurrentDay}
                       value={editingRecord.lateMinutes || 0}
                       onChange={e => updateCurrentModalRecord({ lateMinutes: parseInt(e.target.value, 10) || 0 })}
-                      className="w-full px-2.5 py-1.5 text-sm rounded border border-slate-200 focus:outline-none focus:border-blue-400 font-mono disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                      className="w-full px-2.5 py-1.5 text-sm rounded border border-slate-200 focus:outline-none focus:border-blue-400 font-mono"
                     />
                   </div>
                 )}
               </div>
 
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <label className={`flex items-center gap-2 ${isEditingCurrentDay ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    disabled={!isEditingCurrentDay}
                     checked={editingRecord.onSite || false}
                     onChange={e => updateCurrentModalRecord({ onSite: e.target.checked })}
                     className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -1940,10 +2160,9 @@ export default function AttendanceDaily() {
                     type="number"
                     step="0.5"
                     min="0"
-                    disabled={!isEditingCurrentDay}
                     value={editingRecord.overtimeHours || 0}
                     onChange={e => updateCurrentModalRecord({ overtimeHours: parseFloat(e.target.value) || 0 })}
-                    className="w-16 px-2 py-1 text-xs rounded border border-slate-200 font-mono text-center disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    className="w-16 px-2 py-1 text-xs rounded border border-slate-200 font-mono text-center"
                   />
                 </div>
               </div>
@@ -1954,9 +2173,172 @@ export default function AttendanceDaily() {
                 onClick={() => setInspectModalOpen(false)}
                 className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
               >
-                Close
+                Done / Save
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk Historical Attendance Initializer Modal ── */}
+      {bulkModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setBulkModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 text-slate-800 anim-fade-up max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">
+                    Bulk Historical Attendance Setup
+                  </h3>
+                  <p className="text-xs text-slate-500">Populate working days for <strong>{monthYearLabel}</strong> before app launch</p>
+                </div>
+              </div>
+              <button onClick={() => setBulkModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            {bulkResult ? (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-semibold text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <p>{bulkResult}</p>
+              </div>
+            ) : (
+              <div className="space-y-4 text-xs text-slate-700">
+                <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-blue-800 text-xs space-y-1">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    <span>Historical Month Implementation Tool</span>
+                  </div>
+                  <p className="text-[11.5px] text-blue-700 leading-relaxed">
+                    This utility generates complete presence records for weekdays (excluding public holidays and Sundays) for <strong>{monthYearLabel}</strong>. Attendance prorations (Lunch & Transport) and payroll worksheets will immediately reflect these days.
+                  </p>
+                </div>
+
+                {/* Target Scope */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">Apply Historical Attendance To</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBulkTarget('selected')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${bulkTarget === 'selected' ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300 text-blue-900 font-semibold' : 'bg-slate-50 border-slate-200 hover:bg-white text-slate-700'}`}
+                    >
+                      <span className="block text-xs">This Staff Member</span>
+                      <span className="text-[11px] text-slate-500 font-normal truncate block">{selectedStaff?.full_name || 'Selected Employee'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkTarget('all')}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${bulkTarget === 'all' ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-300 text-blue-900 font-semibold' : 'bg-slate-50 border-slate-200 hover:bg-white text-slate-700'}`}
+                    >
+                      <span className="block text-xs">All Active Staff</span>
+                      <span className="text-[11px] text-slate-500 font-normal block">{staffList.length} total staff members</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Status & Default Working Hours */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">Marked Status</label>
+                    <select
+                      value={bulkStatus}
+                      onChange={e => setBulkStatus(e.target.value as AttendanceStatus)}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-blue-400 bg-white"
+                    >
+                      <option value="present">Present (On-Time)</option>
+                      <option value="absent">Absent</option>
+                      <option value="unmarked">Unmarked (Clear)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">Work Mode</label>
+                    <input
+                      type="text"
+                      disabled
+                      value="Office Branch (Default)"
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-slate-50 text-slate-500"
+                    />
+                  </div>
+                </div>
+
+                {bulkStatus === 'present' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">Standard Clock In</label>
+                      <input
+                        type="time"
+                        value={bulkClockIn}
+                        onChange={e => setBulkClockIn(e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 font-mono focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">Standard Clock Out</label>
+                      <input
+                        type="time"
+                        value={bulkClockOut}
+                        onChange={e => setBulkClockOut(e.target.value)}
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 font-mono focus:outline-none focus:border-blue-400"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Options Toggles */}
+                <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={bulkPreserveLeaves}
+                      onChange={e => setBulkPreserveLeaves(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="font-semibold text-slate-800 text-xs">Preserve Approved Leaves</span>
+                      <p className="text-[11px] text-slate-500">Do not overwrite dates where staff already has approved leave.</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={bulkIncludeSaturdays}
+                      onChange={e => setBulkIncludeSaturdays(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="font-semibold text-slate-800 text-xs">Include Saturday Shifts</span>
+                      <p className="text-[11px] text-slate-500">Also mark Saturdays as working shift present (Sundays always excluded).</p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setBulkModalOpen(false)}
+                    className="flex-1 py-2 rounded-xl border text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkLoading}
+                    onClick={handleBulkFillHistoricalAttendance}
+                    className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-60 transition-colors shadow-2xs"
+                  >
+                    {bulkLoading ? 'Applying Records...' : `Apply to ${bulkTarget === 'all' ? `All (${staffList.length})` : 'Selected Staff'}`}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
