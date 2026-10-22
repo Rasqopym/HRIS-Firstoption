@@ -463,13 +463,21 @@ export default function AttendanceDaily() {
       // 2. Fetch from Supabase across all candidate IDs
       let dbRecords: Record<string, any> = {}
       try {
-        const orFilter = candidateIds.map(id => `staff_id.eq.${id}`).join(',')
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        const validUuids = Array.from(new Set(candidateIds.filter(id => uuidRegex.test(id))))
+
         let query = supabase
           .from('attendance_records')
           .select('*')
           .gte('attendance_date', firstDay)
           .lte('attendance_date', lastDay)
-          .or(orFilter)
+        if (validUuids.length === 1) {
+          query = query.eq('staff_id', validUuids[0])
+        } else if (validUuids.length > 1) {
+          query = query.in('staff_id', validUuids)
+        } else if (selectedStaffId) {
+          query = query.eq('staff_id', selectedStaffId)
+        }
 
         const { data, error } = await query
 
@@ -482,17 +490,19 @@ export default function AttendanceDaily() {
         console.warn('Supabase fetch attendance skipped:', e)
       }
 
-      // 3. Directly merge any in-memory today records for this staff member
+      // 3. Directly merge any in-memory today records for this staff member (only for today's live clock-in)
+      if (targetDate === todayStr) {
       for (const cid of candidateIds) {
         if (todayRecords[cid]) {
           const tRec = todayRecords[cid]
           const dStr = tRec.attendance_date || todayStr
-          if (dStr.startsWith(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`)) {
+          if (dStr === todayStr && dStr.startsWith(`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`)) {
             dbRecords[dStr] = { ...(dbRecords[dStr] || {}), ...tRec }
           }
         }
       }
 
+      }
       const mergedRecords = { ...cachedRecords, ...dbRecords }
       const monthDays = buildMonth(selectedYear, selectedMonth, mergedRecords, customHolidays, selectedStaff?.date_employed)
       setDays(monthDays)
@@ -500,7 +510,7 @@ export default function AttendanceDaily() {
     }
 
     fetchAttendance()
-  }, [selectedStaffId, selectedStaff?.date_employed, selectedMonth, selectedYear, customHolidays, todayRecords])
+  }, [selectedStaffId, selectedStaff?.date_employed, selectedMonth, selectedYear, customHolidays])
 
   // ── Eligible Staff for the Selected Month (Hired on or before end of month) ──
   const calendarStaffList = useMemo(() => {
