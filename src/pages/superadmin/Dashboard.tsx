@@ -339,16 +339,31 @@ export default function SADashboard({ onNavigate }: Props) {
     const todayObj = new Date()
     const todayStr = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}-${String(todayObj.getDate()).padStart(2, '0')}`
 
-    const activeDates = Array.from(new Set(
-      attRecords
-        .filter(r => (deptFilter === 'all' || activeStaffIds.has(r.staff_id)) && r.status === 'present')
-        .map(r => r.date || r.attendance_date)
-        .filter(Boolean)
-    )).sort()
+    const datePresenceCount = new Map<string, number>()
+    attRecords.forEach(r => {
+      const d = r.date || r.attendance_date
+      if (d && (deptFilter === 'all' || activeStaffIds.has(r.staff_id)) && r.status === 'present') {
+        datePresenceCount.set(d, (datePresenceCount.get(d) || 0) + 1)
+      }
+    })
 
-    const latestRegDate = activeDates.includes(todayStr)
-      ? todayStr
-      : (activeDates.length > 0 ? activeDates[activeDates.length - 1] : todayStr)
+    const activeDates = Array.from(datePresenceCount.keys()).sort()
+
+    // Determine representative latest registry date
+    let latestRegDate = todayStr
+    if (activeDates.length > 0) {
+      const todayCount = datePresenceCount.get(todayStr) || 0
+      const threshold = Math.max(2, Math.min(5, Math.ceil(totalEmployeesCount * 0.25)))
+      const representativeDates = activeDates.filter(d => (datePresenceCount.get(d) || 0) >= threshold)
+
+      if (todayCount >= threshold) {
+        latestRegDate = todayStr
+      } else if (representativeDates.length > 0) {
+        latestRegDate = representativeDates[representativeDates.length - 1]
+      } else {
+        latestRegDate = activeDates[activeDates.length - 1]
+      }
+    }
 
     const latestRegDateObj = new Date(latestRegDate + 'T00:00:00')
     const formattedLatestRegDate = isNaN(latestRegDateObj.getTime())
@@ -369,7 +384,9 @@ export default function SADashboard({ onNavigate }: Props) {
       const e = lr.end_date || lr.endDate
       return s && e && s <= latestRegDate && e >= latestRegDate && (deptFilter === 'all' || activeStaffIds.has(lr.staff_id))
     }).length
-    const regNotClockedIn = Math.max(0, totalEmployeesCount - regPresent - regLeaveCount)
+    const onLeaveInAtt = latestRegRecords.filter(r => r.status === 'on_leave').length
+    const totalRegLeave = Math.max(regLeaveCount, onLeaveInAtt)
+    const regNotClockedIn = Math.max(0, totalEmployeesCount - regPresent - totalRegLeave)
     const regPresenceRate = totalEmployeesCount > 0 ? Math.round((regPresent / totalEmployeesCount) * 100) : 0
     const regPunctuality = regPresent > 0 ? Math.round((regOnTime / regPresent) * 100) : 100
 
@@ -382,7 +399,7 @@ export default function SADashboard({ onNavigate }: Props) {
       onTime: regOnTime,
       late: regLate,
       punctualityScore: regPunctuality,
-      onLeave: regLeaveCount,
+      onLeave: totalRegLeave,
       notClockedIn: regNotClockedIn,
       missingClockOut: regMissingClockOut,
     })
@@ -576,14 +593,38 @@ export default function SADashboard({ onNavigate }: Props) {
           })
         })
 
-        // Fetch attendance records from Supabase
+        // 3. Fetch attendance records from Supabase with pagination & descending order
         let attRecords: any[] = []
         try {
-          const { data: aData } = await supabase
-            .from('attendance_records')
-            .select('*')
-          if (aData) {
-            attRecords = aData
+          const minDateObj = new Date()
+          minDateObj.setMonth(minDateObj.getMonth() - 14)
+          const minDateStr = `${minDateObj.getFullYear()}-${String(minDateObj.getMonth() + 1).padStart(2, '0')}-01`
+
+          let from = 0
+          const PAGE_SIZE = 1000
+          let keepFetching = true
+
+          while (keepFetching) {
+            const { data: pageData, error: pageErr } = await supabase
+              .from('attendance_records')
+              .select('*')
+              .gte('attendance_date', minDateStr)
+              .order('attendance_date', { ascending: false })
+              .range(from, from + PAGE_SIZE - 1)
+
+            if (pageErr) {
+              console.warn('Attendance DB fetch page error:', pageErr)
+              keepFetching = false
+            } else if (pageData && pageData.length > 0) {
+              attRecords.push(...pageData)
+              if (pageData.length < PAGE_SIZE) {
+                keepFetching = false
+              } else {
+                from += PAGE_SIZE
+              }
+            } else {
+              keepFetching = false
+            }
           }
         } catch (e) {
           console.warn('Attendance DB fetch skipped:', e)
@@ -591,31 +632,7 @@ export default function SADashboard({ onNavigate }: Props) {
 
         const attendanceMap = new Map<string, any>()
 
-        // 1. Supabase records
-        attRecords.forEach((r: any) => {
-          const d = r.attendance_date || r.date
-          if (!d) return
-          const dateOnly = String(d).slice(0, 10)
-          const rawId = r.staff_id ? String(r.staff_id) : ''
-          const matchedStaff = candidateMap.get(rawId) || candidateMap.get(rawId.toLowerCase())
-          const canonicalId = matchedStaff ? matchedStaff.id : rawId
-          if (!canonicalId) return
-          const key = `${canonicalId}_${dateOnly}`
-          attendanceMap.set(key, {
-            ...r,
-            staff_id: canonicalId,
-            date: dateOnly,
-            attendance_date: dateOnly,
-            status: r.status || 'present',
-            is_late: Boolean(r.is_late || r.isLate),
-            late_minutes: Number(r.late_minutes || r.lateMinutes || 0),
-            clock_in: r.clock_in || r.clockIn,
-            clock_out: r.clock_out || r.clockOut,
-            work_mode: r.work_mode || r.workMode,
-          })
-        })
-
-        // 2. LocalStorage records per staff candidate IDs (mirrors AttendanceDaily & AttendanceSummary)
+        // A. Load LocalStorage records per staff candidate IDs (mirrors AttendanceDaily & AttendanceSummary)
         allStaff.forEach(st => {
           const cids = [st.id, st.staff_code, st.profile_id, st.email].filter(Boolean) as string[]
           cids.forEach(cid => {
@@ -630,19 +647,17 @@ export default function SADashboard({ onNavigate }: Props) {
                     if (d && typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
                       const dateOnly = d.slice(0, 10)
                       const key = `${st.id}_${dateOnly}`
-                      const existing = attendanceMap.get(key) || {}
                       attendanceMap.set(key, {
-                        ...existing,
                         ...val,
                         staff_id: st.id,
                         date: dateOnly,
                         attendance_date: dateOnly,
-                        status: val.status || existing.status || 'present',
-                        is_late: val.is_late !== undefined ? Boolean(val.is_late) : (val.isLate !== undefined ? Boolean(val.isLate) : existing.is_late),
-                        late_minutes: Number(val.late_minutes || val.lateMinutes || existing.late_minutes || 0),
-                        clock_in: val.clock_in || val.clockIn || existing.clock_in,
-                        clock_out: val.clock_out || val.clockOut || existing.clock_out,
-                        work_mode: val.work_mode || val.workMode || existing.work_mode,
+                        status: val.status || 'present',
+                        is_late: val.is_late !== undefined ? Boolean(val.is_late) : (val.isLate !== undefined ? Boolean(val.isLate) : false),
+                        late_minutes: Number(val.late_minutes || val.lateMinutes || 0),
+                        clock_in: val.clock_in || val.clockIn || val.clock_in_time || val.clockInTime,
+                        clock_out: val.clock_out || val.clockOut || val.clock_out_time || val.clockOutTime,
+                        work_mode: val.work_mode || val.workMode || 'office',
                       })
                     }
                   })
@@ -652,10 +667,37 @@ export default function SADashboard({ onNavigate }: Props) {
           })
         })
 
+        // B. Overlay verified Supabase records (authoritative)
+        attRecords.forEach((r: any) => {
+          const d = r.attendance_date || r.date
+          if (!d) return
+          const dateOnly = String(d).slice(0, 10)
+          const rawId = r.staff_id ? String(r.staff_id) : ''
+          const matchedStaff = candidateMap.get(rawId) || candidateMap.get(rawId.toLowerCase())
+          const canonicalId = matchedStaff ? matchedStaff.id : rawId
+          if (!canonicalId) return
+          const key = `${canonicalId}_${dateOnly}`
+          const localExisting = attendanceMap.get(key) || {}
+
+          attendanceMap.set(key, {
+            ...localExisting,
+            ...r,
+            staff_id: canonicalId,
+            date: dateOnly,
+            attendance_date: dateOnly,
+            status: r.status || localExisting.status || 'present',
+            is_late: r.is_late !== undefined ? Boolean(r.is_late || r.isLate) : (localExisting.is_late || false),
+            late_minutes: Number(r.late_minutes || r.lateMinutes || localExisting.late_minutes || 0),
+            clock_in: r.clock_in_time || r.clock_in || r.clockIn || localExisting.clock_in,
+            clock_out: r.clock_out_time || r.clock_out || r.clockOut || localExisting.clock_out,
+            work_mode: r.work_mode || r.workMode || localExisting.work_mode || 'office',
+          })
+        })
+
         const uniqueAttRecords = Array.from(attendanceMap.values())
         setRawAttRecords(uniqueAttRecords)
 
-        // Fetch real approved leave requests
+        // 4. Fetch real approved leave requests
         let leaveRecords: any[] = []
         try {
           const { data: lData } = await supabase
@@ -697,7 +739,7 @@ export default function SADashboard({ onNavigate }: Props) {
         // Calculate Department Headcount and KPIs
         calculateMetrics(allStaff, selectedDeptFilter, selectedTimeframe, uniqueAttRecords, leaveRecords, customStartDate, customEndDate)
 
-        // Fetch recent audit logs
+        // 5. Fetch recent audit logs
         try {
           const { data: auditLogs } = await supabase
             .from('audit_log')
@@ -731,6 +773,16 @@ export default function SADashboard({ onNavigate }: Props) {
     }
 
     fetchData()
+
+    const handleSync = () => {
+      fetchData()
+    }
+    window.addEventListener('storage', handleSync)
+    window.addEventListener('focus', handleSync)
+    return () => {
+      window.removeEventListener('storage', handleSync)
+      window.removeEventListener('focus', handleSync)
+    }
   }, [])
 
   // Recalculate metrics when department filter, timeframe, or custom dates change
