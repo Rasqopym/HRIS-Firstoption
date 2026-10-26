@@ -6,6 +6,7 @@ import { isPasswordRecoveryUrl, establishRecoverySession } from './lib/authRecov
 
 import Login from './pages/Login'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 import Profile from './pages/Profile'
 
 // Super Admin pages
@@ -697,7 +698,9 @@ export default function App() {
       onSelectStaff={handleSelectStaff}
       onSelectPayslip={handleSelectPayslip}
     >
-      {renderPage()}
+      <ErrorBoundary key={page}>
+        {renderPage()}
+      </ErrorBoundary>
     </Layout>
   )
 }
