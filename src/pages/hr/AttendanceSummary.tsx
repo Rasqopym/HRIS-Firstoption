@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import * as XLSX from 'xlsx'
 import { calculateWorkingDaysInMonth, isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
+import ExportAttendanceModal from '../../components/ExportAttendanceModal'
 
 interface StaffMember {
   id: string
@@ -80,6 +81,7 @@ export default function AttendanceSummary() {
   const [summaries, setSummaries] = useState<AttendanceSummary[]>([])
   const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
   const [loading, setLoading] = useState(true)
+  const [exportModalOpen, setExportModalOpen] = useState(false)
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   const monthYearLabel = `${monthNames[selectedMonth]} ${selectedYear}`
@@ -310,6 +312,13 @@ export default function AttendanceSummary() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">Monthly Attendance Summary</h1>
+
+          {/* Custom Timeframe Attendance CSV Export Modal */}
+          <ExportAttendanceModal
+            isOpen={exportModalOpen}
+            onClose={() => setExportModalOpen(false)}
+            defaultStartDate={`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`}
+          />
           <p className="text-sm text-slate-500 mt-0.5">{monthYearLabel} — monthly presence, weekend shifts, lateness records, and overtime summary</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -328,6 +337,14 @@ export default function AttendanceSummary() {
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span>Export Excel</span>
+          </button>
+          <button 
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold transition-colors shadow-2xs"
+            onClick={() => setExportModalOpen(true)}
+            title="Export all staff attendance entries for a custom date range in CSV"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Export Custom CSV</span>
           </button>
         </div>
       </div>
