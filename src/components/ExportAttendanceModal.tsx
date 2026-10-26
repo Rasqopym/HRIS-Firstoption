@@ -88,9 +88,12 @@ export default function ExportAttendanceModal({
         const { data: holData } = await supabase.from('public_holidays').select('*')
         if (holData) {
           setCustomHolidays(holData.map((h: any) => ({
-            date: h.holiday_date,
+            id: h.id || `hol-${h.holiday_date || h.date}`,
+            holiday_date: h.holiday_date || h.date,
+            date: h.holiday_date || h.date,
             name: h.name,
-            isRecurring: h.is_recurring ?? false,
+            is_recurring: h.is_recurring ?? h.isRecurring ?? false,
+            isRecurring: h.is_recurring ?? h.isRecurring ?? false,
           })))
         }
       } catch (err) {
@@ -357,7 +360,7 @@ export default function ExportAttendanceModal({
         // If user wants to skip weekends and it's not a weekend shift
         for (const st of targetStaff) {
           // Check employment date
-          if (st.date_employed && dStr < st.date_employed) {
+          if (st.date_employed && dStr < st.date_employed.slice(0, 10)) {
             continue // skip before staff joined
           }
 
@@ -406,7 +409,7 @@ export default function ExportAttendanceModal({
             finalStatus = 'On Leave'
             const leaveTypeName = onLeaveReq.leave_types?.name || 'Approved Leave'
             notes = `${leaveTypeName}: ${onLeaveReq.reason || 'Approved leave'}`
-          } else if (holiday.isHoliday) {
+          } else if (holiday) {
             finalStatus = 'Public Holiday'
             notes = holiday.name || 'Public Holiday'
           } else if (isWeekend) {
@@ -487,20 +490,20 @@ export default function ExportAttendanceModal({
         r.date,
         r.dayOfWeek,
         r.staffCode,
-        `"${r.staffName.replace(/"/g, '""')}"`,
-        `"${r.department.replace(/"/g, '""')}"`,
-        `"${r.jobTitle.replace(/"/g, '""')}"`,
-        `"${r.status.replace(/"/g, '""')}"`,
+        `"${(r.staffName || '').replace(/"/g, '""')}"`,
+        `"${(r.department || '').replace(/"/g, '""')}"`,
+        `"${(r.jobTitle || '').replace(/"/g, '""')}"`,
+        `"${(r.status || '').replace(/"/g, '""')}"`,
         r.clockIn,
         r.clockOut,
         r.duration,
         r.isLate,
         r.lateMinutes,
         r.workMode,
-        `"${r.location.replace(/"/g, '""')}"`,
+        `"${(r.location || '').replace(/"/g, '""')}"`,
         r.overtimeHours,
         r.overtimeApproval,
-        `"${r.notes.replace(/"/g, '""')}"`,
+        `"${(r.notes || '').replace(/"/g, '""')}"`,
       ])
 
       // Prefix with UTF-8 BOM (\uFEFF) so Excel respects UTF-8 encoding
