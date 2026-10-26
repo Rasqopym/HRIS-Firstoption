@@ -88,6 +88,20 @@ interface AttendanceMonthlyTrendItem {
   hasActivity?: boolean
 }
 
+interface LatestRegistryStats {
+  date: string
+  formattedDate: string
+  totalStaff: number
+  present: number
+  attendanceRate: number
+  onTime: number
+  late: number
+  punctualityScore: number
+  onLeave: number
+  notClockedIn: number
+  missingClockOut: number
+}
+
 interface CustomizationConfig {
   showGrossCommitment: boolean
   showNetPayroll: boolean
@@ -167,6 +181,19 @@ export default function SADashboard({ onNavigate }: Props) {
   const [deptBreakdown, setDeptBreakdown] = useState<DeptBreakdownItem[]>([])
   const [attendanceDailyTrends, setAttendanceDailyTrends] = useState<AttendanceDailyTrendItem[]>([])
   const [attendanceMonthlyTrends, setAttendanceMonthlyTrends] = useState<AttendanceMonthlyTrendItem[]>([])
+  const [latestRegistryStats, setLatestRegistryStats] = useState<LatestRegistryStats>({
+    date: '',
+    formattedDate: '',
+    totalStaff: 0,
+    present: 0,
+    attendanceRate: 0,
+    onTime: 0,
+    late: 0,
+    punctualityScore: 100,
+    onLeave: 0,
+    notClockedIn: 0,
+    missingClockOut: 0,
+  })
 
   const reportRef = useRef<HTMLDivElement>(null)
 
@@ -304,11 +331,66 @@ export default function SADashboard({ onNavigate }: Props) {
     })
     setPayrollTrends(pTrends)
 
-    // Construct Daily Attendance Trend (Accurate real records)
+    // Construct Daily Attendance Trend & Sync with HR Daily Registry
+    const activeStaffIds = new Set(filteredStaff.map(s => s.id))
+    const totalEmployeesCount = filteredStaff.length || 1
+
+    // Determine latest registry date with active presence records (or today)
+    const todayObj = new Date()
+    const todayStr = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}-${String(todayObj.getDate()).padStart(2, '0')}`
+
+    const activeDates = Array.from(new Set(
+      attRecords
+        .filter(r => (deptFilter === 'all' || activeStaffIds.has(r.staff_id)) && r.status === 'present')
+        .map(r => r.date || r.attendance_date)
+        .filter(Boolean)
+    )).sort()
+
+    const latestRegDate = activeDates.includes(todayStr)
+      ? todayStr
+      : (activeDates.length > 0 ? activeDates[activeDates.length - 1] : todayStr)
+
+    const latestRegDateObj = new Date(latestRegDate + 'T00:00:00')
+    const formattedLatestRegDate = isNaN(latestRegDateObj.getTime())
+      ? latestRegDate
+      : latestRegDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+
+    const latestRegRecords = attRecords.filter(r => {
+      const rDate = r.date || r.attendance_date
+      return rDate === latestRegDate && (deptFilter === 'all' || activeStaffIds.has(r.staff_id))
+    })
+
+    const regPresent = latestRegRecords.filter(r => r.status === 'present').length
+    const regLate = latestRegRecords.filter(r => r.status === 'present' && Boolean(r.is_late || r.isLate)).length
+    const regOnTime = Math.max(0, regPresent - regLate)
+    const regMissingClockOut = latestRegRecords.filter(r => r.status === 'present' && !r.clock_out && !r.clockOut).length
+    const regLeaveCount = leaveRecords.filter((lr: any) => {
+      const s = lr.start_date || lr.startDate
+      const e = lr.end_date || lr.endDate
+      return s && e && s <= latestRegDate && e >= latestRegDate && (deptFilter === 'all' || activeStaffIds.has(lr.staff_id))
+    }).length
+    const regNotClockedIn = Math.max(0, totalEmployeesCount - regPresent - regLeaveCount)
+    const regPresenceRate = totalEmployeesCount > 0 ? Math.round((regPresent / totalEmployeesCount) * 100) : 0
+    const regPunctuality = regPresent > 0 ? Math.round((regOnTime / regPresent) * 100) : 100
+
+    setLatestRegistryStats({
+      date: latestRegDate,
+      formattedDate: formattedLatestRegDate,
+      totalStaff: totalEmployeesCount,
+      present: regPresent,
+      attendanceRate: regPresenceRate,
+      onTime: regOnTime,
+      late: regLate,
+      punctualityScore: regPunctuality,
+      onLeave: regLeaveCount,
+      notClockedIn: regNotClockedIn,
+      missingClockOut: regMissingClockOut,
+    })
     const dailyAttTrends: AttendanceDailyTrendItem[] = []
-    const totalEmployeesCount = activeStaff.length || 1
+    // employees count already set /*
     const activeStaffIds = new Set(filteredStaff.map(s => s.id))
 
+    */
     let dailyDates: Date[] = []
     if (timeframe === 'custom' && customStart && customEnd) {
       const s = new Date(customStart)
@@ -358,7 +440,7 @@ export default function SADashboard({ onNavigate }: Props) {
       }).length
       const onLeave = Math.max(leaveDayCount, dayRecords.filter(r => r.status === 'on_leave').length)
 
-      const attendanceRate = isWeekend ? 100 : (totalEmployeesCount > 0 ? Math.min(100, Math.round((present / totalEmployeesCount) * 100)) : 100)
+      const attendanceRate = totalEmployeesCount > 0 ? Math.min(100, Math.round((present / totalEmployeesCount) * 100)) : 0
 
       dailyAttTrends.push({
         date: dateStr,
@@ -417,7 +499,13 @@ export default function SADashboard({ onNavigate }: Props) {
         if (dow !== 0 && dow !== 6) workingDays++
       }
 
-      const expectedSlots = Math.max(1, totalEmployeesCount * Math.max(1, workingDays))
+      const recordedDaysInMonth = new Set(
+        mRecords.filter(r => r.status === 'present').map(r => r.date || r.attendance_date)
+      ).size
+      const effectiveWorkingDays = isCurrentMonth && recordedDaysInMonth > 0
+        ? Math.min(workingDays, Math.max(1, recordedDaysInMonth))
+        : Math.max(1, workingDays)
+      const expectedSlots = Math.max(1, totalEmployeesCount * effectiveWorkingDays)
       const attendanceRate = hasActivity 
         ? Math.min(100, Math.round((presentSum / expectedSlots) * 100))
         : 0
@@ -480,6 +568,143 @@ export default function SADashboard({ onNavigate }: Props) {
         })
         setDepartmentList(Array.from(depts).sort())
 
+        // Build candidate identifier to staff map for robust resolution across id, staff_code, profile_id, email
+        const candidateMap = new Map<string, any>()
+        allStaff.forEach(s => {
+          const cids = [s.id, s.staff_code, s.profile_id, s.email].filter(Boolean) as string[]
+          cids.forEach(cid => {
+            candidateMap.set(String(cid).toLowerCase(), s)
+            candidateMap.set(String(cid), s)
+          })
+        })
+
+        // Fetch attendance records from Supabase
+        let attRecords: any[] = []
+        try {
+          const { data: aData } = await supabase
+            .from('attendance_records')
+            .select('*')
+          if (aData) {
+            attRecords = aData
+          }
+        } catch (e) {
+          console.warn('Attendance DB fetch skipped:', e)
+        }
+
+        const attendanceMap = new Map<string, any>()
+
+        // 1. Supabase records
+        attRecords.forEach((r: any) => {
+          const d = r.attendance_date || r.date
+          if (!d) return
+          const dateOnly = String(d).slice(0, 10)
+          const rawId = r.staff_id ? String(r.staff_id) : ''
+          const matchedStaff = candidateMap.get(rawId) || candidateMap.get(rawId.toLowerCase())
+          const canonicalId = matchedStaff ? matchedStaff.id : rawId
+          if (!canonicalId) return
+          const key = `${canonicalId}_${dateOnly}`
+          attendanceMap.set(key, {
+            ...r,
+            staff_id: canonicalId,
+            date: dateOnly,
+            attendance_date: dateOnly,
+            status: r.status || 'present',
+            is_late: Boolean(r.is_late || r.isLate),
+            late_minutes: Number(r.late_minutes || r.lateMinutes || 0),
+            clock_in: r.clock_in || r.clockIn,
+            clock_out: r.clock_out || r.clockOut,
+            work_mode: r.work_mode || r.workMode,
+          })
+        })
+
+        // 2. LocalStorage records per staff candidate IDs (mirrors AttendanceDaily & AttendanceSummary)
+        allStaff.forEach(st => {
+          const cids = [st.id, st.staff_code, st.profile_id, st.email].filter(Boolean) as string[]
+          cids.forEach(cid => {
+            const keys = [`hris_self_attendance_${cid}`, `hris_attendance_daily_${cid}`]
+            keys.forEach(k => {
+              try {
+                const raw = localStorage.getItem(k)
+                if (raw) {
+                  const parsed = JSON.parse(raw)
+                  Object.entries(parsed).forEach(([dKey, val]: [string, any]) => {
+                    const d = val?.attendance_date || val?.date || dKey
+                    if (d && typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
+                      const dateOnly = d.slice(0, 10)
+                      const key = `${st.id}_${dateOnly}`
+                      const existing = attendanceMap.get(key) || {}
+                      attendanceMap.set(key, {
+                        ...existing,
+                        ...val,
+                        staff_id: st.id,
+                        date: dateOnly,
+                        attendance_date: dateOnly,
+                        status: val.status || existing.status || 'present',
+                        is_late: val.is_late !== undefined ? Boolean(val.is_late) : (val.isLate !== undefined ? Boolean(val.isLate) : existing.is_late),
+                        late_minutes: Number(val.late_minutes || val.lateMinutes || existing.late_minutes || 0),
+                        clock_in: val.clock_in || val.clockIn || existing.clock_in,
+                        clock_out: val.clock_out || val.clockOut || existing.clock_out,
+                        work_mode: val.work_mode || val.workMode || existing.work_mode,
+                      })
+                    }
+                  })
+                }
+              } catch (e) {}
+            })
+          })
+        })
+
+        const uniqueAttRecords = Array.from(attendanceMap.values())
+        setRawAttRecords(uniqueAttRecords)
+
+        // Fetch real approved leave requests
+        let leaveRecords: any[] = []
+        try {
+          const { data: lData } = await supabase
+            .from('leave_requests')
+            .select('id, staff_id, start_date, end_date, status, days')
+            .eq('status', 'approved')
+          if (lData) {
+            leaveRecords = lData.map((l: any) => {
+              const rawId = l.staff_id ? String(l.staff_id) : ''
+              const matchedStaff = candidateMap.get(rawId) || candidateMap.get(rawId.toLowerCase())
+              return {
+                ...l,
+                staff_id: matchedStaff ? matchedStaff.id : rawId,
+              }
+            })
+          }
+        } catch (e) {
+          console.warn('Leave requests DB fetch skipped:', e)
+        }
+
+        try {
+          const rawL = localStorage.getItem('hris_all_leave_requests')
+          if (rawL) {
+            const parsed = JSON.parse(rawL)
+            if (Array.isArray(parsed)) {
+              parsed.filter((r: any) => r.status === 'approved').forEach(r => {
+                const rawId = r.staff_id ? String(r.staff_id) : ''
+                const matchedStaff = candidateMap.get(rawId) || candidateMap.get(rawId.toLowerCase())
+                leaveRecords.push({
+                  ...r,
+                  staff_id: matchedStaff ? matchedStaff.id : rawId,
+                })
+              })
+            }
+          }
+        } catch (e) {}
+        setRawLeaveRecords(leaveRecords)
+        /* (legacy loader block commented out)
+                  ...r,
+                  staff_id: matchedStaff ? matchedStaff.id : rawId,
+                })
+              })
+            }
+          }
+        } catch (e) {}
+        setRawLeaveRecords(leaveRecords)
+
         // Fetch attendance records from Supabase
         let attRecords: any[] = []
         try {
@@ -517,7 +742,7 @@ export default function SADashboard({ onNavigate }: Props) {
           }
         } catch (e) {}
 
-        const seenAtt = new Set<string>()
+        // (deduplicated above)
         const uniqueAttRecords: any[] = []
         for (const r of attRecords) {
           const key = `${r.staff_id}_${r.date || r.attendance_date}`
@@ -551,6 +776,7 @@ export default function SADashboard({ onNavigate }: Props) {
         } catch (e) {}
         setRawLeaveRecords(leaveRecords)
 
+        */
         // Calculate Department Headcount and KPIs
         calculateMetrics(allStaff, selectedDeptFilter, selectedTimeframe, uniqueAttRecords, leaveRecords, customStartDate, customEndDate)
 
@@ -1064,7 +1290,64 @@ export default function SADashboard({ onNavigate }: Props) {
             </div>
           )}
 
-          {/* 5. System Attendance Rate */}
+          {/* 5. System Attendance Rate (Aligned with HR Daily Registry) */}
+          {config.showAttendanceCard && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  Daily Attendance
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-xs">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display font-bold text-slate-800 dark:text-white text-xl sm:text-2xl font-mono-data tracking-tight">
+                    {latestRegistryStats.attendanceRate}%
+                  </span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 font-mono-data">
+                    {latestRegistryStats.present}/{latestRegistryStats.totalStaff} Present
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 mt-1 font-medium flex items-center justify-between">
+                  <span>{latestRegistryStats.onTime} on-time · {latestRegistryStats.late} late</span>
+                  <span className="font-mono-data text-[11px] text-slate-500">{latestRegistryStats.formattedDate}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 6. Punctuality Score */}
+          {config.showPunctualityCard && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                  Punctuality Score
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-xs">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display font-bold text-indigo-600 dark:text-indigo-400 text-xl sm:text-2xl font-mono-data tracking-tight">
+                    {latestRegistryStats.punctualityScore}%
+                  </span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-mono-data">
+                    {latestRegistryStats.late === 0 ? 'Zero Late Arrivals' : `${latestRegistryStats.late} Late`}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 mt-1 font-medium flex items-center justify-between">
+                  <span>{latestRegistryStats.onTime} of {latestRegistryStats.present} on-time</span>
+                  <span className="font-mono-data text-[11px] text-slate-500">{latestRegistryStats.formattedDate}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          /* (legacy cards commented out)
           {config.showAttendanceCard && (
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
               <div className="flex items-center justify-between mb-2">
@@ -1112,6 +1395,7 @@ export default function SADashboard({ onNavigate }: Props) {
             </div>
           )}
 
+          */
           {/* 7. Security Accounts Card */}
           {config.showSecurityCard && (
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
@@ -1378,8 +1662,11 @@ export default function SADashboard({ onNavigate }: Props) {
                     <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Avg Attendance</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-slate-800 dark:text-white mt-0.5">
                       {(() => {
-                        const activeDays = attendanceDailyTrends.filter(a => a.present > 0)
-                        if (activeDays.length === 0) return '0%'
+                        const activeDays = attendanceDailyTrends.filter(a => {
+                          const d = new Date(a.date)
+                          return d.getDay() !== 0 && d.getDay() !== 6 && a.present > 0
+                        })
+                        if (activeDays.length === 0) return `${latestRegistryStats.attendanceRate}%`
                         return `${Math.round(activeDays.reduce((s, a) => s + a.attendanceRate, 0) / activeDays.length)}%`
                       })()}
                     </p>
@@ -1409,8 +1696,8 @@ export default function SADashboard({ onNavigate }: Props) {
                     <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Period Compliance</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-slate-800 dark:text-white mt-0.5">
                       {(() => {
-                        const activeMonths = attendanceMonthlyTrends.filter(a => a.avgPresent > 0)
-                        if (activeMonths.length === 0) return '0%'
+                        const activeMonths = attendanceMonthlyTrends.filter(a => a.hasActivity && a.attendanceRate > 0)
+                        if (activeMonths.length === 0) return `${latestRegistryStats.attendanceRate}%`
                         return `${Math.round(activeMonths.reduce((s, a) => s + a.attendanceRate, 0) / activeMonths.length)}%`
                       })()}
                     </p>
@@ -1419,7 +1706,7 @@ export default function SADashboard({ onNavigate }: Props) {
                     <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-400 uppercase">Avg Punctuality Score</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-indigo-700 dark:text-indigo-400 mt-0.5">
                       {(() => {
-                        const activeMonths = attendanceMonthlyTrends.filter(a => a.avgPresent > 0)
+                        const activeMonths = attendanceMonthlyTrends.filter(a => a.hasActivity && a.attendanceRate > 0)
                         if (activeMonths.length === 0) return '100%'
                         return `${Math.round(activeMonths.reduce((s, a) => s + a.punctualityScore, 0) / activeMonths.length)}%`
                       })()}
