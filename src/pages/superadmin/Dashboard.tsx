@@ -333,7 +333,6 @@ export default function SADashboard({ onNavigate }: Props) {
 
     // Construct Daily Attendance Trend & Sync with HR Daily Registry
     const activeStaffIds = new Set(filteredStaff.map(s => s.id))
-    // activeStaffIds already defined above
     const totalEmployeesCount = filteredStaff.length || 1
 
     // Determine latest registry date with active presence records (or today)
@@ -387,11 +386,9 @@ export default function SADashboard({ onNavigate }: Props) {
       notClockedIn: regNotClockedIn,
       missingClockOut: regMissingClockOut,
     })
-    const dailyAttTrends: AttendanceDailyTrendItem[] = []
-    // employees count already configured
-    // activeStaffIds already defined above
 
-    // ready
+    const dailyAttTrends: AttendanceDailyTrendItem[] = []
+
     let dailyDates: Date[] = []
     if (timeframe === 'custom' && customStart && customEnd) {
       const s = new Date(customStart)
@@ -696,88 +693,7 @@ export default function SADashboard({ onNavigate }: Props) {
           }
         } catch (e) {}
         setRawLeaveRecords(leaveRecords)
-        /* (legacy loader block commented out)
-                  ...r,
-                  staff_id: matchedStaff ? matchedStaff.id : rawId,
-                })
-              })
-            }
-          }
-        } catch (e) {}
-        setRawLeaveRecords(leaveRecords)
 
-        // Fetch attendance records from Supabase
-        let attRecords: any[] = []
-        try {
-          const { data: aData } = await supabase
-            .from('attendance_records')
-            .select('id, staff_id, attendance_date, status, is_late, late_minutes')
-          if (aData) {
-            attRecords = aData.map((r: any) => ({
-              ...r,
-              date: r.attendance_date,
-            }))
-          }
-        } catch (e) {
-          console.warn('Attendance DB fetch skipped:', e)
-        }
-
-        // Merge with local storage cached records
-        try {
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i)
-            if (k && (k.startsWith('hris_self_attendance_') || k.startsWith('hris_attendance_daily_'))) {
-              const raw = localStorage.getItem(k)
-              if (raw) {
-                const parsed = JSON.parse(raw)
-                Object.values(parsed).forEach((rec: any) => {
-                  if (rec && rec.attendance_date) {
-                    attRecords.push({
-                      ...rec,
-                      date: rec.attendance_date,
-                    })
-                  }
-                })
-              }
-            }
-          }
-        } catch (e) {}
-
-        // (deduplicated above)
-        const uniqueAttRecords: any[] = []
-        for (const r of attRecords) {
-          const key = `${r.staff_id}_${r.date || r.attendance_date}`
-          if (!seenAtt.has(key)) {
-            seenAtt.add(key)
-            uniqueAttRecords.push(r)
-          }
-        }
-        setRawAttRecords(uniqueAttRecords)
-
-        // Fetch real approved leave requests
-        let leaveRecords: any[] = []
-        try {
-          const { data: lData } = await supabase
-            .from('leave_requests')
-            .select('id, staff_id, start_date, end_date, status, days')
-            .eq('status', 'approved')
-          if (lData) leaveRecords = lData
-        } catch (e) {
-          console.warn('Leave requests DB fetch skipped:', e)
-        }
-
-        try {
-          const rawL = localStorage.getItem('hris_all_leave_requests')
-          if (rawL) {
-            const parsed = JSON.parse(rawL)
-            if (Array.isArray(parsed)) {
-              parsed.filter((r: any) => r.status === 'approved').forEach(r => leaveRecords.push(r))
-            }
-          }
-        } catch (e) {}
-        setRawLeaveRecords(leaveRecords)
-
-        */
         // Calculate Department Headcount and KPIs
         calculateMetrics(allStaff, selectedDeptFilter, selectedTimeframe, uniqueAttRecords, leaveRecords, customStartDate, customEndDate)
 
@@ -1348,56 +1264,7 @@ export default function SADashboard({ onNavigate }: Props) {
               </div>
             </div>
           )}
-          {/*
-          {config.showAttendanceCard && (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase">Avg Attendance</span>
-                <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-xs">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
-                </div>
-              </div>
-              <div>
-                <div className="font-display font-bold text-slate-800 dark:text-white text-xl sm:text-2xl font-mono-data tracking-tight">
-                  {(() => {
-                    const activeDays = attendanceDailyTrends.filter(a => a.present > 0)
-                    if (activeDays.length === 0) return '0%'
-                    return `${Math.round(activeDays.reduce((s, a) => s + a.attendanceRate, 0) / activeDays.length)}%`
-                  })()}
-                </div>
-                <div className="text-xs text-slate-400 mt-1 font-medium">
-                  {attendanceDailyTrends.reduce((s, a) => s + a.onTime, 0)} on-time clock-ins logged
-                </div>
-              </div>
-            </div>
-          )}
 
-          {/* 6. Punctuality Score */}
-          {config.showPunctualityCard && (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase">Punctuality Score</span>
-                <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-xs">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                </div>
-              </div>
-              <div>
-                <div className="font-display font-bold text-indigo-600 dark:text-indigo-400 text-xl sm:text-2xl font-mono-data tracking-tight">
-                  {(() => {
-                    const activeMonths = attendanceMonthlyTrends.filter(a => a.avgPresent > 0)
-                    if (activeMonths.length === 0) return '100%'
-                    return `${Math.round(activeMonths.reduce((s, a) => s + a.punctualityScore, 0) / activeMonths.length)}%`
-                  })()}
-                </div>
-                <div className="text-xs text-slate-400 mt-1 font-medium">
-                  {attendanceMonthlyTrends.reduce((s, a) => s + a.totalLate, 0)} late flags recorded
-                </div>
-              </div>
-            </div>
-          )}
-
-          )}
-          */}
           {/* 7. Security Accounts Card */}
           {config.showSecurityCard && (
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
