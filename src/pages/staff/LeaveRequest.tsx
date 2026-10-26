@@ -4,7 +4,7 @@ import { useCurrentStaff } from '../../hooks/useCurrentStaff'
 import type { LeaveType, LeaveRequest } from '../../types'
 
 export default function LeaveRequest() {
-  const { staff } = useCurrentStaff()
+  const { staff, loading: staffLoading } = useCurrentStaff()
   const [form, setForm] = useState({ type: '', start: '', end: '', reason: '' })
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
@@ -46,6 +46,7 @@ export default function LeaveRequest() {
     /(director|manager|lead|senior|head|executive|principal|chief|supervisor|partner|officer)/i.test(staff?.job_title || '')
   )
   const cadreLabel = isSeniorStaff ? 'Senior Staff' : 'Junior Staff'
+  const annualLeaveDays = balances.find(b => b.typeName.toLowerCase().includes('annual'))?.entitlement ?? (isSeniorStaff ? 21 : 12)
 
   // Tenure & Confirmation: 1 full year service (365 days) + confirmed staff
   const isConfirmed = Boolean(staff?.is_confirmed)
@@ -65,7 +66,10 @@ export default function LeaveRequest() {
   // Fetch leave types, balances, and requests
   useEffect(() => {
     const fetchData = async () => {
-      if (!staff) return
+      if (!staff) {
+        if (!staffLoading) setLoading(false)
+        return
+      }
 
       setLoading(true)
       try {
@@ -253,7 +257,7 @@ export default function LeaveRequest() {
     }
 
     fetchData()
-  }, [staff])
+  }, [staff, staffLoading])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -329,10 +333,20 @@ export default function LeaveRequest() {
     }
   }
 
-  if (loading) {
+  if (staffLoading || (loading && staff)) {
     return (
       <div className="p-6 flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+      </div>
+    )
+  }
+
+  if (!staff) {
+    return (
+      <div className="p-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800 text-sm">
+          No staff record linked to your current profile. Please contact HR or switch to employee view.
+        </div>
       </div>
     )
   }

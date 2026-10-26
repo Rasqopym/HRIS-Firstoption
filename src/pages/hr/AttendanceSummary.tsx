@@ -253,11 +253,11 @@ export default function AttendanceSummary() {
           }
         }
 
-        const explicitAbsent = records.filter(r => r.status === 'absent').length
+
         const daysOnLeave = records.filter(r => r.status === 'on_leave').length
         // Missed weekday working days (excluding approved leave) - pre-employment days and weekends are never counted as absent
-        const unrecordedAbsent = Math.max(0, staffPastWorkingDays - weekdayPresent - daysOnLeave)
-        const daysAbsent = Math.max(explicitAbsent, unrecordedAbsent)
+        const daysAbsent = Math.max(0, staffPastWorkingDays - weekdayPresent - daysOnLeave)
+
         
         const totalOvertimeHours = records.reduce((sum, r) => sum + (r.overtime_hours || r.overtimeHours || 0), 0)
         const approvedOvertimeHours = records
