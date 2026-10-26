@@ -50,6 +50,11 @@ export default function ExportAttendanceModal({
   const [exportProgress, setExportProgress] = useState<string>('')
   const [exportError, setExportError] = useState<string>('')
 
+  useEffect(() => {
+    if (defaultStartDate) setStartDate(defaultStartDate)
+    if (defaultEndDate) setEndDate(defaultEndDate)
+  }, [defaultStartDate, defaultEndDate])
+
   // Load staff list & departments on open
   useEffect(() => {
     if (!isOpen) return
@@ -98,7 +103,7 @@ export default function ExportAttendanceModal({
     loadMetadata()
   }, [isOpen])
 
-  if (!isOpen) return null
+
 
   // Quick Preset Handlers
   const applyPreset = (preset: 'today' | 'this_week' | 'this_month' | 'last_month' | 'last_30' | 'last_90' | 'ytd' | 'full_year') => {
@@ -522,6 +527,8 @@ export default function ExportAttendanceModal({
       setIsExporting(false)
     }
   }
+
+  if (!isOpen) return null
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
