@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { dbRoleToApp } from '../../lib/roleMap'
 import { getStaffConfirmationStatus } from '../../lib/pushNotification'
 import type { Page } from '../../types'
 import * as XLSX from 'xlsx'
@@ -86,6 +85,7 @@ interface AttendanceMonthlyTrendItem {
   totalLate: number
   totalLeave: number
   punctualityScore: number
+  hasActivity?: boolean
 }
 
 interface CustomizationConfig {
@@ -132,13 +132,24 @@ export default function SADashboard({ onNavigate }: Props) {
 
   // Raw Data Cache
   const [rawStaffList, setRawStaffList] = useState<any[]>([])
+  const [rawAttRecords, setRawAttRecords] = useState<any[]>([])
+  const [rawLeaveRecords, setRawLeaveRecords] = useState<any[]>([])
   const [departmentList, setDepartmentList] = useState<string[]>([])
 
   // Customization & Presentation Controls
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all')
-  const [selectedTimeframe, setSelectedTimeframe] = useState<'3m' | '6m' | '12m'>('6m')
-  const [chartMode, setChartMode] = useState<'payroll' | 'departments' | 'attendance'>('payroll')
-  const [attendanceViewMode, setAttendanceViewMode] = useState<'14days' | '12months'>('14days')
+  const [selectedTimeframe, setSelectedTimeframe] = useState<'3m' | '6m' | '12m' | 'custom'>('12m')
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+  })
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
+  const [chartMode, setChartMode] = useState<'payroll' | 'departments' | 'attendance'>('attendance')
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'14days' | '12months'>('12months')
+  const [attendanceChartType, setAttendanceChartType] = useState<'line' | 'bar'>('line')
   const [showCustomizeModal, setShowCustomizeModal] = useState(false)
   const [isPresentationMode, setIsPresentationMode] = useState(false)
 
@@ -166,7 +177,15 @@ export default function SADashboard({ onNavigate }: Props) {
     } catch (e) {}
   }
 
-  const calculateMetrics = (staffList: any[], deptFilter: string, timeframe: '3m' | '6m' | '12m', attRecords: any[]) => {
+  const calculateMetrics = (
+    staffList: any[],
+    deptFilter: string,
+    timeframe: '3m' | '6m' | '12m' | 'custom',
+    attRecords: any[],
+    leaveRecords: any[] = [],
+    customStart?: string,
+    customEnd?: string
+  ) => {
     const filteredStaff = deptFilter === 'all' 
       ? staffList 
       : staffList.filter(s => (s.departments?.name || s.department || 'General Operations') === deptFilter)
@@ -222,76 +241,123 @@ export default function SADashboard({ onNavigate }: Props) {
     Object.entries(deptMap).forEach(([k, v]) => { simpleDeptCount[k] = v.total })
     setDeptHeadcount(simpleDeptCount)
 
-    // 3. Compute Monthly Payroll
+    // Compute Monthly Payroll
     const currentMonthName = new Date().toLocaleDateString('en-US', { month: 'long' })
     const currentYear = new Date().getFullYear()
     setPeriodLabel(`${currentMonthName} ${currentYear}`)
 
-    let procSum = 0
-    let pendSum = 0
     const estNet = Math.round(grossSum * 0.82)
-    procSum = Math.round(estNet * 0.65)
-    pendSum = estNet - procSum
+    const procSum = Math.round(estNet * 0.65)
+    const pendSum = estNet - procSum
 
     setMonthlyPayroll(estNet)
     setProcessedPayroll(procSum)
     setPendingPayroll(pendSum)
 
-    // 4. Construct Payroll Outflow Trend according to selected timeframe
-    const monthsCount = timeframe === '3m' ? 3 : (timeframe === '6m' ? 6 : 12)
-    const pTrends: PayrollTrendItem[] = []
+    // Target months for selected timeframe or custom range
     const today = new Date()
+    const targetMonths: { y: number; mIdx: number; monthShort: string; fullMonth: string }[] = []
 
-    for (let m = monthsCount - 1; m >= 0; m--) {
-      const targetDate = new Date(today.getFullYear(), today.getMonth() - m, 1)
-      const monthShort = targetDate.toLocaleDateString('en-US', { month: 'short' })
-      const fullMonth = targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-      
-      const ratio = 1 - (m * 0.025)
+    if (timeframe === 'custom' && customStart && customEnd) {
+      const sDate = new Date(customStart)
+      const eDate = new Date(customEnd)
+      let cur = new Date(sDate.getFullYear(), sDate.getMonth(), 1)
+      const lastMonth = new Date(eDate.getFullYear(), eDate.getMonth(), 1)
+      while (cur <= lastMonth) {
+        targetMonths.push({
+          y: cur.getFullYear(),
+          mIdx: cur.getMonth(),
+          monthShort: cur.toLocaleDateString('en-US', { month: 'short' }),
+          fullMonth: cur.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+        })
+        cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)
+      }
+    } else {
+      const monthsCount = timeframe === '3m' ? 3 : (timeframe === '6m' ? 6 : 12)
+      for (let m = monthsCount - 1; m >= 0; m--) {
+        const targetDate = new Date(today.getFullYear(), today.getMonth() - m, 1)
+        targetMonths.push({
+          y: targetDate.getFullYear(),
+          mIdx: targetDate.getMonth(),
+          monthShort: targetDate.toLocaleDateString('en-US', { month: 'short' }),
+          fullMonth: targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+        })
+      }
+    }
+
+    // Construct Payroll Outflow Trend
+    const pTrends: PayrollTrendItem[] = targetMonths.map((tm, idx) => {
+      const mDistance = targetMonths.length - 1 - idx
+      const ratio = 1 - (mDistance * 0.025)
       const gEst = Math.round((grossSum || 2500000) * Math.max(0.7, ratio))
       const nEst = Math.round(gEst * 0.82)
       const tEst = Math.round(gEst * 0.10)
       const penEst = Math.round(gEst * 0.08)
-
-      pTrends.push({
-        month: monthShort,
-        fullMonth,
+      return {
+        month: tm.monthShort,
+        fullMonth: tm.fullMonth,
         gross: gEst,
         net: nEst,
         tax: tEst,
         pension: penEst,
-      })
-    }
+      }
+    })
     setPayrollTrends(pTrends)
 
-    // 5. Construct 14-Day Attendance Trend
+    // Construct Daily Attendance Trend (Accurate real records)
     const dailyAttTrends: AttendanceDailyTrendItem[] = []
-    const totalEmployeesCount = activeStaff.length || 5
+    const totalEmployeesCount = activeStaff.length || 1
+    const activeStaffIds = new Set(filteredStaff.map(s => s.id))
 
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
+    let dailyDates: Date[] = []
+    if (timeframe === 'custom' && customStart && customEnd) {
+      const s = new Date(customStart)
+      const e = new Date(customEnd)
+      const spanDays = Math.round((e.getTime() - s.getTime()) / 86400000)
+      if (spanDays >= 0 && spanDays <= 31) {
+        let cur = new Date(s)
+        while (cur <= e) {
+          dailyDates.push(new Date(cur))
+          cur.setDate(cur.getDate() + 1)
+        }
+      } else {
+        for (let i = 13; i >= 0; i--) {
+          const d = new Date(e)
+          d.setDate(d.getDate() - i)
+          dailyDates.push(d)
+        }
+      }
+    } else {
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(d.getDate() - i)
+        dailyDates.push(d)
+      }
+    }
+
+    dailyDates.forEach(d => {
       const dateStr = d.toISOString().split('T')[0]
       const label = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })
       const fullDate = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       const isWeekend = d.getDay() === 0 || d.getDay() === 6
 
-      const dayRecords = attRecords.filter(r => r.date === dateStr)
-      let present = 0
-      let late = 0
-      let onLeave = 0
+      const dayRecords = attRecords.filter(r => {
+        const rDate = r.date || r.attendance_date
+        return rDate === dateStr && (deptFilter === 'all' || activeStaffIds.has(r.staff_id))
+      })
 
-      if (dayRecords.length > 0) {
-        present = dayRecords.filter(r => r.status === 'present').length
-        late = dayRecords.filter(r => r.is_late).length
-        onLeave = dayRecords.filter(r => r.status === 'on_leave').length
-      } else if (!isWeekend && d <= today) {
-        present = Math.max(1, Math.round(totalEmployeesCount * (0.86 + ((i % 3) * 0.03))))
-        late = Math.round(present * 0.12)
-        onLeave = Math.round(totalEmployeesCount * 0.05)
-      }
-
+      const present = dayRecords.filter(r => r.status === 'present').length
+      const late = dayRecords.filter(r => r.status === 'present' && (r.is_late || r.isLate)).length
       const onTime = Math.max(0, present - late)
+
+      // Real approved leave on this date
+      const leaveDayCount = leaveRecords.filter((lr: any) => {
+        const s = lr.start_date || lr.startDate
+        const e = lr.end_date || lr.endDate
+        return s && e && s <= dateStr && e >= dateStr && (deptFilter === 'all' || activeStaffIds.has(lr.staff_id))
+      }).length
+      const onLeave = Math.max(leaveDayCount, dayRecords.filter(r => r.status === 'on_leave').length)
+
       const attendanceRate = isWeekend ? 100 : (totalEmployeesCount > 0 ? Math.min(100, Math.round((present / totalEmployeesCount) * 100)) : 100)
 
       dailyAttTrends.push({
@@ -302,54 +368,74 @@ export default function SADashboard({ onNavigate }: Props) {
         present,
         onTime,
         late,
-        onLeave
+        onLeave,
       })
-    }
+    })
     setAttendanceDailyTrends(dailyAttTrends)
 
-    // 6. Construct 12-Month Summary Attendance Trend
-    const monthlyAttTrends: AttendanceMonthlyTrendItem[] = []
-    const mCount = timeframe === '3m' ? 3 : (timeframe === '6m' ? 6 : 12)
+    // Construct Monthly Summary Attendance Trend (Accurate real records)
+    const monthlyAttTrends: (AttendanceMonthlyTrendItem & { hasActivity?: boolean })[] = []
 
-    for (let m = mCount - 1; m >= 0; m--) {
-      const targetDate = new Date(today.getFullYear(), today.getMonth() - m, 1)
-      const y = targetDate.getFullYear()
-      const mIdx = targetDate.getMonth()
-      const monthShort = targetDate.toLocaleDateString('en-US', { month: 'short' })
-      const fullMonth = targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-
+    targetMonths.forEach(tm => {
+      const { y, mIdx, monthShort, fullMonth } = tm
       const monthPrefix = `${y}-${String(mIdx + 1).padStart(2, '0')}`
-      const mRecords = attRecords.filter(r => r.date && r.date.startsWith(monthPrefix))
+      const mRecords = attRecords.filter(r => {
+        const d = r.date || r.attendance_date
+        return d && d.startsWith(monthPrefix) && (deptFilter === 'all' || activeStaffIds.has(r.staff_id))
+      })
 
-      let presentSum = 0
-      let lateSum = 0
-      let leaveSum = 0
+      const monthStart = `${monthPrefix}-01`
+      const daysInTargetMonth = new Date(y, mIdx + 1, 0).getDate()
+      const monthEnd = `${monthPrefix}-${String(daysInTargetMonth).padStart(2, '0')}`
 
-      if (mRecords.length > 0) {
-        presentSum = mRecords.filter(r => r.status === 'present').length
-        lateSum = mRecords.filter(r => r.is_late).length
-        leaveSum = mRecords.filter(r => r.status === 'on_leave').length
-      } else {
-        const workingDays = 22
-        presentSum = Math.round(totalEmployeesCount * workingDays * (0.88 + ((m % 4) * 0.02)))
-        lateSum = Math.round(presentSum * 0.09)
-        leaveSum = Math.round(totalEmployeesCount * 1.5)
+      let leaveDaysInMonth = 0
+      leaveRecords.forEach((lr: any) => {
+        if (deptFilter !== 'all' && !activeStaffIds.has(lr.staff_id)) return
+        const lStart = lr.start_date || lr.startDate
+        const lEnd = lr.end_date || lr.endDate
+        if (lStart && lEnd && lStart <= monthEnd && lEnd >= monthStart) {
+          const oStart = new Date(Math.max(new Date(lStart).getTime(), new Date(monthStart).getTime()))
+          const oEnd = new Date(Math.min(new Date(lEnd).getTime(), new Date(monthEnd).getTime()))
+          const diff = Math.max(0, Math.round((oEnd.getTime() - oStart.getTime()) / 86400000) + 1)
+          leaveDaysInMonth += diff
+        }
+      })
+      const onLeaveAttCount = mRecords.filter(r => r.status === 'on_leave').length
+      const totalLeave = Math.max(leaveDaysInMonth, onLeaveAttCount)
+
+      const presentSum = mRecords.filter(r => r.status === 'present').length
+      const lateSum = mRecords.filter(r => r.status === 'present' && (r.is_late || r.isLate)).length
+      const onTimeSum = Math.max(0, presentSum - lateSum)
+
+      const hasActivity = mRecords.length > 0 || totalLeave > 0
+
+      let workingDays = 0
+      const isCurrentMonth = y === today.getFullYear() && mIdx === today.getMonth()
+      const maxDay = isCurrentMonth ? today.getDate() : daysInTargetMonth
+      for (let day = 1; day <= maxDay; day++) {
+        const dow = new Date(y, mIdx, day).getDay()
+        if (dow !== 0 && dow !== 6) workingDays++
       }
 
-      const baseWorkingSlots = Math.max(1, totalEmployeesCount * 22)
-      const attendanceRate = Math.min(100, Math.max(82, Math.round((presentSum / baseWorkingSlots) * 100)))
-      const punctualityScore = Math.min(100, Math.max(76, Math.round(((presentSum - lateSum) / (presentSum || 1)) * 100)))
+      const expectedSlots = Math.max(1, totalEmployeesCount * Math.max(1, workingDays))
+      const attendanceRate = hasActivity 
+        ? Math.min(100, Math.round((presentSum / expectedSlots) * 100))
+        : 0
+      const punctualityScore = presentSum > 0
+        ? Math.min(100, Math.round((onTimeSum / presentSum) * 100))
+        : (hasActivity ? 100 : 0)
 
       monthlyAttTrends.push({
         month: monthShort,
         fullMonth,
         attendanceRate,
-        avgPresent: Math.round(presentSum / 22),
+        avgPresent: workingDays > 0 ? Math.round(presentSum / workingDays) : 0,
         totalLate: lateSum,
-        totalLeave: leaveSum,
-        punctualityScore
+        totalLeave,
+        punctualityScore,
+        hasActivity,
       })
-    }
+    })
     setAttendanceMonthlyTrends(monthlyAttTrends)
   }
 
@@ -394,19 +480,81 @@ export default function SADashboard({ onNavigate }: Props) {
         })
         setDepartmentList(Array.from(depts).sort())
 
-        // Fetch attendance records
+        // Fetch attendance records from Supabase
         let attRecords: any[] = []
         try {
           const { data: aData } = await supabase
             .from('attendance_records')
-            .select('date, status, is_late')
-          if (aData) attRecords = aData
+            .select('id, staff_id, attendance_date, status, is_late, late_minutes')
+          if (aData) {
+            attRecords = aData.map((r: any) => ({
+              ...r,
+              date: r.attendance_date,
+            }))
+          }
+        } catch (e) {
+          console.warn('Attendance DB fetch skipped:', e)
+        }
+
+        // Merge with local storage cached records
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i)
+            if (k && (k.startsWith('hris_self_attendance_') || k.startsWith('hris_attendance_daily_'))) {
+              const raw = localStorage.getItem(k)
+              if (raw) {
+                const parsed = JSON.parse(raw)
+                Object.values(parsed).forEach((rec: any) => {
+                  if (rec && rec.attendance_date) {
+                    attRecords.push({
+                      ...rec,
+                      date: rec.attendance_date,
+                    })
+                  }
+                })
+              }
+            }
+          }
         } catch (e) {}
 
-        // Calculate Department Headcount and KPIs
-        calculateMetrics(allStaff, selectedDeptFilter, selectedTimeframe, attRecords)
+        const seenAtt = new Set<string>()
+        const uniqueAttRecords: any[] = []
+        for (const r of attRecords) {
+          const key = `${r.staff_id}_${r.date || r.attendance_date}`
+          if (!seenAtt.has(key)) {
+            seenAtt.add(key)
+            uniqueAttRecords.push(r)
+          }
+        }
+        setRawAttRecords(uniqueAttRecords)
 
-        // 3. Fetch recent audit logs
+        // Fetch real approved leave requests
+        let leaveRecords: any[] = []
+        try {
+          const { data: lData } = await supabase
+            .from('leave_requests')
+            .select('id, staff_id, start_date, end_date, status, days')
+            .eq('status', 'approved')
+          if (lData) leaveRecords = lData
+        } catch (e) {
+          console.warn('Leave requests DB fetch skipped:', e)
+        }
+
+        try {
+          const rawL = localStorage.getItem('hris_all_leave_requests')
+          if (rawL) {
+            const parsed = JSON.parse(rawL)
+            if (Array.isArray(parsed)) {
+              parsed.filter((r: any) => r.status === 'approved').forEach(r => leaveRecords.push(r))
+            }
+          }
+        } catch (e) {}
+        setRawLeaveRecords(leaveRecords)
+
+        // Calculate Department Headcount and KPIs
+        calculateMetrics(allStaff, selectedDeptFilter, selectedTimeframe, uniqueAttRecords, leaveRecords, customStartDate, customEndDate)
+
+        // Fetch recent audit logs
         try {
           const { data: auditLogs } = await supabase
             .from('audit_log')
@@ -427,10 +575,10 @@ export default function SADashboard({ onNavigate }: Props) {
         // Set current date string
         const nowDate = new Date()
         setCurrentDate(nowDate.toLocaleDateString('en-US', { 
-          weekday: 'long', 
-          year: 'numeric', 
-          month: 'long', 
-          day: 'numeric' 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
         }))
       } catch (err) {
         console.error('Error fetching dashboard data:', err)
@@ -442,12 +590,12 @@ export default function SADashboard({ onNavigate }: Props) {
     fetchData()
   }, [])
 
-  // Recalculate metrics when department filter or timeframe changes
+  // Recalculate metrics when department filter, timeframe, or custom dates change
   useEffect(() => {
     if (rawStaffList.length > 0) {
-      calculateMetrics(rawStaffList, selectedDeptFilter, selectedTimeframe, [])
+      calculateMetrics(rawStaffList, selectedDeptFilter, selectedTimeframe, rawAttRecords, rawLeaveRecords, customStartDate, customEndDate)
     }
-  }, [selectedDeptFilter, selectedTimeframe])
+  }, [selectedDeptFilter, selectedTimeframe, customStartDate, customEndDate, rawAttRecords, rawLeaveRecords])
 
   // Export Executive Summary Data as Excel
   const handleExportExcel = () => {
@@ -491,7 +639,7 @@ export default function SADashboard({ onNavigate }: Props) {
     XLSX.writeFile(wb, `executive-summary-${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  // Custom Dark Glassmorphism Tooltip for Payroll
+  // Custom Tooltip for Payroll
   const CustomPayrollTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const d = payload[0].payload as PayrollTrendItem
@@ -603,33 +751,44 @@ export default function SADashboard({ onNavigate }: Props) {
   // Custom Tooltip for Monthly Attendance
   const CustomMonthlyAttendanceTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
-      const d = payload[0].payload as AttendanceMonthlyTrendItem
+      const d = payload[0].payload as AttendanceMonthlyTrendItem & { hasActivity?: boolean }
       return (
         <div className="bg-slate-900/95 text-white p-3.5 rounded-xl border border-slate-700 shadow-xl text-xs space-y-1.5 backdrop-blur-md min-w-[210px]">
-          <div className="font-semibold text-slate-200 border-b border-slate-800 pb-1">
-            {d.fullMonth}
+          <div className="font-semibold text-slate-200 border-b border-slate-800 pb-1 flex items-center justify-between">
+            <span>{d.fullMonth}</span>
+            {d.hasActivity === false && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">No records</span>
+            )}
           </div>
           <div className="space-y-1 font-mono-data text-slate-300">
-            <div className="flex justify-between text-emerald-400 font-bold">
-              <span>Avg. Attendance Rate:</span>
-              <span>{d.attendanceRate}%</span>
-            </div>
-            <div className="flex justify-between text-indigo-300 font-semibold">
-              <span>Punctuality Score:</span>
-              <span>{d.punctualityScore}%</span>
-            </div>
-            <div className="flex justify-between text-slate-300">
-              <span>Avg. Daily Present:</span>
-              <span>{d.avgPresent} staff</span>
-            </div>
-            <div className="flex justify-between text-amber-400">
-              <span>Total Late Arrivals:</span>
-              <span>{d.totalLate}</span>
-            </div>
-            <div className="flex justify-between text-sky-300">
-              <span>Total Leave Taken:</span>
-              <span>{d.totalLeave} days</span>
-            </div>
+            {d.hasActivity === false ? (
+              <div className="text-slate-400 py-1 text-[11px] italic">
+                No attendance or leave logged for this period
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between text-emerald-400 font-bold">
+                  <span>Attendance Compliance:</span>
+                  <span>{d.attendanceRate}%</span>
+                </div>
+                <div className="flex justify-between text-indigo-300 font-semibold">
+                  <span>Punctuality Score:</span>
+                  <span>{d.punctualityScore}%</span>
+                </div>
+                <div className="flex justify-between text-slate-300">
+                  <span>Avg. Daily Present:</span>
+                  <span>{d.avgPresent} staff</span>
+                </div>
+                <div className="flex justify-between text-amber-400">
+                  <span>Total Late Arrivals:</span>
+                  <span>{d.totalLate}</span>
+                </div>
+                <div className="flex justify-between text-sky-300">
+                  <span>Total Leave Taken:</span>
+                  <span>{d.totalLeave} days</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )
@@ -681,8 +840,8 @@ export default function SADashboard({ onNavigate }: Props) {
             </select>
           </div>
 
-          {/* Timeframe Selector */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl border border-slate-200/80 dark:border-slate-600">
+          {/* Timeframe Selector with Custom Option */}
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700/60 p-1 rounded-xl border border-slate-200/80 dark:border-slate-600 flex-wrap">
             {(['3m', '6m', '12m'] as const).map(tf => (
               <button
                 key={tf}
@@ -696,6 +855,17 @@ export default function SADashboard({ onNavigate }: Props) {
                 {tf === '3m' ? '3 Months' : tf === '6m' ? '6 Months' : '12 Months'}
               </button>
             ))}
+            <button
+              onClick={() => setSelectedTimeframe('custom')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 ${
+                selectedTimeframe === 'custom'
+                  ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
+              }`}
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <span>Custom Range</span>
+            </button>
           </div>
 
           {/* Customize View Modal Trigger */}
@@ -733,6 +903,77 @@ export default function SADashboard({ onNavigate }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Custom Date Range Picker Toolbar (Visible when Custom Range is selected) */}
+      {selectedTimeframe === 'custom' && (
+        <div className="bg-white dark:bg-slate-800 p-3.5 rounded-2xl border border-blue-200 dark:border-blue-900 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="font-semibold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Custom Analysis Window:
+            </span>
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500 font-medium">From:</label>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={e => setCustomStartDate(e.target.value)}
+                className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 font-mono-data text-slate-800 dark:text-slate-100"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500 font-medium">To:</label>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={e => setCustomEndDate(e.target.value)}
+                className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 font-mono-data text-slate-800 dark:text-slate-100"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date()
+                const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+                const end = now.toISOString().slice(0, 10)
+                setCustomStartDate(start)
+                setCustomEndDate(end)
+              }}
+              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200"
+            >
+              This Month
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date()
+                const start = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10)
+                const end = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10)
+                setCustomStartDate(start)
+                setCustomEndDate(end)
+              }}
+              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200"
+            >
+              Last Month
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date()
+                const start = new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10)
+                const end = now.toISOString().slice(0, 10)
+                setCustomStartDate(start)
+                setCustomEndDate(end)
+              }}
+              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200"
+            >
+              Year to Date
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Printable / Capturable Executive Dashboard Canvas */}
       <div ref={reportRef} className="space-y-5">
@@ -834,10 +1075,14 @@ export default function SADashboard({ onNavigate }: Props) {
               </div>
               <div>
                 <div className="font-display font-bold text-slate-800 dark:text-white text-xl sm:text-2xl font-mono-data tracking-tight">
-                  {Math.round(attendanceDailyTrends.reduce((s, a) => s + a.attendanceRate, 0) / (attendanceDailyTrends.length || 1))}%
+                  {(() => {
+                    const activeDays = attendanceDailyTrends.filter(a => a.present > 0)
+                    if (activeDays.length === 0) return '0%'
+                    return `${Math.round(activeDays.reduce((s, a) => s + a.attendanceRate, 0) / activeDays.length)}%`
+                  })()}
                 </div>
                 <div className="text-xs text-slate-400 mt-1 font-medium">
-                  {attendanceDailyTrends.reduce((s, a) => s + a.onTime, 0)} on-time clock-ins (14 days)
+                  {attendanceDailyTrends.reduce((s, a) => s + a.onTime, 0)} on-time clock-ins logged
                 </div>
               </div>
             </div>
@@ -854,7 +1099,11 @@ export default function SADashboard({ onNavigate }: Props) {
               </div>
               <div>
                 <div className="font-display font-bold text-indigo-600 dark:text-indigo-400 text-xl sm:text-2xl font-mono-data tracking-tight">
-                  {Math.round(attendanceMonthlyTrends.reduce((s, a) => s + a.punctualityScore, 0) / (attendanceMonthlyTrends.length || 1))}%
+                  {(() => {
+                    const activeMonths = attendanceMonthlyTrends.filter(a => a.avgPresent > 0)
+                    if (activeMonths.length === 0) return '100%'
+                    return `${Math.round(activeMonths.reduce((s, a) => s + a.punctualityScore, 0) / activeMonths.length)}%`
+                  })()}
                 </div>
                 <div className="text-xs text-slate-400 mt-1 font-medium">
                   {attendanceMonthlyTrends.reduce((s, a) => s + a.totalLate, 0)} late flags recorded
@@ -896,9 +1145,9 @@ export default function SADashboard({ onNavigate }: Props) {
                 </h3>
               </div>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                {chartMode === 'payroll' && `Historical & projected salary commitments across ${selectedTimeframe === '3m' ? '3 Months' : selectedTimeframe === '6m' ? '6 Months' : '12 Months'}`}
+                {chartMode === 'payroll' && `Historical & projected salary commitments across ${selectedTimeframe === 'custom' ? 'Custom Range' : selectedTimeframe === '3m' ? '3 Months' : selectedTimeframe === '6m' ? '6 Months' : '12 Months'}`}
                 {chartMode === 'departments' && 'Distribution of confirmed vs. probation personnel across operating departments'}
-                {chartMode === 'attendance' && `Comprehensive attendance compliance & punctuality trends (${attendanceViewMode === '14days' ? '14-Day Daily Range' : '12-Month Annual Summary'})`}
+                {chartMode === 'attendance' && `Comprehensive attendance compliance & punctuality trends (${attendanceViewMode === '14days' ? 'Daily Activity' : 'Summary Trends'})`}
               </p>
             </div>
 
@@ -1059,12 +1308,12 @@ export default function SADashboard({ onNavigate }: Props) {
             </div>
           )}
 
-          {/* ── VIEW 3: SYSTEM-WIDE ATTENDANCE TRENDS (14-Day Daily vs 12-Month Summary) ── */}
+          {/* ── VIEW 3: SYSTEM-WIDE ATTENDANCE TRENDS (Trendline by Default) ── */}
           {chartMode === 'attendance' && (
             <div className="space-y-4 anim-fade">
-              {/* Range Switcher Toolbar */}
+              {/* Range & Format Switcher Toolbar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Analysis Range:</span>
                   <div className="flex bg-slate-100 dark:bg-slate-700 p-0.5 rounded-lg border border-slate-200 dark:border-slate-600">
                     <button
@@ -1075,7 +1324,7 @@ export default function SADashboard({ onNavigate }: Props) {
                           : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
                       }`}
                     >
-                      14-Day Activity
+                      {selectedTimeframe === 'custom' ? 'Daily Activity' : '14-Day Activity'}
                     </button>
                     <button
                       onClick={() => setAttendanceViewMode('12months')}
@@ -1085,7 +1334,38 @@ export default function SADashboard({ onNavigate }: Props) {
                           : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
                       }`}
                     >
-                      12-Month Summary
+                      {selectedTimeframe === 'custom' ? 'Summary Trends' : `${selectedTimeframe === '3m' ? '3-Month' : selectedTimeframe === '6m' ? '6-Month' : '12-Month'} Summary`}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Trendline vs Bar Switcher */}
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">View Format:</span>
+                  <div className="flex bg-slate-100 dark:bg-slate-700 p-0.5 rounded-lg border border-slate-200 dark:border-slate-600">
+                    <button
+                      onClick={() => setAttendanceChartType('line')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        attendanceChartType === 'line'
+                          ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                      }`}
+                      title="Display smooth trendline"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                      <span>Trendline</span>
+                    </button>
+                    <button
+                      onClick={() => setAttendanceChartType('bar')}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        attendanceChartType === 'bar'
+                          ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                      }`}
+                      title="Display bar chart"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                      <span>Bar Chart</span>
                     </button>
                   </div>
                 </div>
@@ -1095,9 +1375,13 @@ export default function SADashboard({ onNavigate }: Props) {
               {attendanceViewMode === '14days' ? (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
-                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">14-Day Avg Attendance</span>
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Avg Attendance</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-slate-800 dark:text-white mt-0.5">
-                      {Math.round(attendanceDailyTrends.reduce((s, a) => s + a.attendanceRate, 0) / (attendanceDailyTrends.length || 1))}%
+                      {(() => {
+                        const activeDays = attendanceDailyTrends.filter(a => a.present > 0)
+                        if (activeDays.length === 0) return '0%'
+                        return `${Math.round(activeDays.reduce((s, a) => s + a.attendanceRate, 0) / activeDays.length)}%`
+                      })()}
                     </p>
                   </div>
                   <div className="bg-emerald-50/50 dark:bg-emerald-950/30 p-3 rounded-xl border border-emerald-100/60 dark:border-emerald-800/40">
@@ -1122,19 +1406,27 @@ export default function SADashboard({ onNavigate }: Props) {
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
-                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Annual Compliance</span>
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">Period Compliance</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-slate-800 dark:text-white mt-0.5">
-                      {Math.round(attendanceMonthlyTrends.reduce((s, a) => s + a.attendanceRate, 0) / (attendanceMonthlyTrends.length || 1))}%
+                      {(() => {
+                        const activeMonths = attendanceMonthlyTrends.filter(a => a.avgPresent > 0)
+                        if (activeMonths.length === 0) return '0%'
+                        return `${Math.round(activeMonths.reduce((s, a) => s + a.attendanceRate, 0) / activeMonths.length)}%`
+                      })()}
                     </p>
                   </div>
                   <div className="bg-indigo-50/50 dark:bg-indigo-950/30 p-3 rounded-xl border border-indigo-100/60 dark:border-indigo-800/40">
                     <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-400 uppercase">Avg Punctuality Score</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-indigo-700 dark:text-indigo-400 mt-0.5">
-                      {Math.round(attendanceMonthlyTrends.reduce((s, a) => s + a.punctualityScore, 0) / (attendanceMonthlyTrends.length || 1))}%
+                      {(() => {
+                        const activeMonths = attendanceMonthlyTrends.filter(a => a.avgPresent > 0)
+                        if (activeMonths.length === 0) return '100%'
+                        return `${Math.round(activeMonths.reduce((s, a) => s + a.punctualityScore, 0) / activeMonths.length)}%`
+                      })()}
                     </p>
                   </div>
                   <div className="bg-amber-50/50 dark:bg-amber-950/30 p-3 rounded-xl border border-amber-100/60 dark:border-amber-800/40">
-                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase">Annual Late Incidents</span>
+                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase">Total Late Incidents</span>
                     <p className="text-base sm:text-lg font-bold font-mono-data text-amber-700 dark:text-amber-400 mt-0.5">
                       {attendanceMonthlyTrends.reduce((s, a) => s + a.totalLate, 0)}
                     </p>
@@ -1152,24 +1444,47 @@ export default function SADashboard({ onNavigate }: Props) {
               <div className="h-[280px] sm:h-[340px] w-full pt-2">
                 <ResponsiveContainer width="100%" height="100%">
                   {attendanceViewMode === '14days' ? (
-                    <LineChart data={attendanceDailyTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                      <XAxis dataKey="dayLabel" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip content={<CustomDailyAttendanceTooltip />} />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                      <Line type="monotone" dataKey="attendanceRate" name="Daily Attendance Compliance (%)" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6 }} />
-                    </LineChart>
+                    attendanceChartType === 'bar' ? (
+                      <BarChart data={attendanceDailyTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                        <XAxis dataKey="dayLabel" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                        <Tooltip content={<CustomDailyAttendanceTooltip />} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                        <Bar dataKey="attendanceRate" name="Daily Attendance Compliance (%)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    ) : (
+                      <LineChart data={attendanceDailyTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                        <XAxis dataKey="dayLabel" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                        <Tooltip content={<CustomDailyAttendanceTooltip />} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                        <Line type="monotone" dataKey="attendanceRate" name="Daily Attendance Compliance (%)" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 6 }} />
+                      </LineChart>
+                    )
                   ) : (
-                    <BarChart data={attendanceMonthlyTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                      <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                      <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip content={<CustomMonthlyAttendanceTooltip />} />
-                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                      <Bar dataKey="attendanceRate" name="Attendance Compliance (%)" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="punctualityScore" name="Punctuality Score (%)" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                    </BarChart>
+                    attendanceChartType === 'line' ? (
+                      <LineChart data={attendanceMonthlyTrends} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                        <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                        <Tooltip content={<CustomMonthlyAttendanceTooltip />} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                        <Line type="monotone" dataKey="attendanceRate" name="Attendance Compliance (%)" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 7 }} />
+                        <Line type="monotone" dataKey="punctualityScore" name="Punctuality Score (%)" stroke="#6366f1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 7 }} />
+                      </LineChart>
+                    ) : (
+                      <BarChart data={attendanceMonthlyTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                        <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                        <Tooltip content={<CustomMonthlyAttendanceTooltip />} />
+                        <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                        <Bar dataKey="attendanceRate" name="Attendance Compliance (%)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="punctualityScore" name="Punctuality Score (%)" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    )
                   )}
                 </ResponsiveContainer>
               </div>
