@@ -6,6 +6,7 @@ import { formatTime12Hour, formatDistance, calculateVisitDuration } from '../../
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import { batchClockOutPendingStaff } from '../../lib/attendanceAutoClockout'
+import ExportAttendanceModal from '../../components/ExportAttendanceModal'
 
 const STATUS_COLORS: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-500',
@@ -173,6 +174,7 @@ export default function AttendanceDaily() {
   const [todayRecords, setTodayRecords] = useState<Record<string, any>>({})
   const [todayLeaves, setTodayLeaves] = useState<Record<string, any>>({})
   const [rosterLoading, setRosterLoading] = useState(false)
+  const [exportRangeModalOpen, setExportRangeModalOpen] = useState(false)
 
   // ── Inspection / Adjustment Modal State ──
   const [inspectModalOpen, setInspectModalOpen] = useState(false)
@@ -1112,6 +1114,14 @@ export default function AttendanceDaily() {
 
   return (
     <div className="p-4 sm:p-6 anim-fade-up space-y-6">
+      {/* Custom Timeframe Attendance CSV Export Modal */}
+      <ExportAttendanceModal
+        isOpen={exportRangeModalOpen}
+        onClose={() => setExportRangeModalOpen(false)}
+        defaultStartDate={targetDate}
+        defaultEndDate={targetDate}
+      />
+
       {/* ── Top Header & Dual-View Tabs ── */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
@@ -1227,6 +1237,15 @@ export default function AttendanceDaily() {
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <span>Export CSV ({filteredRoster.length})</span>
+              </button>
+
+              <button
+                onClick={() => setExportRangeModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
+                title="Export all staff attendance across a custom date range"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <span>Export Date Range (CSV)</span>
               </button>
             </div>
           </div>
