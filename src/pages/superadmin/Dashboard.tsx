@@ -333,6 +333,7 @@ export default function SADashboard({ onNavigate }: Props) {
 
     // Construct Daily Attendance Trend & Sync with HR Daily Registry
     const activeStaffIds = new Set(filteredStaff.map(s => s.id))
+    // activeStaffIds already defined above
     const totalEmployeesCount = filteredStaff.length || 1
 
     // Determine latest registry date with active presence records (or today)
@@ -387,10 +388,10 @@ export default function SADashboard({ onNavigate }: Props) {
       missingClockOut: regMissingClockOut,
     })
     const dailyAttTrends: AttendanceDailyTrendItem[] = []
-    // employees count already set /*
-    const activeStaffIds = new Set(filteredStaff.map(s => s.id))
+    // employees count already configured
+    // activeStaffIds already defined above
 
-    */
+    // ready
     let dailyDates: Date[] = []
     if (timeframe === 'custom' && customStart && customEnd) {
       const s = new Date(customStart)
@@ -1347,7 +1348,7 @@ export default function SADashboard({ onNavigate }: Props) {
               </div>
             </div>
           )}
-          /* (legacy cards commented out)
+          {/*
           {config.showAttendanceCard && (
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
               <div className="flex items-center justify-between mb-2">
@@ -1395,7 +1396,8 @@ export default function SADashboard({ onNavigate }: Props) {
             </div>
           )}
 
-          */
+          )}
+          */}
           {/* 7. Security Accounts Card */}
           {config.showSecurityCard && (
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 sm:p-5 shadow-xs card-hover flex flex-col justify-between">
