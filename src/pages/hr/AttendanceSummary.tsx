@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import * as XLSX from 'xlsx'
 import { calculateWorkingDaysInMonth, isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import ExportAttendanceModal from '../../components/ExportAttendanceModal'
+import StaffReportCardModal from '../../components/StaffReportCardModal'
 
 interface StaffMember {
   id: string
@@ -16,6 +17,7 @@ interface StaffMember {
 
 interface AttendanceSummary {
   staffId: string
+  rawId: string
   name: string
   department: string
   daysPresent: number
@@ -48,7 +50,8 @@ const exportToExcel = (summaries: AttendanceSummary[], month: number, year: numb
       'Days Absent',
       'Days on Leave',
       'Approved OT (Hours)',
-      'Site Days'
+      'Total OT (Hours)',
+      'Site Days',
     ],
     ...summaries.map(s => [
       s.name,
@@ -62,11 +65,11 @@ const exportToExcel = (summaries: AttendanceSummary[], month: number, year: numb
       s.daysAbsent,
       s.daysOnLeave,
       s.approvedOvertimeHours,
+      s.totalOvertimeHours,
       s.daysOnSite,
     ])
   ]
-  
-  // Create worksheet
+
   const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance Summary')
@@ -82,6 +85,8 @@ export default function AttendanceSummary() {
   const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
   const [loading, setLoading] = useState(true)
   const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [reportCardModalOpen, setReportCardModalOpen] = useState(false)
+  const [reportCardStaffId, setReportCardStaffId] = useState<string | null>(null)
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   const monthYearLabel = `${monthNames[selectedMonth]} ${selectedYear}`
@@ -255,12 +260,10 @@ export default function AttendanceSummary() {
           }
         }
 
-
         const daysOnLeave = records.filter(r => r.status === 'on_leave').length
         // Missed weekday working days (excluding approved leave) - pre-employment days and weekends are never counted as absent
         const daysAbsent = Math.max(0, staffPastWorkingDays - weekdayPresent - daysOnLeave)
 
-        
         const totalOvertimeHours = records.reduce((sum, r) => sum + (r.overtime_hours || r.overtimeHours || 0), 0)
         const approvedOvertimeHours = records
           .filter(r => r.overtime_approval === 'approved')
@@ -269,6 +272,7 @@ export default function AttendanceSummary() {
 
         return {
           staffId: staff.staff_code,
+          rawId: staff.id,
           name: staff.full_name,
           department: staff.department_name,
           daysPresent,
@@ -321,7 +325,7 @@ export default function AttendanceSummary() {
           />
           <p className="text-sm text-slate-500 mt-0.5">{monthYearLabel} — monthly presence, weekend shifts, lateness records, and overtime summary</p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 shadow-2xs">
             <button onClick={handlePrevMonth} className="p-1.5 hover:bg-slate-100 rounded text-slate-600 transition-colors">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -345,6 +349,17 @@ export default function AttendanceSummary() {
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span>Export Custom CSV</span>
+          </button>
+          <button 
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-2xs"
+            onClick={() => {
+              setReportCardStaffId(null)
+              setReportCardModalOpen(true)
+            }}
+            title="Generate detailed employee attendance and performance report card"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span>Staff Report Card</span>
           </button>
         </div>
       </div>
@@ -397,6 +412,7 @@ export default function AttendanceSummary() {
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">Leave</th>
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">OT (Hrs)</th>
                 <th className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wide px-3 py-3">Site Days</th>
+                <th className="text-right text-xs font-semibold text-slate-400 uppercase tracking-wide px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -429,12 +445,34 @@ export default function AttendanceSummary() {
                   <td className="px-3 py-3 text-center font-medium text-purple-600">{s.daysOnLeave > 0 ? s.daysOnLeave : <span className="text-slate-300">—</span>}</td>
                   <td className="px-3 py-3 text-center font-mono text-xs text-violet-600 font-semibold">{s.approvedOvertimeHours > 0 ? `${s.approvedOvertimeHours}h` : '—'}</td>
                   <td className="px-3 py-3 text-center text-xs text-slate-600">{s.daysOnSite > 0 ? s.daysOnSite : '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => {
+                        setReportCardStaffId(s.rawId || s.staffId)
+                        setReportCardModalOpen(true)
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors border border-indigo-200"
+                      title="View Performance Scorecard & Detailed Report Card"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                      <span>Report Card</span>
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Individual Staff Detailed Report Card Modal */}
+      <StaffReportCardModal
+        isOpen={reportCardModalOpen}
+        onClose={() => setReportCardModalOpen(false)}
+        initialStaffId={reportCardStaffId}
+        initialStartDate={`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`}
+        initialEndDate={`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(new Date(selectedYear, selectedMonth + 1, 0).getDate()).padStart(2, '0')}`}
+      />
     </div>
   )
 }

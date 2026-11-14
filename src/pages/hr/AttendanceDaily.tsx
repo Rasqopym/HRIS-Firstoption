@@ -7,6 +7,7 @@ import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import { batchClockOutPendingStaff } from '../../lib/attendanceAutoClockout'
 import ExportAttendanceModal from '../../components/ExportAttendanceModal'
+import StaffReportCardModal from '../../components/StaffReportCardModal'
 
 const STATUS_COLORS: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-500',
@@ -175,6 +176,8 @@ export default function AttendanceDaily() {
   const [todayLeaves, setTodayLeaves] = useState<Record<string, any>>({})
   const [rosterLoading, setRosterLoading] = useState(false)
   const [exportRangeModalOpen, setExportRangeModalOpen] = useState(false)
+  const [reportCardModalOpen, setReportCardModalOpen] = useState(false)
+  const [reportCardStaffId, setReportCardStaffId] = useState<string | null>(null)
 
   // ── Inspection / Adjustment Modal State ──
   const [inspectModalOpen, setInspectModalOpen] = useState(false)
@@ -1247,6 +1250,18 @@ export default function AttendanceDaily() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 <span>Export Date Range (CSV)</span>
               </button>
+
+              <button
+                onClick={() => {
+                  setReportCardStaffId(selectedStaffId || null)
+                  setReportCardModalOpen(true)
+                }}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
+                title="Generate detailed employee attendance and punctuality performance report card"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span>Staff Report Card</span>
+              </button>
             </div>
           </div>
 
@@ -1301,9 +1316,7 @@ export default function AttendanceDaily() {
               <div className={`text-[11px] font-semibold uppercase tracking-wider ${statusFilter === 'on_time' ? 'text-teal-200' : 'text-slate-500'}`}>
                 On-Time
               </div>
-              <div className={`text-xl sm:text-2xl font-bold font-mono-data mt-1 ${statusFilter === 'on_time' ? 'text-white' : 'text-emerald-600'}`}>
-                {rosterStats.onTime}
-              </div>
+              <div className="text-xl sm:text-2xl font-bold font-mono-data mt-1">{rosterStats.onTime}</div>
               <div className={`text-[10px] mt-0.5 ${statusFilter === 'on_time' ? 'text-teal-200' : 'text-slate-400'}`}>
                 Punctual arrivals
               </div>
@@ -1321,9 +1334,7 @@ export default function AttendanceDaily() {
               <div className={`text-[11px] font-semibold uppercase tracking-wider ${statusFilter === 'late' ? 'text-amber-100' : 'text-slate-500'}`}>
                 Late Arrivals
               </div>
-              <div className={`text-xl sm:text-2xl font-bold font-mono-data mt-1 ${statusFilter === 'late' ? 'text-white' : 'text-amber-600'}`}>
-                {rosterStats.late}
-              </div>
+              <div className="text-xl sm:text-2xl font-bold font-mono-data mt-1">{rosterStats.late}</div>
               <div className={`text-[10px] mt-0.5 ${statusFilter === 'late' ? 'text-amber-100' : 'text-slate-400'}`}>
                 +{rosterStats.lateMinutesTotal}m total late
               </div>
@@ -1366,9 +1377,7 @@ export default function AttendanceDaily() {
               <div className={`text-[11px] font-semibold uppercase tracking-wider ${statusFilter === 'field' ? 'text-indigo-200' : 'text-slate-500'}`}>
                 Field / Sites
               </div>
-              <div className={`text-xl sm:text-2xl font-bold font-mono-data mt-1 ${statusFilter === 'field' ? 'text-white' : 'text-indigo-600'}`}>
-                {rosterStats.field}
-              </div>
+              <div className="text-xl sm:text-2xl font-bold font-mono-data mt-1">{rosterStats.field}</div>
               <div className={`text-[10px] mt-0.5 ${statusFilter === 'field' ? 'text-indigo-200' : 'text-slate-400'}`}>
                 Waypoints active
               </div>
@@ -1826,6 +1835,17 @@ export default function AttendanceDaily() {
                               >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                               </button>
+
+                              <button
+                                onClick={() => {
+                                  setReportCardStaffId(item.staff.id)
+                                  setReportCardModalOpen(true)
+                                }}
+                                className="p-1 rounded-lg border border-slate-200 hover:bg-indigo-50 text-slate-500 hover:text-indigo-700 transition-colors"
+                                title="Generate Staff Performance Report Card"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1874,6 +1894,18 @@ export default function AttendanceDaily() {
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 <span>Bulk Historical Setup</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setReportCardStaffId(selectedStaffId || null)
+                  setReportCardModalOpen(true)
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 shadow-2xs"
+                title="Generate detailed audit scorecard and report card for this staff"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span>Report Card</span>
               </button>
 
               <button
@@ -2403,6 +2435,13 @@ export default function AttendanceDaily() {
           </div>
         </div>
       )}
+
+      {/* Individual Staff Detailed Report Card Modal */}
+      <StaffReportCardModal
+        isOpen={reportCardModalOpen}
+        onClose={() => setReportCardModalOpen(false)}
+        initialStaffId={reportCardStaffId}
+      />
     </div>
   )
 }
