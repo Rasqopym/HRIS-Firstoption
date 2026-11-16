@@ -3,7 +3,7 @@ import type { Role, Page, HRISNotification } from '../types'
 import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 import { useCompanySettings } from '../hooks/useCompanySettings'
-import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus } from '../lib/pushNotification'
+import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus, checkAndNotifyUnclockedStaff } from '../lib/pushNotification'
 import { checkAndAutoClockOut } from '../lib/attendanceAutoClockout'
 import { getUserWorkspaces } from '../lib/workspaceManager'
 
@@ -617,6 +617,28 @@ export default function Layout({
             }
           })
           localStorage.setItem('hris_staff_confirmations_due', JSON.stringify(dueConfirmations))
+
+          // Check unclocked staff alert for 12:00 PM and 3:00 PM reminder (working days only)
+          try {
+            const unclockedRes = await checkAndNotifyUnclockedStaff(role, (companySettings as any)?.custom_holidays || [])
+            if (unclockedRes && unclockedRes.hasUnclocked && unclockedRes.window) {
+              const isRepeat = unclockedRes.window === '3pm'
+              items.unshift({
+                id: `unclocked-${unclockedRes.window}-${unclockedRes.todayStr}`,
+                title: isRepeat ? '⏰ 3:00 PM Reminder: Unclocked Staff' : '⏰ 12:00 PM Alert: Unclocked Staff',
+                message: `${unclockedRes.count} staff member${unclockedRes.count > 1 ? 's' : ''} ${
+                  isRepeat ? 'still have not clocked in for work today' : 'have not clocked in for work today'
+                }: ${unclockedRes.namesSummary}. Tap to inspect today's presence roster.`,
+                timestamp: isRepeat ? 'Today, 3:00 PM' : 'Today, 12:00 PM',
+                type: 'warning',
+                read: false,
+                navigateTo: 'hr-attendance-daily',
+                source: 'system',
+              })
+            }
+          } catch (e) {
+            console.warn('Unclocked staff notification check error:', e)
+          }
         }
 
         if (role === 'accountant' || role === 'superadmin') {
@@ -956,7 +978,7 @@ export default function Layout({
         try {
           const { data: { user } } = await supabase.auth.getUser()
           const currentSId = user ? (localStorage.getItem(`hris_staff_id_${user.id}`) || localStorage.getItem('hris_last_active_staff_id') || user.id) : null
-          runRoutineReminders(role, [], currentSId)
+          runRoutineReminders(role, (companySettings as any)?.custom_holidays || [], currentSId)
           if (currentSId) {
             checkAndAutoClockOut(currentSId)
           }

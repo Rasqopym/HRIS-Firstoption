@@ -1,3 +1,6 @@
+import { supabase } from './supabase'
+import { isPublicHoliday, type PublicHoliday } from './holidays'
+
 export interface PushReminderOptions {
   title: string
   body: string
@@ -104,7 +107,187 @@ export function getStaffConfirmationStatus(dateEmployedStr?: string): Confirmati
   }
 }
 
-// Routine reminders check (clock-in, clock-out, pending tasks, and staff 3-month confirmation)
+export interface UnclockedStaffAlertResult {
+  hasUnclocked: boolean
+  count: number
+  names: string[]
+  namesSummary: string
+  window: '12pm' | '3pm' | null
+  todayStr: string
+}
+
+/**
+ * Checks for staff yet to clock in on working days at 12:00 PM and 3:00 PM (repeat reminder)
+ * for HR and Superadmin roles, and sends a local push notification if not already sent.
+ */
+export async function checkAndNotifyUnclockedStaff(
+  role: string,
+  customHolidays: PublicHoliday[] = []
+): Promise<UnclockedStaffAlertResult | null> {
+  if (role !== 'hr' && role !== 'superadmin') {
+    return null
+  }
+
+  const now = new Date()
+  const dow = now.getDay()
+  // Working days only: Monday (1) to Friday (5)
+  if (dow === 0 || dow === 6) {
+    return null
+  }
+
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+  // Check public holidays
+  let hols = customHolidays
+  if (!hols || hols.length === 0) {
+    try {
+      const cached = localStorage.getItem('hris_custom_holidays')
+      if (cached) hols = JSON.parse(cached)
+    } catch {}
+  }
+  if (isPublicHoliday(todayStr, hols)) {
+    return null
+  }
+
+  // Determine time window: 12:00 PM (noon) alert vs 3:00 PM repeat reminder
+  const hours = now.getHours()
+  let alertWindow: '12pm' | '3pm' | null = null
+  if (hours >= 12 && hours < 15) {
+    alertWindow = '12pm'
+  } else if (hours >= 15) {
+    alertWindow = '3pm'
+  } else {
+    // Before 12:00 PM
+    return null
+  }
+
+  try {
+    // 1. Fetch active staff
+    const { data: staffList, error: staffErr } = await supabase
+      .from('staff')
+      .select('id, staff_code, full_name, profile_id, email, date_employed, created_at')
+      .eq('status', 'active')
+      .order('full_name')
+
+    if (staffErr || !staffList || staffList.length === 0) {
+      return null
+    }
+
+    // 2. Fetch today's attendance records
+    const { data: attRecords } = await supabase
+      .from('attendance_records')
+      .select('staff_id, clock_in_time, status')
+      .eq('attendance_date', todayStr)
+
+    const clockedInStaffIds = new Set<string>()
+    if (attRecords) {
+      attRecords.forEach((r: any) => {
+        if (r.staff_id && (r.clock_in_time || r.status === 'present')) {
+          clockedInStaffIds.add(r.staff_id)
+        }
+      })
+    }
+
+    // 3. Fetch today's approved leaves
+    const { data: leaves } = await supabase
+      .from('leave_requests')
+      .select('staff_id')
+      .eq('status', 'approved')
+      .lte('start_date', todayStr)
+      .gte('end_date', todayStr)
+
+    const onLeaveStaffIds = new Set<string>()
+    if (leaves) {
+      leaves.forEach((l: any) => {
+        if (l.staff_id) onLeaveStaffIds.add(l.staff_id)
+      })
+    }
+
+    // 4. Identify unclocked active staff
+    const unclockedStaff = staffList.filter((st: any) => {
+      // Must be employed as of today
+      const empDate = st.date_employed || (st.created_at ? st.created_at.slice(0, 10) : null)
+      if (empDate && empDate > todayStr) {
+        return false
+      }
+
+      const candidateIds = [st.id, st.staff_code, st.profile_id, st.email].filter(Boolean) as string[]
+
+      // Check if marked clocked in or on leave in Supabase
+      for (const cid of candidateIds) {
+        if (clockedInStaffIds.has(cid)) return false
+        if (onLeaveStaffIds.has(cid)) return false
+      }
+
+      // Check LocalStorage cache for offline/local clock-ins
+      for (const cid of candidateIds) {
+        for (const k of [`hris_self_attendance_${cid}`, `hris_attendance_daily_${cid}`]) {
+          try {
+            const raw = localStorage.getItem(k)
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              if (parsed[todayStr] && (parsed[todayStr].clock_in_time || parsed[todayStr].clockInTime || parsed[todayStr].status === 'present')) {
+                return false
+              }
+            }
+          } catch {}
+        }
+      }
+
+      return true
+    })
+
+    if (unclockedStaff.length === 0) {
+      return {
+        hasUnclocked: false,
+        count: 0,
+        names: [],
+        namesSummary: '',
+        window: alertWindow,
+        todayStr
+      }
+    }
+
+    const names = unclockedStaff.map((s: any) => s.full_name)
+    const namesSummary = names.length <= 3
+      ? names.join(', ')
+      : `${names.slice(0, 3).join(', ')} and ${names.length - 3} other${names.length - 3 > 1 ? 's' : ''}`
+
+    // 5. Send local push notification once per window
+    const remindKey = `hris_remind_unclocked_${alertWindow}_${todayStr}`
+    if (!localStorage.getItem(remindKey)) {
+      const isRepeat = alertWindow === '3pm'
+      const title = isRepeat
+        ? '⏰ 3:00 PM Attendance Reminder: Still Unclocked'
+        : '⏰ 12:00 PM Attendance Alert: Unclocked Staff'
+      const body = isRepeat
+        ? `${names.length} staff member${names.length > 1 ? 's' : ''} still have not clocked in today: ${namesSummary}. Tap to view attendance.`
+        : `${names.length} staff member${names.length > 1 ? 's' : ''} have not clocked in today: ${namesSummary}. Tap to view attendance.`
+
+      sendLocalNotification({
+        title,
+        body,
+        tag: `unclocked-staff-${alertWindow}-${todayStr}`,
+        url: '/#hr-attendance-daily'
+      })
+      localStorage.setItem(remindKey, 'true')
+    }
+
+    return {
+      hasUnclocked: true,
+      count: names.length,
+      names,
+      namesSummary,
+      window: alertWindow,
+      todayStr
+    }
+  } catch (err) {
+    console.warn('Error checking unclocked staff alerts:', err)
+    return null
+  }
+}
+
+// Routine reminders check (clock-in, clock-out, pending tasks, staff 3-month confirmation, and unclocked staff)
 export function runRoutineReminders(role: string, customHolidays: any[] = [], currentStaffId?: string | null) {
   const now = new Date()
   const hours = now.getHours()
@@ -235,5 +418,10 @@ export function runRoutineReminders(role: string, customHolidays: any[] = [], cu
         }
       }
     } catch (e) {}
+  }
+
+  // 4. Unclocked Staff Reminders (12:00 PM & 3:00 PM on working days for HR and Superadmin)
+  if (role === 'hr' || role === 'superadmin') {
+    checkAndNotifyUnclockedStaff(role, customHolidays).catch(() => {})
   }
 }
