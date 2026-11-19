@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { logAction } from '../../lib/auditLog'
 import type { DayAttendance, AttendanceStatus, SiteVisit } from '../../types'
-import { formatTime12Hour, formatDistance, calculateVisitDuration } from '../../lib/geofence'
+import { formatTime12Hour, formatDistance, calculateVisitDuration, getExternalFieldVisits } from '../../lib/geofence'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import { batchClockOutPendingStaff } from '../../lib/attendanceAutoClockout'
@@ -898,7 +898,7 @@ export default function AttendanceDaily() {
         } else {
           onTime++
         }
-        if (item.workMode === 'field' || item.siteVisits.length > 0) {
+        if (item.workMode === 'field' || getExternalFieldVisits(item.siteVisits, item.workMode).length > 0) {
           field++
         }
       } else if (item.computedStatus === 'on_leave') {
@@ -982,7 +982,7 @@ export default function AttendanceDaily() {
       } else if (statusFilter === 'late') {
         if (item.computedStatus !== 'present' || !item.isLate) return false
       } else if (statusFilter === 'field') {
-        const isField = item.workMode === 'field' || item.siteVisits.length > 0
+        const isField = item.workMode === 'field' || getExternalFieldVisits(item.siteVisits, item.workMode).length > 0
         if (item.computedStatus !== 'present' || !isField) return false
       } else if (statusFilter === 'absent') {
         if (item.computedStatus !== 'absent' && item.computedStatus !== 'unmarked') return false
@@ -1794,11 +1794,11 @@ export default function AttendanceDaily() {
 
                           {/* Branch / Work Mode */}
                           <td className="py-3 px-4">
-                            {item.workMode === 'field' || item.siteVisits.length > 0 ? (
+                            {item.workMode === 'field' || getExternalFieldVisits(item.siteVisits, item.workMode).length > 0 ? (
                               <div className="flex items-center gap-1.5 text-indigo-700">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
                                 <span className="font-semibold truncate max-w-[140px]">
-                                  {item.fieldClientName || item.siteVisits[0]?.site_name || 'Field / Multi-Site'}
+                                  {item.fieldClientName || getExternalFieldVisits(item.siteVisits, item.workMode)[0]?.site_name || 'Field / Multi-Site'}
                                 </span>
                               </div>
                             ) : item.matchedLocationName ? (
@@ -2001,7 +2001,9 @@ export default function AttendanceDaily() {
                   const dow = new Date(day.date).getDay()
                   const isWeekend = dow === 0 || dow === 6
                   const isCurrentDay = day.date === todayStr
-                  const visitsCount = day.siteVisits?.length || 0
+                  const extVisits = getExternalFieldVisits(day.siteVisits, day.workMode)
+                  const isFieldDay = day.workMode === 'field'
+                  const visitsCount = isFieldDay ? Math.max(1, extVisits.length) : extVisits.length
 
                   return (
                     <div
@@ -2046,7 +2048,7 @@ export default function AttendanceDaily() {
 
                         {visitsCount > 0 && (
                           <div className="text-[10px] text-amber-700 bg-amber-50 rounded px-1 py-0.5 font-medium truncate">
-                            {day.siteVisits?.[0]?.site_name}
+                            {extVisits[0]?.site_name || day.fieldClientName}
                           </div>
                         )}
 

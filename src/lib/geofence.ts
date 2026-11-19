@@ -169,3 +169,16 @@ export function calculateVisitDuration(arrivalTimeStr?: string, departureTimeStr
   if (mins === 0) return `${hours}h`
   return `${hours}h ${mins}m`
 }
+
+/**
+ * Filters out routine office shift arrivals from site visits list,
+ * preserving only genuine client/project site visits.
+ */
+export function getExternalFieldVisits<T extends { purpose?: string | null }>(visits?: T[] | null, workMode?: string): T[] {
+  if (!visits || !Array.isArray(visits)) return []
+  if (workMode === 'field') return visits
+  return visits.filter(v => {
+    const p = (v.purpose || '').toLowerCase()
+    return !p.includes('office shift arrival') && !p.includes('shift arrival')
+  })
+}

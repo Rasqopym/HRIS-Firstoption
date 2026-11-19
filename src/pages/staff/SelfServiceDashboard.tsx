@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { useCurrentStaff } from '../../hooks/useCurrentStaff'
 import { calculatePayrollForStaff } from '../../lib/payrollEngine'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
-import { formatTime12Hour } from '../../lib/geofence'
+import { formatTime12Hour, getExternalFieldVisits } from '../../lib/geofence'
 import { isPublicHoliday, calculateWorkingDaysInMonth, type PublicHoliday } from '../../lib/holidays'
 import { getStaffConfirmationStatus, requestNotificationPermission, sendLocalNotification } from '../../lib/pushNotification'
 import {
@@ -272,7 +272,8 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
             status = 'present'
             isLate = Boolean(rec.is_late || rec.isLate)
             lateMinutes = rec.late_minutes || rec.lateMinutes || 0
-            siteVisitsCount = Array.isArray(rec.site_visits) ? rec.site_visits.length : (rec.siteVisits?.length || 0)
+            const rawVisits = Array.isArray(rec.site_visits) ? rec.site_visits : (rec.siteVisits || [])
+            siteVisitsCount = getExternalFieldVisits(rawVisits, rec.work_mode || rec.workMode).length
             overtimeHours = rec.overtime_hours || rec.overtimeHours || 0
             clockInTime = rec.clock_in_time || rec.clockInTime || null
             clockOutTime = rec.clock_out_time || rec.clockOutTime || null
@@ -361,7 +362,9 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
               } else {
                 onTimeCount++
               }
-              const vCount = Array.isArray(r.site_visits) ? r.site_visits.length : (r.siteVisits?.length || 0)
+              const rawVisits = Array.isArray(r.site_visits) ? r.site_visits : (r.siteVisits || [])
+              const extVisits = getExternalFieldVisits(rawVisits, r.work_mode || r.workMode)
+              const vCount = extVisits.length
               if (r.work_mode === 'field' || r.workMode === 'field' || vCount > 0) {
                 fieldCount += (vCount > 0 ? vCount : 1)
               }

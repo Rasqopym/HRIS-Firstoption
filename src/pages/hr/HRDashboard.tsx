@@ -4,6 +4,7 @@ import type { Page } from '../../types'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { getStaffConfirmationStatus } from '../../lib/pushNotification'
+import { getExternalFieldVisits } from '../../lib/geofence'
 import {
   ResponsiveContainer,
   BarChart,
@@ -262,7 +263,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
         const todayPresent = todayRecs.filter(r => r.status === 'present').length
         const todayLate = todayRecs.filter(r => r.status === 'present' && (r.is_late || r.isLate)).length
         const todayOnTime = Math.max(0, todayPresent - todayLate)
-        const todayField = todayRecs.filter(r => r.status === 'present' && (r.work_mode === 'field' || (Array.isArray(r.site_visits) && r.site_visits.length > 0))).length
+        const todayField = todayRecs.filter(r => r.status === 'present' && (r.work_mode === 'field' || getExternalFieldVisits(r.site_visits, r.work_mode).length > 0)).length
         const todayLeave = todayRecs.filter(r => r.status === 'on_leave').length
 
         setTodayMetrics({
@@ -378,7 +379,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
                 if (r.status === 'present') {
                   mPresent++
                   if (r.is_late || r.isLate) mLate++
-                  if (r.work_mode === 'field' || (Array.isArray(r.site_visits) && r.site_visits.length > 0)) mField++
+                  if (r.work_mode === 'field' || getExternalFieldVisits(r.site_visits, r.work_mode).length > 0) mField++
                 } else if (r.status === 'on_leave') {
                   mLeave++
                 }
