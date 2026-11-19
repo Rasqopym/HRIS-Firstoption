@@ -3,7 +3,13 @@ import type { Role, Page, HRISNotification } from '../types'
 import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 import { useCompanySettings } from '../hooks/useCompanySettings'
-import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus, checkAndNotifyUnclockedStaff } from '../lib/pushNotification'
+import {
+  requestNotificationPermission,
+  sendLocalNotification,
+  runRoutineReminders,
+  getStaffConfirmationStatus,
+  checkAndNotifyUnclockedStaff,
+} from '../lib/pushNotification'
 import { checkAndAutoClockOut } from '../lib/attendanceAutoClockout'
 import { getUserWorkspaces } from '../lib/workspaceManager'
 
@@ -461,6 +467,24 @@ export default function Layout({
     }
   }
 
+  const handleSendTestNotification = async () => {
+    try {
+      const perm = await requestNotificationPermission()
+      if (perm !== 'granted') {
+        alert('Please allow notification permissions in your browser address bar/settings to receive push alerts.')
+        return
+      }
+      await sendLocalNotification({
+        title: '✅ HRIS Notification Test',
+        body: 'Push notifications are active and working properly on your device!',
+        tag: `test-notif-${Date.now()}`,
+        url: window.location.href,
+      })
+    } catch (err) {
+      console.error('Failed to trigger test notification:', err)
+    }
+  }
+
   const navSections = navForRole(role)
   const unreadCount = notifs.filter(n => !n.read).length
 
@@ -592,12 +616,13 @@ export default function Layout({
           // Check Staff 3-Month Confirmation Milestone
           const { data: staffDirectory } = await supabase
             .from('staff')
-            .select('id, full_name, staff_code, date_employed, job_title')
+            .select('id, full_name, staff_code, date_employed, created_at, job_title')
             .eq('status', 'active')
 
           const dueConfirmations: Array<{ id: string; name: string; staffCode: string; daysRemaining: number }> = []
           ;(staffDirectory || []).forEach((st: any) => {
-            const conf = getStaffConfirmationStatus(st.date_employed)
+            const empDate = st.date_employed || (st.created_at ? st.created_at.split('T')[0] : null)
+            const conf = getStaffConfirmationStatus(empDate)
             if (conf && conf.isDueForConfirmation) {
               dueConfirmations.push({
                 id: st.id,
@@ -622,15 +647,16 @@ export default function Layout({
           try {
             const unclockedRes = await checkAndNotifyUnclockedStaff(role, (companySettings as any)?.custom_holidays || [])
             if (unclockedRes && unclockedRes.hasUnclocked && unclockedRes.window) {
+              const isMorning = unclockedRes.window === 'morning'
               const isRepeat = unclockedRes.window === '3pm'
               items.unshift({
                 id: `unclocked-${unclockedRes.window}-${unclockedRes.todayStr}`,
-                title: isRepeat ? '⏰ 3:00 PM Reminder: Unclocked Staff' : '⏰ 12:00 PM Alert: Unclocked Staff',
+                title: isMorning ? '📋 Morning Attendance: Yet to Clock In' : isRepeat ? '⏰ 3:00 PM Reminder: Unclocked Staff' : '⏰ 12:00 PM Alert: Unclocked Staff',
                 message: `${unclockedRes.count} staff member${unclockedRes.count > 1 ? 's' : ''} ${
                   isRepeat ? 'still have not clocked in for work today' : 'have not clocked in for work today'
                 }: ${unclockedRes.namesSummary}. Tap to inspect today's presence roster.`,
-                timestamp: isRepeat ? 'Today, 3:00 PM' : 'Today, 12:00 PM',
-                type: 'warning',
+                timestamp: isMorning ? 'Today, Morning' : isRepeat ? 'Today, 3:00 PM' : 'Today, 12:00 PM',
+                type: isMorning ? 'info' : 'warning',
                 read: false,
                 navigateTo: 'hr-attendance-daily',
                 source: 'system',
@@ -752,6 +778,16 @@ export default function Layout({
                     source: 'workspace',
                     navigateTo: 'st-workspace',
                   })
+                  const taskNotifKey = `hris_pushed_task_${t.id}`
+                  if (!localStorage.getItem(taskNotifKey)) {
+                    sendLocalNotification({
+                      title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : '📋 Task Assigned to You',
+                      body: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                      tag: `task-${t.id}`,
+                      url: '/#st-workspace',
+                    })
+                    localStorage.setItem(taskNotifKey, 'true')
+                  }
                 })
               } catch (taskErr) {
                 console.warn('Workspace tasks notification error:', taskErr)
@@ -949,7 +985,7 @@ export default function Layout({
                   title: '⏱️ Daily Standup Pending',
                   message: 'You have not submitted your daily squad standup update for today.',
                   timestamp: 'Today',
-                  type: 'warning',
+                  type: 'info',
                   read: false,
                   source: 'workspace',
                   navigateTo: wsPage,
@@ -2218,7 +2254,17 @@ export default function Layout({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>
+                <button
+                  type="button"
+                  onClick={handleSendTestNotification}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                  title="Trigger a test push notification to verify alerts on this device"
+                >
+                  🔔 Test
+                </button>
+                <button onClick={markAllRead} className="text-xs text-slate-500 hover:text-blue-600 hover:underline">
+                  Mark all read
+                </button>
                 <button onClick={() => setShowNotifications(false)} className="p-1 rounded hover:bg-slate-100 text-slate-400">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -2259,45 +2305,69 @@ export default function Layout({
               </div>
             )}
             <div className="flex-1 overflow-y-auto">
-              {notifs.map(n => (
-                <div
-                  key={n.id}
-                  onClick={() => {
-                    setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
-                    try {
-                      const stored = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
-                      if (!stored.includes(n.id)) {
-                        localStorage.setItem('hris_read_notif_ids', JSON.stringify([...stored, n.id]))
+              {notifs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 text-center h-72 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold text-slate-700">No Notifications</h3>
+                    <p className="text-xs text-slate-400 max-w-[220px]">
+                      You are all caught up! Shift reminders, approvals, and alerts will appear here.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSendTestNotification}
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+                  >
+                    🔔 Send Test Alert
+                  </button>
+                </div>
+              ) : (
+                notifs.map(n => (
+                  <div
+                    key={n.id}
+                    onClick={() => {
+                      setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
+                      try {
+                        const stored = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
+                        if (!stored.includes(n.id)) {
+                          localStorage.setItem('hris_read_notif_ids', JSON.stringify([...stored, n.id]))
+                        }
+                      } catch {}
+                      if (n.navigateTo) {
+                        setShowNotifications(false)
+                        onNavigate(n.navigateTo as any)
                       }
-                    } catch {}
-                    if (n.navigateTo) {
-                      setShowNotifications(false)
-                      onNavigate(n.navigateTo as any)
-                    }
-                  }}
-                  className={`px-5 py-4 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={`mt-0.5 w-2 h-2 rounded-full flex-none ${
-                      n.type === 'success' ? 'bg-emerald-500' :
-                      n.type === 'warning' ? 'bg-amber-500' :
-                      n.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
-                    } ${n.read ? 'opacity-30' : ''}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium ${n.read ? 'text-slate-500' : 'text-slate-800'}`}>{n.title}</div>
-                      <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{n.message}</div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-slate-400">{n.timestamp}</span>
-                        {n.source === 'workspace' && !n.read && (
-                          <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
-                            Workspace →
-                          </span>
-                        )}
+                    }}
+                    className={`px-5 py-4 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className={`mt-0.5 w-2 h-2 rounded-full flex-none ${
+                        n.type === 'success' ? 'bg-emerald-500' :
+                        n.type === 'warning' ? 'bg-amber-500' :
+                        n.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
+                      } ${n.read ? 'opacity-30' : ''}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium ${n.read ? 'text-slate-500' : 'text-slate-800'}`}>{n.title}</div>
+                        <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{n.message}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-slate-400">{n.timestamp}</span>
+                          {n.source === 'workspace' && !n.read && (
+                            <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
+                              Workspace →
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </>

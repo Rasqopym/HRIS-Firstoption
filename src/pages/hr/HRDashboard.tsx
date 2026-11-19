@@ -540,7 +540,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
       {/* 3-Month Confirmation Milestone Notice */}
       {(() => {
         const dueList = staff.filter(s => {
-          const conf = getStaffConfirmationStatus(s.date_employed)
+          const conf = getStaffConfirmationStatus(s.date_employed || (s.created_at ? s.created_at.split('T')[0] : null))
           return conf && conf.isDueForConfirmation
         })
 
