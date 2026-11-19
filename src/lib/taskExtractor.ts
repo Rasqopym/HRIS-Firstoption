@@ -41,7 +41,8 @@ const URGENCY_PATTERNS = {
 }
 
 const KPI_KEYWORDS: Record<string, RegExp> = {
-  'Sales & Customer Acquisition': /\b(sales|lead|leads|pipeline|client|customer|pitch|closing|prospect|post|instagram|facebook|ads?|marketing|campaign|social media)\b/i,
+  'Media & Marketing': /\b(media|marketing|branding|banner|graphics?|flyer|video|content|post|instagram|facebook|linkedin|tiktok|social media|press|campaign|roll-?up|ad|ads|advert|billboard|photo|photoshoot)\b/i,
+  'Sales & Customer Acquisition': /\b(sales|lead|leads|pipeline|client|customer|pitch|closing|prospect)\b/i,
   'Logistics, Warehouse & Inventory': /\b(warehouse|inventory|stock|goods|shipment|dispatch|storekeeper|storage|waybill|procurement|supply chain|materials|carton|item counts|stocktaking|replenish)\b/i,
   'Technical & IT Procedures': /\b(bug|code|server|api|database|deploy|fix|frontend|backend|infrastructure|security|pr|repo)\b/i,
   'HR & People Operations': /\b(onboarding|appraisal|attendance|recruitment|interview|policy|payroll|leave|staff)\b/i,
