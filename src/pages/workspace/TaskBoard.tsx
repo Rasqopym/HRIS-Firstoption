@@ -133,7 +133,12 @@ export default function TaskBoard({
   const [newTaskReminderType, setNewTaskReminderType] = useState<WorkspaceTask['reminder_type']>('none')
   const [newTaskRecurrence, setNewTaskRecurrence] = useState<RecurrenceInterval>('none')
   const [newTaskHours, setNewTaskHours] = useState('2')
-  const [newTaskKpi, setNewTaskKpi] = useState('Operations, Admin & Compliance')
+  const [newTaskKpi, setNewTaskKpi] = useState(() => {
+    if (teamName && (teamName.toLowerCase().includes('media') || teamName.toLowerCase().includes('marketing'))) {
+      return 'Media & Marketing'
+    }
+    return 'Operations, Admin & Compliance'
+  })
   const [newChecklistText, setNewChecklistText] = useState('')
   const [newTaskChecklist, setNewTaskChecklist] = useState<string[]>([])
   const [newTaskImages, setNewTaskImages] = useState<any[]>([])
@@ -533,6 +538,7 @@ export default function TaskBoard({
     setNewTaskDueTime('')
     setNewTaskReminderType('none')
     setNewTaskRecurrence('none')
+    setNewTaskKpi(teamName && (teamName.toLowerCase().includes('media') || teamName.toLowerCase().includes('marketing')) ? 'Media & Marketing' : 'Operations, Admin & Compliance')
     setNewTaskChecklist([])
     setNewTaskImages([])
     setShowCreateModal(false)
@@ -1268,7 +1274,14 @@ export default function TaskBoard({
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">Assignee</label>
                   <select
                     value={newTaskAssignee}
-                    onChange={e => setNewTaskAssignee(e.target.value)}
+                    onChange={e => {
+                      const staffId = e.target.value
+                      setNewTaskAssignee(staffId)
+                      const st = staffList.find(s => s.id === staffId)
+                      if (st?.department && (st.department.toLowerCase().includes('media') || st.department.toLowerCase().includes('marketing'))) {
+                        setNewTaskKpi('Media & Marketing')
+                      }
+                    }}
                     className="w-full px-2.5 py-2 border border-slate-300 rounded-lg outline-none font-medium bg-white"
                   >
                     <option value="">Unassigned</option>
@@ -1363,6 +1376,7 @@ export default function TaskBoard({
                     <option value="Operations, Admin & Compliance">Operations, Admin & Compliance</option>
                     <option value="Logistics, Warehouse & Inventory">Logistics, Warehouse & Inventory</option>
                     <option value="Sales & Customer Acquisition">Sales & Customer Acquisition</option>
+                    <option value="Media & Marketing">Media & Marketing</option>
                     <option value="Technical & IT Procedures">Technical & IT Procedures</option>
                     <option value="HR & People Operations">HR & People Operations</option>
                     <option value="Finance & Accounting">Finance & Accounting</option>
@@ -2185,6 +2199,7 @@ export default function TaskBoard({
                   <option value="Operations, Admin & Compliance">Operations, Admin & Compliance</option>
                   <option value="Logistics, Warehouse & Inventory">Logistics, Warehouse & Inventory</option>
                   <option value="Sales & Customer Acquisition">Sales & Customer Acquisition</option>
+                  <option value="Media & Marketing">Media & Marketing</option>
                   <option value="Technical & IT Procedures">Technical & IT Procedures</option>
                   <option value="HR & People Operations">HR & People Operations</option>
                   <option value="Finance & Accounting">Finance & Accounting</option>

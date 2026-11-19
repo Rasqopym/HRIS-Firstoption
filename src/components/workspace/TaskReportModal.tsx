@@ -33,6 +33,7 @@ const KPI_CATEGORIES = [
   'Operations, Admin & Compliance',
   'Logistics, Warehouse & Inventory',
   'Sales & Customer Acquisition',
+  'Media & Marketing',
   'Technical & IT Procedures',
   'HR & People Operations',
   'Finance & Accounting',

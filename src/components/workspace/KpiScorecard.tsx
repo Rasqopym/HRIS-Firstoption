@@ -45,14 +45,15 @@ type TimeRange = 'this_week' | 'last_week' | 'this_month' | 'all_time'
 
 interface KpiCategoryDef {
   name: string
-  color: 'blue' | 'amber' | 'emerald' | 'purple' | 'rose' | 'cyan'
-  iconKey: 'building' | 'package' | 'trending-up' | 'terminal' | 'users' | 'credit-card'
+  color: 'blue' | 'amber' | 'emerald' | 'purple' | 'rose' | 'cyan' | 'pink'
+  iconKey: 'building' | 'package' | 'trending-up' | 'terminal' | 'users' | 'credit-card' | 'sparkles' | 'image'
 }
 
 const KPI_CATEGORIES: KpiCategoryDef[] = [
   { name: 'Operations, Admin & Compliance', color: 'blue', iconKey: 'building' },
   { name: 'Logistics, Warehouse & Inventory', color: 'amber', iconKey: 'package' },
   { name: 'Sales & Customer Acquisition', color: 'emerald', iconKey: 'trending-up' },
+  { name: 'Media & Marketing', color: 'pink', iconKey: 'image' },
   { name: 'Technical & IT Procedures', color: 'purple', iconKey: 'terminal' },
   { name: 'HR & People Operations', color: 'rose', iconKey: 'users' },
   { name: 'Finance & Accounting', color: 'cyan', iconKey: 'credit-card' },
@@ -357,6 +358,10 @@ export default function KpiScorecard({
         return <IconUsers className="w-4 h-4" />
       case 'credit-card':
         return <IconCreditCard className="w-4 h-4" />
+      case 'image':
+        return <IconImage className="w-4 h-4" />
+      case 'sparkles':
+        return <IconSparkles className="w-4 h-4" />
       default:
         return <IconBriefcase className="w-4 h-4" />
     }
@@ -597,7 +602,7 @@ export default function KpiScorecard({
               <p className="text-xs text-slate-500">Deliverable completion across standard operational domains</p>
             </div>
             <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg">
-              6 Categories
+              {categoryStats.length} Categories
             </span>
           </div>
 
@@ -614,6 +619,8 @@ export default function KpiScorecard({
                   ? 'bg-purple-50 text-purple-700 border-purple-200'
                   : cat.color === 'rose'
                   ? 'bg-rose-50 text-rose-700 border-rose-200'
+                  : cat.color === 'pink'
+                  ? 'bg-pink-50 text-pink-700 border-pink-200'
                   : 'bg-cyan-50 text-cyan-700 border-cyan-200'
 
               return (
