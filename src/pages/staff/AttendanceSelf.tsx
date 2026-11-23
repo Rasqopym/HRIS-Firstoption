@@ -13,6 +13,7 @@ import {
 } from '../../lib/geofence'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { checkAndAutoClockOut, submitDepartureAdjustment } from '../../lib/attendanceAutoClockout'
+import { requestNotificationPermission, sendLocalNotification } from '../../lib/pushNotification'
 
 const STATUS_TEXT: Record<AttendanceStatus, string> = {
   present: 'Present', absent: 'Absent', on_leave: 'On Leave',
@@ -167,6 +168,7 @@ export default function AttendanceSelf() {
 
   // Real-time clock
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
 
   // Public Holidays State
   const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
@@ -979,6 +981,60 @@ export default function AttendanceSelf() {
         </div>
       )}
 
+      {/* ── Push Notification Banner / Quick Opt-In ── */}
+      {'Notification' in window && notifPermission !== 'granted' && (
+        <div className="bg-gradient-to-r from-blue-900/90 via-slate-900 to-indigo-950 text-white rounded-2xl p-4 sm:p-5 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-300 border border-blue-400/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            </div>
+            <div className="min-w-0">
+              <div className="font-bold text-sm text-white flex items-center gap-2 flex-wrap">
+                <span>Never Miss Daily Clock-In & Shift Closing</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900">
+                  {notifPermission === 'denied' ? 'Blocked in Browser' : 'Turn On Reminders'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                {notifPermission === 'denied'
+                  ? 'Notifications are currently blocked by your browser settings. To turn on reminders, click the lock/settings icon next to the URL in your browser address bar and set Notifications to "Allow".'
+                  : 'Get daily reminders directly on this phone/computer for morning clock-in (8:00 AM), 12:00 PM check-in, and 5:00 PM closing.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+            {notifPermission === 'denied' ? (
+              <button
+                type="button"
+                onClick={() => alert('To allow notifications:\n1. Look at your browser address bar at the top.\n2. Click the Lock or Settings icon on the left of the URL.\n3. Change "Notifications" from Block to Allow.\n4. Refresh the page.')}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                How to Unblock
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  const perm = await requestNotificationPermission()
+                  setNotifPermission(perm)
+                  if (perm === 'granted') {
+                    sendLocalNotification({
+                      title: '✅ Attendance Reminders Active',
+                      body: 'Shift reminders are now enabled on this device (8:00 AM arrival, 12:00 PM midday, 5:00 PM closing).',
+                      url: window.location.href,
+                    })
+                  }
+                }}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span>Turn On Notifications</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Real-Time Clock In / Out Hero Widget ── */}
       {isCurrentMonth && (
         <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 text-white rounded-2xl shadow-xl p-5 sm:p-7 border border-slate-700/50">
@@ -1019,6 +1075,26 @@ export default function AttendanceSelf() {
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/></svg>
                       {settings.office_locations.filter(l => l.is_active !== false).length} Active Branch{settings.office_locations.length > 1 ? 'es' : ''}
                     </span>
+                  </>
+                )}
+                {'Notification' in window && notifPermission === 'granted' && (
+                  <>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sendLocalNotification({
+                          title: '🔔 Shift Reminders Active',
+                          body: 'Attendance notifications are working properly on this device! Reminders scheduled for 8:00 AM, 12:00 PM, and 5:00 PM.',
+                          url: window.location.href,
+                        })
+                      }}
+                      className="text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-1 cursor-pointer"
+                      title="Click to test notification on this device"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>Reminders Active (Test)</span>
+                    </button>
                   </>
                 )}
               </div>

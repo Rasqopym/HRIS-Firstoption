@@ -418,6 +418,7 @@ export default function Layout({
   const [searching, setSearching] = useState(false)
   const [searchResults, setSearchResults] = useState<{ id: string; icon: React.ReactNode; primary: string; secondary: string; category: string; onClick: () => void }[]>([])
   const [notifs, setNotifs] = useState<HRISNotification[]>([])
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; photo: string | null } | null>(
     userName ? { name: userName, email: userEmail || '', photo: userPhoto || null } : null
@@ -470,6 +471,7 @@ export default function Layout({
   const handleSendTestNotification = async () => {
     try {
       const perm = await requestNotificationPermission()
+      setNotifPermission(perm)
       if (perm !== 'granted') {
         alert('Please allow notification permissions in your browser address bar/settings to receive push alerts.')
         return
@@ -1925,7 +1927,7 @@ export default function Layout({
               <button
                 type="button"
                 onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false) }}
-                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors focus:outline-hidden"
+                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors focus:outline-hidden cursor-pointer"
                 title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}` : 'Notifications'}
               >
                 <IconBell />
@@ -1938,6 +1940,120 @@ export default function Layout({
                   </span>
                 )}
               </button>
+
+              {showNotifications && (
+                <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-fadeIn">
+                  {/* Header */}
+                  <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-bold text-sm text-slate-800">Notifications</span>
+                      {unreadCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">
+                          {unreadCount} new
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setNotifs(prev => prev.map(n => ({ ...n, read: true })))}
+                        className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+                      >
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Push Notification Opt-In Banner */}
+                  <div className="p-3 border-b border-slate-100 bg-gradient-to-br from-blue-50 to-indigo-50/40">
+                    {'Notification' in window ? (
+                      notifPermission === 'granted' ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-800 font-semibold">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-none" />
+                            <span>Push Notifications Active</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleSendTestNotification}
+                            className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-white hover:bg-slate-50 px-2 py-1 rounded-lg border border-blue-200 shadow-2xs transition-colors cursor-pointer"
+                          >
+                            Send Test Alert
+                          </button>
+                        </div>
+                      ) : notifPermission === 'denied' ? (
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center gap-1.5 font-semibold text-amber-800">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            <span>Notifications Blocked by Browser</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-snug">
+                            To enable reminders, tap the <strong>lock / tune icon</strong> in your browser address bar and set <strong>Notifications to Allow</strong>.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-xs text-slate-800">Turn On Push Notifications</div>
+                            <div className="text-[11px] text-slate-500 leading-snug">Get clock-in, leave & task alerts on this device</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleSendTestNotification}
+                            className="flex-none px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                          >
+                            Turn On
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <div className="text-xs text-slate-500">Push notifications not supported on this browser</div>
+                    )}
+                  </div>
+
+                  {/* Notification List */}
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                    {notifs.length === 0 ? (
+                      <div className="p-6 text-center text-slate-400 text-xs">
+                        <svg className="w-8 h-8 mx-auto text-slate-300 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        No notifications yet
+                      </div>
+                    ) : (
+                      notifs.map(n => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => {
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
+                            if (n.navigateTo) {
+                              onNavigate(n.navigateTo)
+                              setShowNotifications(false)
+                            }
+                          }}
+                          className={`w-full text-left p-3 hover:bg-slate-50 transition-colors flex items-start gap-2.5 cursor-pointer ${
+                            !n.read ? 'bg-blue-50/40' : ''
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full mt-1.5 flex-none ${
+                            n.type === 'error' ? 'bg-red-500' : n.type === 'warning' ? 'bg-amber-400' : 'bg-blue-500'
+                          }`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className={`text-xs truncate ${!n.read ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}`}>
+                                {n.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 flex-none">{n.timestamp}</span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 leading-snug">
+                              {n.message}
+                            </p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* User menu */}

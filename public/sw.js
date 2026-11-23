@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hris-v3';
+const CACHE_NAME = 'hris-v4-ios-compat';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -25,6 +25,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME) {
+            console.log('Purging legacy cache for iOS compatibility:', key);
             return caches.delete(key);
           }
         })
@@ -34,12 +35,13 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Network-first with cache fallback strategy for dynamic navigation
+// Network-first with cache fallback strategy for dynamic navigation & assets
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || !event.request.url.startsWith('http')) {
     return;
   }
 
+  // Never cache Supabase API or Auth requests
   if (event.request.url.includes('supabase.co')) {
     event.respondWith(
       fetch(event.request).catch(() => caches.match(event.request))
@@ -47,13 +49,39 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // HTML Navigation: Network first, fallback to cached index.html
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
 
+  // Script & style assets: Network-First to guarantee latest iOS-compatible code
+  if (event.request.destination === 'script' || event.request.destination === 'style') {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Other assets (images, fonts, icons): Cache first, fallback to network
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {
