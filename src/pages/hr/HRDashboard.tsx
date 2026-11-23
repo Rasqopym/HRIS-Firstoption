@@ -3,7 +3,8 @@ import { supabase } from '../../lib/supabase'
 import type { Page } from '../../types'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
-import { getStaffConfirmationStatus } from '../../lib/pushNotification'
+import { getStaffConfirmationStatus, requestNotificationPermission, sendLocalNotification } from '../../lib/pushNotification'
+import { getExternalFieldVisits } from '../../lib/geofence'
 import {
   ResponsiveContainer,
   BarChart,
@@ -71,6 +72,7 @@ interface MonthlyTrendItem {
 export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [loading, setLoading] = useState(true)
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
 
   // Chart state
   const [chartView, setChartView] = useState<'daily' | 'department' | 'monthly'>('daily')
@@ -262,7 +264,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
         const todayPresent = todayRecs.filter(r => r.status === 'present').length
         const todayLate = todayRecs.filter(r => r.status === 'present' && (r.is_late || r.isLate)).length
         const todayOnTime = Math.max(0, todayPresent - todayLate)
-        const todayField = todayRecs.filter(r => r.status === 'present' && (r.work_mode === 'field' || (Array.isArray(r.site_visits) && r.site_visits.length > 0))).length
+        const todayField = todayRecs.filter(r => r.status === 'present' && (r.work_mode === 'field' || getExternalFieldVisits(r.site_visits, r.work_mode).length > 0)).length
         const todayLeave = todayRecs.filter(r => r.status === 'on_leave').length
 
         setTodayMetrics({
@@ -378,7 +380,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
                 if (r.status === 'present') {
                   mPresent++
                   if (r.is_late || r.isLate) mLate++
-                  if (r.work_mode === 'field' || (Array.isArray(r.site_visits) && r.site_visits.length > 0)) mField++
+                  if (r.work_mode === 'field' || getExternalFieldVisits(r.site_visits, r.work_mode).length > 0) mField++
                 } else if (r.status === 'on_leave') {
                   mLeave++
                 }
@@ -519,7 +521,39 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
           <h2 className="font-display font-bold text-slate-800 text-xl sm:text-2xl">HR Operations & Workforce Analytics</h2>
           <p className="text-slate-500 text-xs sm:text-sm mt-0.5">{todayFormatted} · Real-time attendance, punctuality, and staff operations</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {'Notification' in window && (
+            <button
+              onClick={async () => {
+                if (notifPermission !== 'granted') {
+                  const perm = await requestNotificationPermission()
+                  setNotifPermission(perm)
+                  if (perm === 'granted') {
+                    sendLocalNotification({
+                      title: '✅ HR Attendance Alerts Active',
+                      body: 'You will receive reminders at 12:00 PM and 3:00 PM for staff yet to clock in.',
+                      url: window.location.href,
+                    })
+                  }
+                } else {
+                  sendLocalNotification({
+                    title: '🔔 HR Alerts Test',
+                    body: 'Push notifications are active! Working-day unclocked staff alerts trigger at 12:00 PM and 3:00 PM.',
+                    url: window.location.href,
+                  })
+                }
+              }}
+              className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer ${
+                notifPermission === 'granted'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+              }`}
+              title={notifPermission === 'granted' ? 'HR unclocked staff alerts active (click to test)' : 'Click to turn on 12:00 PM and 3:00 PM unclocked staff alerts'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              <span>{notifPermission === 'granted' ? 'Alerts Active' : 'Turn On 12PM/3PM Alerts'}</span>
+            </button>
+          )}
           <button
             onClick={() => onNavigate('hr-attendance-daily')}
             className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
@@ -540,7 +574,7 @@ export default function HRDashboard({ onNavigate, onSelectStaff }: Props) {
       {/* 3-Month Confirmation Milestone Notice */}
       {(() => {
         const dueList = staff.filter(s => {
-          const conf = getStaffConfirmationStatus(s.date_employed)
+          const conf = getStaffConfirmationStatus(s.date_employed || (s.created_at ? s.created_at.split('T')[0] : null))
           return conf && conf.isDueForConfirmation
         })
 

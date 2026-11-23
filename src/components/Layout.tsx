@@ -3,7 +3,13 @@ import type { Role, Page, HRISNotification } from '../types'
 import { supabase } from '../lib/supabase'
 import { getInitials, getAvatarColor } from '../lib/avatarUtils'
 import { useCompanySettings } from '../hooks/useCompanySettings'
-import { requestNotificationPermission, sendLocalNotification, runRoutineReminders, getStaffConfirmationStatus, checkAndNotifyUnclockedStaff } from '../lib/pushNotification'
+import {
+  requestNotificationPermission,
+  sendLocalNotification,
+  runRoutineReminders,
+  getStaffConfirmationStatus,
+  checkAndNotifyUnclockedStaff,
+} from '../lib/pushNotification'
 import { checkAndAutoClockOut } from '../lib/attendanceAutoClockout'
 import { getUserWorkspaces } from '../lib/workspaceManager'
 
@@ -412,6 +418,7 @@ export default function Layout({
   const [searching, setSearching] = useState(false)
   const [searchResults, setSearchResults] = useState<{ id: string; icon: React.ReactNode; primary: string; secondary: string; category: string; onClick: () => void }[]>([])
   const [notifs, setNotifs] = useState<HRISNotification[]>([])
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; photo: string | null } | null>(
     userName ? { name: userName, email: userEmail || '', photo: userPhoto || null } : null
@@ -458,6 +465,25 @@ export default function Layout({
     if (outcome === 'accepted') {
       setShowInstallBanner(false)
       setDeferredPrompt(null)
+    }
+  }
+
+  const handleSendTestNotification = async () => {
+    try {
+      const perm = await requestNotificationPermission()
+      setNotifPermission(perm)
+      if (perm !== 'granted') {
+        alert('Please allow notification permissions in your browser address bar/settings to receive push alerts.')
+        return
+      }
+      await sendLocalNotification({
+        title: '✅ HRIS Notification Test',
+        body: 'Push notifications are active and working properly on your device!',
+        tag: `test-notif-${Date.now()}`,
+        url: window.location.href,
+      })
+    } catch (err) {
+      console.error('Failed to trigger test notification:', err)
     }
   }
 
@@ -592,12 +618,13 @@ export default function Layout({
           // Check Staff 3-Month Confirmation Milestone
           const { data: staffDirectory } = await supabase
             .from('staff')
-            .select('id, full_name, staff_code, date_employed, job_title')
+            .select('id, full_name, staff_code, date_employed, created_at, job_title')
             .eq('status', 'active')
 
           const dueConfirmations: Array<{ id: string; name: string; staffCode: string; daysRemaining: number }> = []
           ;(staffDirectory || []).forEach((st: any) => {
-            const conf = getStaffConfirmationStatus(st.date_employed)
+            const empDate = st.date_employed || (st.created_at ? st.created_at.split('T')[0] : null)
+            const conf = getStaffConfirmationStatus(empDate)
             if (conf && conf.isDueForConfirmation) {
               dueConfirmations.push({
                 id: st.id,
@@ -622,15 +649,16 @@ export default function Layout({
           try {
             const unclockedRes = await checkAndNotifyUnclockedStaff(role, (companySettings as any)?.custom_holidays || [])
             if (unclockedRes && unclockedRes.hasUnclocked && unclockedRes.window) {
+              const isMorning = unclockedRes.window === 'morning'
               const isRepeat = unclockedRes.window === '3pm'
               items.unshift({
                 id: `unclocked-${unclockedRes.window}-${unclockedRes.todayStr}`,
-                title: isRepeat ? '⏰ 3:00 PM Reminder: Unclocked Staff' : '⏰ 12:00 PM Alert: Unclocked Staff',
+                title: isMorning ? '📋 Morning Attendance: Yet to Clock In' : isRepeat ? '⏰ 3:00 PM Reminder: Unclocked Staff' : '⏰ 12:00 PM Alert: Unclocked Staff',
                 message: `${unclockedRes.count} staff member${unclockedRes.count > 1 ? 's' : ''} ${
                   isRepeat ? 'still have not clocked in for work today' : 'have not clocked in for work today'
                 }: ${unclockedRes.namesSummary}. Tap to inspect today's presence roster.`,
-                timestamp: isRepeat ? 'Today, 3:00 PM' : 'Today, 12:00 PM',
-                type: 'warning',
+                timestamp: isMorning ? 'Today, Morning' : isRepeat ? 'Today, 3:00 PM' : 'Today, 12:00 PM',
+                type: isMorning ? 'info' : 'warning',
                 read: false,
                 navigateTo: 'hr-attendance-daily',
                 source: 'system',
@@ -752,6 +780,16 @@ export default function Layout({
                     source: 'workspace',
                     navigateTo: 'st-workspace',
                   })
+                  const taskNotifKey = `hris_pushed_task_${t.id}`
+                  if (!localStorage.getItem(taskNotifKey)) {
+                    sendLocalNotification({
+                      title: t.priority === 'urgent' ? '🔥 Urgent Task Assigned' : '📋 Task Assigned to You',
+                      body: `"${t.title}"${t.due_date ? ` (Due: ${t.due_date})` : ''}`,
+                      tag: `task-${t.id}`,
+                      url: '/#st-workspace',
+                    })
+                    localStorage.setItem(taskNotifKey, 'true')
+                  }
                 })
               } catch (taskErr) {
                 console.warn('Workspace tasks notification error:', taskErr)
@@ -949,7 +987,7 @@ export default function Layout({
                   title: '⏱️ Daily Standup Pending',
                   message: 'You have not submitted your daily squad standup update for today.',
                   timestamp: 'Today',
-                  type: 'warning',
+                  type: 'info',
                   read: false,
                   source: 'workspace',
                   navigateTo: wsPage,
@@ -1889,7 +1927,7 @@ export default function Layout({
               <button
                 type="button"
                 onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false) }}
-                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors focus:outline-hidden"
+                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors focus:outline-hidden cursor-pointer"
                 title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}` : 'Notifications'}
               >
                 <IconBell />
@@ -1902,6 +1940,120 @@ export default function Layout({
                   </span>
                 )}
               </button>
+
+              {showNotifications && (
+                <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-fadeIn">
+                  {/* Header */}
+                  <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-bold text-sm text-slate-800">Notifications</span>
+                      {unreadCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">
+                          {unreadCount} new
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setNotifs(prev => prev.map(n => ({ ...n, read: true })))}
+                        className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
+                      >
+                        Mark all as read
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Push Notification Opt-In Banner */}
+                  <div className="p-3 border-b border-slate-100 bg-gradient-to-br from-blue-50 to-indigo-50/40">
+                    {'Notification' in window ? (
+                      notifPermission === 'granted' ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-800 font-semibold">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-none" />
+                            <span>Push Notifications Active</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleSendTestNotification}
+                            className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 bg-white hover:bg-slate-50 px-2 py-1 rounded-lg border border-blue-200 shadow-2xs transition-colors cursor-pointer"
+                          >
+                            Send Test Alert
+                          </button>
+                        </div>
+                      ) : notifPermission === 'denied' ? (
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center gap-1.5 font-semibold text-amber-800">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            <span>Notifications Blocked by Browser</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-snug">
+                            To enable reminders, tap the <strong>lock / tune icon</strong> in your browser address bar and set <strong>Notifications to Allow</strong>.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-xs text-slate-800">Turn On Push Notifications</div>
+                            <div className="text-[11px] text-slate-500 leading-snug">Get clock-in, leave & task alerts on this device</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleSendTestNotification}
+                            className="flex-none px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                          >
+                            Turn On
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <div className="text-xs text-slate-500">Push notifications not supported on this browser</div>
+                    )}
+                  </div>
+
+                  {/* Notification List */}
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                    {notifs.length === 0 ? (
+                      <div className="p-6 text-center text-slate-400 text-xs">
+                        <svg className="w-8 h-8 mx-auto text-slate-300 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        No notifications yet
+                      </div>
+                    ) : (
+                      notifs.map(n => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => {
+                            setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
+                            if (n.navigateTo) {
+                              onNavigate(n.navigateTo)
+                              setShowNotifications(false)
+                            }
+                          }}
+                          className={`w-full text-left p-3 hover:bg-slate-50 transition-colors flex items-start gap-2.5 cursor-pointer ${
+                            !n.read ? 'bg-blue-50/40' : ''
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full mt-1.5 flex-none ${
+                            n.type === 'error' ? 'bg-red-500' : n.type === 'warning' ? 'bg-amber-400' : 'bg-blue-500'
+                          }`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className={`text-xs truncate ${!n.read ? 'font-bold text-slate-900' : 'font-medium text-slate-700'}`}>
+                                {n.title}
+                              </span>
+                              <span className="text-[10px] text-slate-400 flex-none">{n.timestamp}</span>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2 leading-snug">
+                              {n.message}
+                            </p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* User menu */}
@@ -2218,7 +2370,17 @@ export default function Layout({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline">Mark all read</button>
+                <button
+                  type="button"
+                  onClick={handleSendTestNotification}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                  title="Trigger a test push notification to verify alerts on this device"
+                >
+                  🔔 Test
+                </button>
+                <button onClick={markAllRead} className="text-xs text-slate-500 hover:text-blue-600 hover:underline">
+                  Mark all read
+                </button>
                 <button onClick={() => setShowNotifications(false)} className="p-1 rounded hover:bg-slate-100 text-slate-400">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -2259,45 +2421,69 @@ export default function Layout({
               </div>
             )}
             <div className="flex-1 overflow-y-auto">
-              {notifs.map(n => (
-                <div
-                  key={n.id}
-                  onClick={() => {
-                    setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
-                    try {
-                      const stored = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
-                      if (!stored.includes(n.id)) {
-                        localStorage.setItem('hris_read_notif_ids', JSON.stringify([...stored, n.id]))
+              {notifs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 text-center h-72 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold text-slate-700">No Notifications</h3>
+                    <p className="text-xs text-slate-400 max-w-[220px]">
+                      You are all caught up! Shift reminders, approvals, and alerts will appear here.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSendTestNotification}
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+                  >
+                    🔔 Send Test Alert
+                  </button>
+                </div>
+              ) : (
+                notifs.map(n => (
+                  <div
+                    key={n.id}
+                    onClick={() => {
+                      setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x))
+                      try {
+                        const stored = JSON.parse(localStorage.getItem('hris_read_notif_ids') || '[]')
+                        if (!stored.includes(n.id)) {
+                          localStorage.setItem('hris_read_notif_ids', JSON.stringify([...stored, n.id]))
+                        }
+                      } catch {}
+                      if (n.navigateTo) {
+                        setShowNotifications(false)
+                        onNavigate(n.navigateTo as any)
                       }
-                    } catch {}
-                    if (n.navigateTo) {
-                      setShowNotifications(false)
-                      onNavigate(n.navigateTo as any)
-                    }
-                  }}
-                  className={`px-5 py-4 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={`mt-0.5 w-2 h-2 rounded-full flex-none ${
-                      n.type === 'success' ? 'bg-emerald-500' :
-                      n.type === 'warning' ? 'bg-amber-500' :
-                      n.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
-                    } ${n.read ? 'opacity-30' : ''}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium ${n.read ? 'text-slate-500' : 'text-slate-800'}`}>{n.title}</div>
-                      <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{n.message}</div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-slate-400">{n.timestamp}</span>
-                        {n.source === 'workspace' && !n.read && (
-                          <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
-                            Workspace →
-                          </span>
-                        )}
+                    }}
+                    className={`px-5 py-4 border-b border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className={`mt-0.5 w-2 h-2 rounded-full flex-none ${
+                        n.type === 'success' ? 'bg-emerald-500' :
+                        n.type === 'warning' ? 'bg-amber-500' :
+                        n.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
+                      } ${n.read ? 'opacity-30' : ''}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium ${n.read ? 'text-slate-500' : 'text-slate-800'}`}>{n.title}</div>
+                        <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{n.message}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-slate-400">{n.timestamp}</span>
+                          {n.source === 'workspace' && !n.read && (
+                            <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full">
+                              Workspace →
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </>

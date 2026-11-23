@@ -13,8 +13,33 @@ export default defineConfig(({ mode }) => {
   return {
     base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
     build: {
+      target: ['es2020', 'safari14', 'ios14'],
+      cssTarget: ['safari14', 'ios14'],
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('html-to-image')) {
+                return 'vendor-pdf'
+              }
+              if (id.includes('xlsx')) {
+                return 'vendor-xlsx'
+              }
+              if (id.includes('recharts')) {
+                return 'vendor-charts'
+              }
+              if (id.includes('@supabase')) {
+                return 'vendor-supabase'
+              }
+              if (id.includes('react') || id.includes('react-dom')) {
+                return 'vendor-react'
+              }
+            }
+          }
+        }
+      }
     },
     plugins: [
       react(),

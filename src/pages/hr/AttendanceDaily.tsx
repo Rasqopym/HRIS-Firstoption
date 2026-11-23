@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { logAction } from '../../lib/auditLog'
 import type { DayAttendance, AttendanceStatus, SiteVisit } from '../../types'
-import { formatTime12Hour, formatDistance, calculateVisitDuration } from '../../lib/geofence'
+import { formatTime12Hour, formatDistance, calculateVisitDuration, getExternalFieldVisits } from '../../lib/geofence'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
 import { batchClockOutPendingStaff } from '../../lib/attendanceAutoClockout'
 import ExportAttendanceModal from '../../components/ExportAttendanceModal'
 import StaffReportCardModal from '../../components/StaffReportCardModal'
+import { requestNotificationPermission, sendLocalNotification } from '../../lib/pushNotification'
 
 const STATUS_COLORS: Record<AttendanceStatus, string> = {
   present: 'bg-emerald-500',
@@ -179,6 +180,7 @@ export default function AttendanceDaily() {
   const [reportCardModalOpen, setReportCardModalOpen] = useState(false)
   const [reportCardStaffId, setReportCardStaffId] = useState<string | null>(null)
 
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
   // ── Inspection / Adjustment Modal State ──
   const [inspectModalOpen, setInspectModalOpen] = useState(false)
   const [inspectStaff, setInspectStaff] = useState<StaffMember | null>(null)
@@ -898,7 +900,7 @@ export default function AttendanceDaily() {
         } else {
           onTime++
         }
-        if (item.workMode === 'field' || item.siteVisits.length > 0) {
+        if (item.workMode === 'field' || getExternalFieldVisits(item.siteVisits, item.workMode).length > 0) {
           field++
         }
       } else if (item.computedStatus === 'on_leave') {
@@ -982,7 +984,7 @@ export default function AttendanceDaily() {
       } else if (statusFilter === 'late') {
         if (item.computedStatus !== 'present' || !item.isLate) return false
       } else if (statusFilter === 'field') {
-        const isField = item.workMode === 'field' || item.siteVisits.length > 0
+        const isField = item.workMode === 'field' || getExternalFieldVisits(item.siteVisits, item.workMode).length > 0
         if (item.computedStatus !== 'present' || !isField) return false
       } else if (statusFilter === 'absent') {
         if (item.computedStatus !== 'absent' && item.computedStatus !== 'unmarked') return false
@@ -1179,6 +1181,60 @@ export default function AttendanceDaily() {
           ═══════════════════════════════════════════════════════════════════ */}
       {viewMode === 'today' && (
         <div className="space-y-5 anim-fade-up">
+          {/* 12:00 PM & 3:00 PM Unclocked Staff Alerts Opt-In Card */}
+          {'Notification' in window && notifPermission !== 'granted' && (
+            <div className="bg-gradient-to-r from-blue-900/95 via-slate-900 to-indigo-950 text-white p-4 rounded-2xl border border-blue-500/30 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-300 border border-blue-400/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-sm text-white flex items-center gap-2 flex-wrap">
+                    <span>12:00 PM & 3:00 PM Unclocked Staff Reminders</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900">
+                      {notifPermission === 'denied' ? 'Blocked in Browser' : 'HR Alerts Off'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    {notifPermission === 'denied'
+                      ? 'Push alerts are blocked in your browser. Click the lock/settings icon next to the URL in your browser address bar and set Notifications to "Allow".'
+                      : 'Enable push alerts to receive automatic notifications at 12:00 PM and 3:00 PM on working days listing staff who have not clocked in.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+                {notifPermission === 'denied' ? (
+                  <button
+                    type="button"
+                    onClick={() => alert('To allow notifications:\n1. Look at your browser address bar at the top.\n2. Click the Lock or Settings icon on the left of the URL.\n3. Change "Notifications" from Block to Allow.\n4. Refresh the page.')}
+                    className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  >
+                    How to Unblock
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const perm = await requestNotificationPermission()
+                      setNotifPermission(perm)
+                      if (perm === 'granted') {
+                        sendLocalNotification({
+                          title: '✅ HR Attendance Alerts Active',
+                          body: 'You will now receive alerts at 12:00 PM and 3:00 PM on working days for staff yet to clock in.',
+                          url: window.location.href,
+                        })
+                      }
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span>Enable HR Alerts</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Date Selector & Action Bar */}
           <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -1794,11 +1850,11 @@ export default function AttendanceDaily() {
 
                           {/* Branch / Work Mode */}
                           <td className="py-3 px-4">
-                            {item.workMode === 'field' || item.siteVisits.length > 0 ? (
+                            {item.workMode === 'field' || getExternalFieldVisits(item.siteVisits, item.workMode).length > 0 ? (
                               <div className="flex items-center gap-1.5 text-indigo-700">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
                                 <span className="font-semibold truncate max-w-[140px]">
-                                  {item.fieldClientName || item.siteVisits[0]?.site_name || 'Field / Multi-Site'}
+                                  {item.fieldClientName || getExternalFieldVisits(item.siteVisits, item.workMode)[0]?.site_name || 'Field / Multi-Site'}
                                 </span>
                               </div>
                             ) : item.matchedLocationName ? (
@@ -2001,7 +2057,9 @@ export default function AttendanceDaily() {
                   const dow = new Date(day.date).getDay()
                   const isWeekend = dow === 0 || dow === 6
                   const isCurrentDay = day.date === todayStr
-                  const visitsCount = day.siteVisits?.length || 0
+                  const extVisits = getExternalFieldVisits(day.siteVisits, day.workMode)
+                  const isFieldDay = day.workMode === 'field'
+                  const visitsCount = isFieldDay ? Math.max(1, extVisits.length) : extVisits.length
 
                   return (
                     <div
@@ -2046,7 +2104,7 @@ export default function AttendanceDaily() {
 
                         {visitsCount > 0 && (
                           <div className="text-[10px] text-amber-700 bg-amber-50 rounded px-1 py-0.5 font-medium truncate">
-                            {day.siteVisits?.[0]?.site_name}
+                            {extVisits[0]?.site_name || day.fieldClientName}
                           </div>
                         )}
 

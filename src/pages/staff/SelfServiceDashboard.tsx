@@ -4,9 +4,9 @@ import { supabase } from '../../lib/supabase'
 import { useCurrentStaff } from '../../hooks/useCurrentStaff'
 import { calculatePayrollForStaff } from '../../lib/payrollEngine'
 import { getInitials, getAvatarColor } from '../../lib/avatarUtils'
-import { formatTime12Hour } from '../../lib/geofence'
+import { formatTime12Hour, getExternalFieldVisits } from '../../lib/geofence'
 import { isPublicHoliday, calculateWorkingDaysInMonth, type PublicHoliday } from '../../lib/holidays'
-import { getStaffConfirmationStatus } from '../../lib/pushNotification'
+import { getStaffConfirmationStatus, requestNotificationPermission, sendLocalNotification } from '../../lib/pushNotification'
 import {
   ResponsiveContainer,
   BarChart,
@@ -272,7 +272,8 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
             status = 'present'
             isLate = Boolean(rec.is_late || rec.isLate)
             lateMinutes = rec.late_minutes || rec.lateMinutes || 0
-            siteVisitsCount = Array.isArray(rec.site_visits) ? rec.site_visits.length : (rec.siteVisits?.length || 0)
+            const rawVisits = Array.isArray(rec.site_visits) ? rec.site_visits : (rec.siteVisits || [])
+            siteVisitsCount = getExternalFieldVisits(rawVisits, rec.work_mode || rec.workMode).length
             overtimeHours = rec.overtime_hours || rec.overtimeHours || 0
             clockInTime = rec.clock_in_time || rec.clockInTime || null
             clockOutTime = rec.clock_out_time || rec.clockOutTime || null
@@ -361,7 +362,9 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
               } else {
                 onTimeCount++
               }
-              const vCount = Array.isArray(r.site_visits) ? r.site_visits.length : (r.siteVisits?.length || 0)
+              const rawVisits = Array.isArray(r.site_visits) ? r.site_visits : (r.siteVisits || [])
+              const extVisits = getExternalFieldVisits(rawVisits, r.work_mode || r.workMode)
+              const vCount = extVisits.length
               if (r.work_mode === 'field' || r.workMode === 'field' || vCount > 0) {
                 fieldCount += (vCount > 0 ? vCount : 1)
               }
@@ -626,6 +629,76 @@ export default function SelfServiceDashboard({ onNavigate }: Props) {
           ))}
         </div>
       </div>
+
+      {/* Push Notification Card / Quick Opt-In for Staff */}
+      {'Notification' in window && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-none ${
+              Notification.permission === 'granted' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-blue-50 text-blue-600 border border-blue-200'
+            }`}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-display font-semibold text-sm text-slate-800">
+                  {Notification.permission === 'granted' ? 'Device Notifications Active' : 'Enable Device Push Notifications'}
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  Notification.permission === 'granted' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {Notification.permission === 'granted' ? 'Enabled' : 'Action Required'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                {Notification.permission === 'granted'
+                  ? 'You are receiving real-time reminders for daily clock-in (morning & midday), shift closing, and urgent task assignments.'
+                  : 'Turn on notifications to never miss morning clock-in reminders, shift notices, and task alerts on this device.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-none self-end sm:self-center">
+            {Notification.permission !== 'granted' ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await requestNotificationPermission()
+                  if (res === 'granted') {
+                    sendLocalNotification({
+                      title: '✅ Notifications Active',
+                      body: 'You will now receive shift clock-in and task reminders directly on this device.',
+                      url: window.location.href,
+                    })
+                    window.location.reload()
+                  } else {
+                    alert('Please allow notification permissions in your browser address bar/settings.')
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+              >
+                Enable Notifications
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  sendLocalNotification({
+                    title: '🔔 HRIS Test Notification',
+                    body: 'Your device notifications are working properly! Shift reminders are active.',
+                    url: window.location.href,
+                  })
+                }}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium transition-colors cursor-pointer"
+              >
+                🔔 Test Alert
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Interactive Attendance Summary & Analytics Chart ── */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">

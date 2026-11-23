@@ -13,6 +13,7 @@ import {
 } from '../../lib/geofence'
 import { isPublicHoliday, type PublicHoliday } from '../../lib/holidays'
 import { checkAndAutoClockOut, submitDepartureAdjustment } from '../../lib/attendanceAutoClockout'
+import { requestNotificationPermission, sendLocalNotification } from '../../lib/pushNotification'
 
 const STATUS_TEXT: Record<AttendanceStatus, string> = {
   present: 'Present', absent: 'Absent', on_leave: 'On Leave',
@@ -40,6 +41,15 @@ interface ExtendedDayAttendance extends DayAttendance {
   fieldClientName?: string
   fieldNotes?: string
   siteVisits?: SiteVisit[]
+}
+
+export function getExternalFieldVisits(visits?: SiteVisit[] | null, workMode?: string): SiteVisit[] {
+  if (!visits || !Array.isArray(visits)) return []
+  if (workMode === 'field') return visits
+  return visits.filter(v => {
+    const p = (v.purpose || '').toLowerCase()
+    return !p.includes('office shift arrival') && !p.includes('shift arrival')
+  })
 }
 
 function buildMonth(year: number, month: number, existingRecords: Record<string, any>, customHolidays: PublicHoliday[] = []): ExtendedDayAttendance[] {
@@ -158,6 +168,7 @@ export default function AttendanceSelf() {
 
   // Real-time clock
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied')
 
   // Public Holidays State
   const [customHolidays, setCustomHolidays] = useState<PublicHoliday[]>([])
@@ -283,28 +294,18 @@ export default function AttendanceSelf() {
           lateMinutes = evalRes.lateMinutes
         }
 
-        // Initial Site Visit item if started on field or office
+        // Initial Site Visit item (only logged if started in field work mode)
         const initialVisits: SiteVisit[] = []
-        if (workMode === 'field' && fieldClientName.trim()) {
+        if (workMode === 'field') {
+          const siteName = fieldClientName.trim() || matchedLoc?.name || 'Field Site'
           initialVisits.push({
             id: `visit-${Date.now()}`,
-            site_name: fieldClientName.trim(),
+            site_name: siteName,
             arrival_time: timeStr,
             departure_time: null,
             lat: userLat || null,
             lng: userLng || null,
             purpose: fieldNotes.trim() || (isWeekendDay ? 'Weekend shift on field' : 'Field visit check-in'),
-            status: 'in_progress',
-          })
-        } else if (matchedLoc) {
-          initialVisits.push({
-            id: `visit-${Date.now()}`,
-            site_name: matchedLoc.name,
-            arrival_time: timeStr,
-            departure_time: null,
-            lat: userLat || null,
-            lng: userLng || null,
-            purpose: isWeekendDay ? (now.getDay() === 6 ? 'Saturday shift arrival' : 'Sunday emergency arrival') : 'Office shift arrival',
             status: 'in_progress',
           })
         }
@@ -319,13 +320,13 @@ export default function AttendanceSelf() {
           clock_in_lat: userLat || null,
           clock_in_lng: userLng || null,
           clock_in_distance_meters: distance !== undefined ? distance : null,
-          matched_location_name: matchedLoc?.name || (workMode === 'field' ? `Field: ${fieldClientName.trim()}` : null),
+          matched_location_name: matchedLoc?.name || (workMode === 'field' ? `Field: ${fieldClientName.trim() || 'Field Site'}` : null),
           work_mode: workMode,
           field_client_name: workMode === 'field' ? fieldClientName.trim() : null,
           field_notes: workMode === 'field' ? fieldNotes.trim() : null,
           site_visits: initialVisits,
           overtime_hours: overtimeHours,
-          on_site: workMode === 'office' ? true : onSite,
+          on_site: workMode === 'office' ? false : onSite,
           overtime_approval: overtimeHours > 0 ? 'pending' : 'none',
         }
 
@@ -355,12 +356,12 @@ export default function AttendanceSelf() {
           lateMinutes,
           distanceMeters: distance,
           workMode,
-          matchedLocationName: matchedLoc?.name || (workMode === 'field' ? `Field: ${fieldClientName.trim()}` : undefined),
+          matchedLocationName: matchedLoc?.name || (workMode === 'field' ? `Field: ${fieldClientName.trim() || 'Field Site'}` : undefined),
           fieldClientName: workMode === 'field' ? fieldClientName.trim() : undefined,
           fieldNotes: workMode === 'field' ? fieldNotes.trim() : undefined,
           siteVisits: initialVisits,
           overtimeHours,
-          onSite: workMode === 'office' ? true : onSite,
+          onSite: workMode === 'office' ? false : onSite,
           overtimeApproval: overtimeHours > 0 ? 'pending' : 'none',
         } : d))
 
@@ -372,7 +373,7 @@ export default function AttendanceSelf() {
           msg += ` · ${now.getDay() === 6 ? 'Saturday Shift' : 'Sunday Emergency'}`
         }
         if (workMode === 'field') {
-          msg += ` · Field Work (${fieldClientName.trim()})`
+          msg += ` · Field Work (${fieldClientName.trim() || 'Field Site'})`
         } else if (matchedLoc) {
           msg += ` · ${matchedLoc.name}`
         }
@@ -903,8 +904,8 @@ export default function AttendanceSelf() {
   })
   const recentUnclosedDay = unclosedOrAutoDays[unclosedOrAutoDays.length - 1]
 
-  // Today's site visits
-  const todayVisits = todayRecord?.siteVisits || []
+  // Today's site visits (excluding routine office shift arrival)
+  const todayVisits = getExternalFieldVisits(todayRecord?.siteVisits, todayRecord?.workMode)
   const activeVisit = todayVisits.find(v => v.status === 'in_progress')
 
   // Month stats
@@ -914,7 +915,7 @@ export default function AttendanceSelf() {
   const totalLateMinutes = days.filter(d => d.status === 'present' && d.isLate).reduce((acc, d) => acc + (d.lateMinutes || 0), 0)
   const onLeave = days.filter(d => d.status === 'on_leave').length
   const otHours = days.filter(d => d.overtimeApproval === 'approved').reduce((a, d) => a + d.overtimeHours, 0)
-  const fieldDays = days.filter(d => d.status === 'present' && (d.workMode === 'field' || (d.siteVisits && d.siteVisits.length > 0))).length
+  const fieldDays = days.filter(d => d.status === 'present' && (d.workMode === 'field' || getExternalFieldVisits(d.siteVisits, d.workMode).length > 0)).length
 
   return (
     <div className="p-4 sm:p-6 anim-fade-up space-y-6">
@@ -980,6 +981,60 @@ export default function AttendanceSelf() {
         </div>
       )}
 
+      {/* ── Push Notification Banner / Quick Opt-In ── */}
+      {'Notification' in window && notifPermission !== 'granted' && (
+        <div className="bg-gradient-to-r from-blue-900/90 via-slate-900 to-indigo-950 text-white rounded-2xl p-4 sm:p-5 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-300 border border-blue-400/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            </div>
+            <div className="min-w-0">
+              <div className="font-bold text-sm text-white flex items-center gap-2 flex-wrap">
+                <span>Never Miss Daily Clock-In & Shift Closing</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900">
+                  {notifPermission === 'denied' ? 'Blocked in Browser' : 'Turn On Reminders'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                {notifPermission === 'denied'
+                  ? 'Notifications are currently blocked by your browser settings. To turn on reminders, click the lock/settings icon next to the URL in your browser address bar and set Notifications to "Allow".'
+                  : 'Get daily reminders directly on this phone/computer for morning clock-in (8:00 AM), 12:00 PM check-in, and 5:00 PM closing.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+            {notifPermission === 'denied' ? (
+              <button
+                type="button"
+                onClick={() => alert('To allow notifications:\n1. Look at your browser address bar at the top.\n2. Click the Lock or Settings icon on the left of the URL.\n3. Change "Notifications" from Block to Allow.\n4. Refresh the page.')}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                How to Unblock
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  const perm = await requestNotificationPermission()
+                  setNotifPermission(perm)
+                  if (perm === 'granted') {
+                    sendLocalNotification({
+                      title: '✅ Attendance Reminders Active',
+                      body: 'Shift reminders are now enabled on this device (8:00 AM arrival, 12:00 PM midday, 5:00 PM closing).',
+                      url: window.location.href,
+                    })
+                  }
+                }}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span>Turn On Notifications</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Real-Time Clock In / Out Hero Widget ── */}
       {isCurrentMonth && (
         <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 text-white rounded-2xl shadow-xl p-5 sm:p-7 border border-slate-700/50">
@@ -1020,6 +1075,26 @@ export default function AttendanceSelf() {
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/></svg>
                       {settings.office_locations.filter(l => l.is_active !== false).length} Active Branch{settings.office_locations.length > 1 ? 'es' : ''}
                     </span>
+                  </>
+                )}
+                {'Notification' in window && notifPermission === 'granted' && (
+                  <>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sendLocalNotification({
+                          title: '🔔 Shift Reminders Active',
+                          body: 'Attendance notifications are working properly on this device! Reminders scheduled for 8:00 AM, 12:00 PM, and 5:00 PM.',
+                          url: window.location.href,
+                        })
+                      }}
+                      className="text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-1 cursor-pointer"
+                      title="Click to test notification on this device"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>Reminders Active (Test)</span>
+                    </button>
                   </>
                 )}
               </div>
@@ -1527,7 +1602,10 @@ export default function AttendanceSelf() {
             const isWeekend = dow === 0 || dow === 6
             const isToday = day.date === todayStr
             const shouldShowStatus = day.status !== 'unmarked' && day.status !== 'weekend'
-            const visitsCount = day.siteVisits?.length || 0
+            const extVisits = getExternalFieldVisits(day.siteVisits, day.workMode)
+            const isFieldDay = day.workMode === 'field'
+            const visitsCount = isFieldDay ? Math.max(1, extVisits.length) : extVisits.length
+            const isSiteStop = visitsCount > 0
 
             return (
               <div key={day.date} className={`p-1.5 sm:p-2 border-r border-b border-slate-50 min-h-[76px] ${isToday ? 'bg-blue-50/60' : ''}`}>
@@ -1536,7 +1614,7 @@ export default function AttendanceSelf() {
                     {d}
                   </span>
                   {shouldShowStatus && (
-                    <span className={`w-2 h-2 rounded-full flex-none ${isWeekend ? 'bg-purple-500' : day.workMode === 'field' || visitsCount > 0 ? 'bg-amber-500' : day.isLate ? 'bg-amber-400' : STATUS_DOT[day.status]}`} />
+                    <span className={`w-2 h-2 rounded-full flex-none ${isWeekend ? 'bg-purple-500' : isSiteStop ? 'bg-blue-500' : day.isLate ? 'bg-amber-400' : STATUS_DOT[day.status]}`} />
                   )}
                 </div>
 
@@ -1545,13 +1623,13 @@ export default function AttendanceSelf() {
                     <div className={`text-[10px] px-1 py-0.5 rounded leading-tight text-center font-medium ${
                       isWeekend
                         ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                        : visitsCount > 0
-                        ? 'bg-amber-100 text-amber-900'
+                        : isSiteStop
+                        ? 'bg-blue-100 text-blue-900 border border-blue-200'
                         : day.isLate
                         ? 'bg-amber-100 text-amber-800'
                         : STATUS_BG[day.status]
                     }`}>
-                      {isWeekend ? (dow === 6 ? 'Saturday Shift' : 'Sunday Shift') : visitsCount > 1 ? `${visitsCount} Sites` : visitsCount === 1 ? '1 Site' : day.isLate ? `Late (${day.lateMinutes}m)` : STATUS_TEXT[day.status]}
+                      {isWeekend ? (dow === 6 ? 'Saturday Shift' : 'Sunday Shift') : isSiteStop ? (visitsCount > 1 ? `${visitsCount} Sites` : isFieldDay ? 'Field Work' : '1 Site') : day.isLate ? `Late (${day.lateMinutes}m)` : STATUS_TEXT[day.status]}
                     </div>
                     {day.clockInTime && (
                       <div className="text-[9px] text-slate-500 text-center font-mono">
@@ -1574,7 +1652,7 @@ export default function AttendanceSelf() {
 
                 <div className="flex gap-1 mt-1 flex-wrap justify-center">
                   {day.overtimeHours > 0 && <span className="text-violet-600 font-mono text-[9px] font-semibold">+{day.overtimeHours}h</span>}
-                  {visitsCount > 0 && <span className="text-amber-600 text-[9px] font-semibold">{visitsCount} stops</span>}
+                  {isSiteStop && <span className="text-blue-600 text-[9px] font-semibold">{visitsCount} stop{visitsCount > 1 ? 's' : ''}</span>}
                 </div>
               </div>
             )

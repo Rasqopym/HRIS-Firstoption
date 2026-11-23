@@ -33,7 +33,12 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 
 // Send local/native push notification (via Service Worker if active or native fallback)
 export async function sendLocalNotification(options: PushReminderOptions) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') {
+  if (!('Notification' in window)) {
+    return false
+  }
+
+  // If permission not granted, cannot display system notification
+  if (Notification.permission !== 'granted') {
     return false
   }
 
@@ -49,16 +54,23 @@ export async function sendLocalNotification(options: PushReminderOptions) {
   }
 
   try {
-    // Try to trigger through active Service Worker registration
+    // 1. Try Service Worker first with a strict timeout (never hangs if SW is inactive)
     if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready
-      if (reg && 'showNotification' in reg) {
-        await reg.showNotification(options.title, notificationOptions)
-        return true
+      try {
+        const reg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 600))
+        ])
+        if (reg && typeof reg.showNotification === 'function') {
+          await reg.showNotification(options.title, notificationOptions)
+          return true
+        }
+      } catch (swErr) {
+        console.warn('SW notification fallback to direct:', swErr)
       }
     }
 
-    // Direct Notification fallback
+    // 2. Direct Notification fallback
     new Notification(options.title, notificationOptions)
     return true
   } catch (e) {
@@ -112,7 +124,7 @@ export interface UnclockedStaffAlertResult {
   count: number
   names: string[]
   namesSummary: string
-  window: '12pm' | '3pm' | null
+  window: '12pm' | '3pm' | 'morning' | null
   todayStr: string
 }
 
@@ -149,27 +161,48 @@ export async function checkAndNotifyUnclockedStaff(
     return null
   }
 
-  // Determine time window: 12:00 PM (noon) alert vs 3:00 PM repeat reminder
+  // Determine time window: 12:00 PM (noon) alert vs 3:00 PM repeat reminder vs morning tracking
   const hours = now.getHours()
-  let alertWindow: '12pm' | '3pm' | null = null
+  let alertWindow: '12pm' | '3pm' | 'morning' | null = null
   if (hours >= 12 && hours < 15) {
     alertWindow = '12pm'
   } else if (hours >= 15) {
     alertWindow = '3pm'
+  } else if (hours >= 8) {
+    alertWindow = 'morning'
   } else {
-    // Before 12:00 PM
+    // Before 8:00 AM
     return null
   }
 
   try {
-    // 1. Fetch active staff
+    // 1. Fetch active staff with fallback to profiles
     const { data: staffList, error: staffErr } = await supabase
       .from('staff')
       .select('id, staff_code, full_name, profile_id, email, date_employed, created_at')
       .eq('status', 'active')
       .order('full_name')
 
-    if (staffErr || !staffList || staffList.length === 0) {
+    let effectiveStaff = staffList || []
+    if (staffErr || effectiveStaff.length === 0) {
+      const { data: pData } = await supabase
+        .from('profiles')
+        .select('id, full_name, role, status, email, created_at')
+      if (pData && pData.length > 0) {
+        effectiveStaff = pData
+          .filter((p: any) => p.status === 'active' || !p.status)
+          .map((p: any) => ({
+            id: p.id,
+            staff_code: p.id.slice(0, 6).toUpperCase(),
+            full_name: p.full_name || p.email,
+            profile_id: p.id,
+            email: p.email,
+            created_at: p.created_at,
+          }))
+      }
+    }
+
+    if (effectiveStaff.length === 0) {
       return null
     }
 
@@ -204,7 +237,7 @@ export async function checkAndNotifyUnclockedStaff(
     }
 
     // 4. Identify unclocked active staff
-    const unclockedStaff = staffList.filter((st: any) => {
+    const unclockedStaff = effectiveStaff.filter((st: any) => {
       // Must be employed as of today
       const empDate = st.date_employed || (st.created_at ? st.created_at.slice(0, 10) : null)
       if (empDate && empDate > todayStr) {
@@ -253,24 +286,26 @@ export async function checkAndNotifyUnclockedStaff(
       ? names.join(', ')
       : `${names.slice(0, 3).join(', ')} and ${names.length - 3} other${names.length - 3 > 1 ? 's' : ''}`
 
-    // 5. Send local push notification once per window
-    const remindKey = `hris_remind_unclocked_${alertWindow}_${todayStr}`
-    if (!localStorage.getItem(remindKey)) {
-      const isRepeat = alertWindow === '3pm'
-      const title = isRepeat
-        ? '⏰ 3:00 PM Attendance Reminder: Still Unclocked'
-        : '⏰ 12:00 PM Attendance Alert: Unclocked Staff'
-      const body = isRepeat
-        ? `${names.length} staff member${names.length > 1 ? 's' : ''} still have not clocked in today: ${namesSummary}. Tap to view attendance.`
-        : `${names.length} staff member${names.length > 1 ? 's' : ''} have not clocked in today: ${namesSummary}. Tap to view attendance.`
+    // 5. Send local push notification once per window (only for 12:00 PM and 3:00 PM windows)
+    if (alertWindow === '12pm' || alertWindow === '3pm') {
+      const remindKey = `hris_remind_unclocked_${alertWindow}_${todayStr}`
+      if (!localStorage.getItem(remindKey)) {
+        const isRepeat = alertWindow === '3pm'
+        const title = isRepeat
+          ? '⏰ 3:00 PM Attendance Reminder: Still Unclocked'
+          : '⏰ 12:00 PM Attendance Alert: Unclocked Staff'
+        const body = isRepeat
+          ? `${names.length} staff member${names.length > 1 ? 's' : ''} still have not clocked in today: ${namesSummary}. Tap to view attendance.`
+          : `${names.length} staff member${names.length > 1 ? 's' : ''} have not clocked in today: ${namesSummary}. Tap to view attendance.`
 
-      sendLocalNotification({
-        title,
-        body,
-        tag: `unclocked-staff-${alertWindow}-${todayStr}`,
-        url: '/#hr-attendance-daily'
-      })
-      localStorage.setItem(remindKey, 'true')
+        sendLocalNotification({
+          title,
+          body,
+          tag: `unclocked-staff-${alertWindow}-${todayStr}`,
+          url: '/#hr-attendance-daily'
+        })
+        localStorage.setItem(remindKey, 'true')
+      }
     }
 
     return {
@@ -302,10 +337,17 @@ export function runRoutineReminders(role: string, customHolidays: any[] = [], cu
   // Check live attendance status from localStorage for the current staff member
   let isClockedInToday = false
   let isClockedOutToday = false
-  if (currentStaffId) {
+  const candidateStaffKeys = [
+    currentStaffId,
+    localStorage.getItem('hris_last_active_staff_id'),
+    localStorage.getItem('hris_staff_code'),
+    localStorage.getItem('hris_active_staff_id'),
+  ].filter(Boolean) as string[]
+
+  for (const cid of candidateStaffKeys) {
     const keys = [
-      `hris_self_attendance_${currentStaffId}`,
-      `hris_attendance_daily_${currentStaffId}`
+      `hris_self_attendance_${cid}`,
+      `hris_attendance_daily_${cid}`
     ]
     for (const k of keys) {
       try {
@@ -320,25 +362,50 @@ export function runRoutineReminders(role: string, customHolidays: any[] = [], cu
         }
       } catch {}
     }
+    if (isClockedInToday) break
   }
 
-  // 1. Staff Morning Clock-In Reminder (8:00 AM - 9:30 AM on weekdays)
-  // Only remind if they haven't already clocked in today
+  // 1. Staff Clock-In Reminders (Weekdays: Mon-Fri)
   if (dow !== 0 && dow !== 6) {
-    if (!isClockedInToday && (hours === 8 || (hours === 9 && minutes <= 30)) && !getReminded('morning_clockin')) {
-      sendLocalNotification({
-        title: 'Good Morning! ⏰ Shift Clock-In',
-        body: 'Remember to clock in for your workday shift and verify your workplace location.',
-        tag: 'morning-clockin',
-        url: '/#st-attendance'
-      })
-      setReminded('morning_clockin')
+    if (!isClockedInToday) {
+      // A. Morning Shift Clock-In (8:00 AM - 9:30 AM)
+      if ((hours === 8 || (hours === 9 && minutes <= 30)) && !getReminded('morning_clockin')) {
+        sendLocalNotification({
+          title: 'Good Morning! ⏰ Shift Clock-In',
+          body: 'Remember to clock in for your workday shift and verify your workplace location.',
+          tag: 'morning-clockin',
+          url: '/#st-attendance'
+        })
+        setReminded('morning_clockin')
+      }
+
+      // B. Late Morning Shift Clock-In Nudge (9:31 AM - 12:00 PM)
+      if (((hours === 9 && minutes > 30) || (hours >= 10 && hours < 12)) && !getReminded('late_morning_clockin')) {
+        sendLocalNotification({
+          title: 'Shift Clock-In Pending ⚠️',
+          body: 'You have not clocked in for work today. Please clock in on your dashboard to mark your attendance.',
+          tag: 'late-morning-clockin',
+          url: '/#st-attendance'
+        })
+        setReminded('late_morning_clockin')
+      }
+
+      // C. Midday Clock-In Alert (12:01 PM - 3:30 PM)
+      if (hours >= 12 && hours <= 15 && !getReminded('midday_clockin')) {
+        sendLocalNotification({
+          title: 'Midday Attendance Notice ⏰',
+          body: 'You are still marked unclocked for today. Remember to record your work attendance or log field visits.',
+          tag: 'midday-clockin',
+          url: '/#st-attendance'
+        })
+        setReminded('midday_clockin')
+      }
     }
 
     // 2. Evening Clock-Out Reminders (Only for staff who clocked in but haven't clocked out)
     if (isClockedInToday && !isClockedOutToday) {
-      // A. Shift End Alert (4:55 PM - 5:25 PM)
-      if (((hours === 16 && minutes >= 55) || (hours === 17 && minutes <= 25)) && !getReminded('closing_clockout')) {
+      // A. Shift End Alert (4:30 PM - 5:45 PM)
+      if (((hours === 16 && minutes >= 30) || (hours === 17 && minutes <= 45)) && !getReminded('closing_clockout')) {
         sendLocalNotification({
           title: 'Workday Closing: Clock-Out Reminder ⏰',
           body: 'Ready to head out? Remember to clock out on your dashboard before leaving the office.',
@@ -348,8 +415,8 @@ export function runRoutineReminders(role: string, customHolidays: any[] = [], cu
         setReminded('closing_clockout')
       }
 
-      // B. Second Nudge if still clocked in after hours (6:00 PM - 6:45 PM)
-      if ((hours === 18 && minutes >= 0 && minutes <= 45) && !getReminded('evening_still_in')) {
+      // B. Second Nudge if still clocked in after hours (6:00 PM - 7:00 PM)
+      if (hours === 18 && !getReminded('evening_still_in')) {
         sendLocalNotification({
           title: 'Still Clocked In? 🕒',
           body: 'You are currently still clocked in for today. If you have finished work, please remember to clock out!',
@@ -360,7 +427,7 @@ export function runRoutineReminders(role: string, customHolidays: any[] = [], cu
       }
 
       // C. Late Evening Final Notice before auto-clockout cutoff (8:00 PM - 8:45 PM)
-      if ((hours === 20 && minutes >= 0 && minutes <= 45) && !getReminded('night_pending_clockout')) {
+      if (hours === 20 && minutes <= 45 && !getReminded('night_pending_clockout')) {
         sendLocalNotification({
           title: 'Unclosed Shift Notice ⚠️',
           body: 'You have not clocked out today. Open shifts will be automatically closed at official close (5:00 PM).',

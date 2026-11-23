@@ -15,6 +15,131 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
     <title><!-- figma:title --></title>
     <!-- figma:head-end -->
+
+    <!-- Legacy iOS & Safari 15 Runtime Polyfills & Crash Protection -->
+    <script>
+      (function() {
+        // 1. globalThis polyfill (Safari < 12.1)
+        if (typeof globalThis === 'undefined') {
+          window.globalThis = window;
+        }
+
+        // 2. crypto.randomUUID polyfill (missing on Safari < 15.4 / iOS 15.0-15.3)
+        if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
+          crypto.randomUUID = function() {
+            return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, function(c) {
+              return (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16);
+            });
+          };
+        }
+
+        // 3. Array.prototype.at & String.prototype.at (missing on Safari < 15.4)
+        if (!Array.prototype.at) {
+          Array.prototype.at = function(n) {
+            n = Math.trunc(n) || 0;
+            if (n < 0) n += this.length;
+            if (n < 0 || n >= this.length) return undefined;
+            return this[n];
+          };
+        }
+        if (!String.prototype.at) {
+          String.prototype.at = function(n) {
+            n = Math.trunc(n) || 0;
+            if (n < 0) n += this.length;
+            if (n < 0 || n >= this.length) return undefined;
+            return this.charAt(n);
+          };
+        }
+
+        // 4. Object.hasOwn polyfill (missing on Safari < 15.4)
+        if (!Object.hasOwn) {
+          Object.hasOwn = function(obj, prop) {
+            return Object.prototype.hasOwnProperty.call(obj, prop);
+          };
+        }
+
+        // 5. structuredClone polyfill (missing on Safari < 15.4)
+        if (typeof window.structuredClone !== 'function') {
+          window.structuredClone = function(val) {
+            if (val === undefined) return undefined;
+            try {
+              return JSON.parse(JSON.stringify(val));
+            } catch (err) {
+              return val;
+            }
+          };
+        }
+
+        // 6. Array.prototype.findLast & findLastIndex (missing on Safari < 15.4)
+        if (!Array.prototype.findLast) {
+          Array.prototype.findLast = function(predicate) {
+            for (var i = this.length - 1; i >= 0; i--) {
+              if (predicate(this[i], i, this)) return this[i];
+            }
+            return undefined;
+          };
+        }
+        if (!Array.prototype.findLastIndex) {
+          Array.prototype.findLastIndex = function(predicate) {
+            for (var i = this.length - 1; i >= 0; i--) {
+              if (predicate(this[i], i, this)) return i;
+            }
+            return -1;
+          };
+        }
+
+        // 7. Promise.allSettled (Safari < 13)
+        if (!Promise.allSettled) {
+          Promise.allSettled = function(promises) {
+            return Promise.all(promises.map(function(p) {
+              return Promise.resolve(p).then(
+                function(value) { return { status: 'fulfilled', value: value }; },
+                function(reason) { return { status: 'rejected', reason: reason }; }
+              );
+            }));
+          };
+        }
+
+        // 8. Early Error & Blank-Screen Guardian for Mobile Safari
+        var caughtError = null;
+        window.addEventListener('error', function(e) {
+          console.error('Captured early script error:', e);
+          caughtError = e.message || 'Script initialization error';
+          renderFallbackIfNeeded();
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+          console.error('Captured unhandled promise rejection:', e);
+          caughtError = (e.reason && (e.reason.message || String(e.reason))) || 'Promise rejection';
+          renderFallbackIfNeeded();
+        });
+
+        function renderFallbackIfNeeded() {
+          var root = document.getElementById('root');
+          // Only show fallback if React hasn't rendered any DOM tree
+          if (root && (!root.firstElementChild || root.innerHTML.trim() === '')) {
+            root.innerHTML = '' +
+              '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;padding:24px;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;color:#f8fafc;box-sizing:border-box;">' +
+                '<div style="background:#1e293b;border:1px solid #334155;border-radius:20px;padding:28px 24px;max-width:380px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">' +
+                  '<div style="width:48px;height:48px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#60a5fa;font-weight:bold;font-size:22px;">⚡</div>' +
+                  '<h2 style="font-size:18px;font-weight:700;margin:0 0 8px;color:#ffffff;">HRIS Portal</h2>' +
+                  '<p style="font-size:13px;line-height:1.5;color:#94a3b8;margin:0 0 20px;">The app encountered an initial loading delay on this device. Tap below to reload fresh assets.</p>' +
+                  (caughtError ? '<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;padding:10px 12px;border-radius:10px;font-size:11px;font-family:monospace;word-break:break-word;margin-bottom:18px;text-align:left;">' + caughtError + '</div>' : '') +
+                  '<button onclick="window.location.reload(true)" style="width:100%;padding:12px;background:#2563eb;color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;">Reload App</button>' +
+                  '<button onclick="if(\'caches\' in window){caches.keys().then(function(k){return Promise.all(k.map(function(n){return caches.delete(n);}))}).then(function(){window.location.reload(true);});}else{window.location.reload(true);}" style="width:100%;padding:10px;background:transparent;color:#94a3b8;border:1px solid #475569;border-radius:12px;font-size:12px;font-weight:500;cursor:pointer;">Clear Cache & Reload</button>' +
+                '</div>' +
+              '</div>';
+          }
+        }
+
+        // Timeout check: If after 6 seconds #root is still completely empty, render fallback
+        setTimeout(function() {
+          var root = document.getElementById('root');
+          if (root && (!root.firstElementChild || root.innerHTML.trim() === '')) {
+            renderFallbackIfNeeded();
+          }
+        }, 6000);
+      })();
+    </script>
   </head>
   <body>
     <!-- figma:body-start -->
