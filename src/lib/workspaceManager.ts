@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { safeSetItem, sanitizeForCache } from './storageHelper'
 import type {
   Workspace,
   WorkspaceMember,
@@ -217,7 +218,7 @@ export async function fetchWorkspaceLatestActivityMap(): Promise<Record<string, 
           localMap[wsId] = Math.max(localMap[wsId] || 0, t)
         }
       })
-      localStorage.setItem(LOCAL_WS_ACTIVITY_KEY, JSON.stringify(localMap))
+      safeSetItem(LOCAL_WS_ACTIVITY_KEY, JSON.stringify(localMap))
     }
   } catch (err) {
     console.warn('Could not fetch workspace latest messages:', err)
@@ -263,7 +264,7 @@ export async function getWorkspaces(): Promise<Workspace[]> {
 
     const activityMap = await fetchWorkspaceLatestActivityMap()
     const sorted = sortWorkspacesByLatestActivity(cleaned, activityMap)
-    localStorage.setItem(LOCAL_WORKSPACE_KEY, JSON.stringify(sorted))
+    safeSetItem(LOCAL_WORKSPACE_KEY, JSON.stringify(sorted))
     return sorted
   } catch {
     const cached = localStorage.getItem(LOCAL_WORKSPACE_KEY)
@@ -654,7 +655,7 @@ export async function getChannelMessages(channelId: string, limit: number = 50):
     }
     combined.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
-    localStorage.setItem(`${LOCAL_MESSAGES_KEY}_${channelId}`, JSON.stringify(combined))
+    safeSetItem(`${LOCAL_MESSAGES_KEY}_${channelId}`, JSON.stringify(sanitizeForCache(combined.slice(-30))))
     return combined
   } catch {
     const cached = localStorage.getItem(`${LOCAL_MESSAGES_KEY}_${channelId}`)
@@ -739,7 +740,7 @@ export async function sendChatMessage(msg: {
     const key = `${LOCAL_MESSAGES_KEY}_${msg.channel_id}`
     const existing: ChatMessage[] = JSON.parse(localStorage.getItem(key) || '[]')
     if (!existing.some(m => m.id === result.id)) {
-      localStorage.setItem(key, JSON.stringify([...existing, result]))
+      safeSetItem(key, JSON.stringify(sanitizeForCache([...existing, result].slice(-30))))
     }
   } catch {}
 
@@ -823,7 +824,7 @@ export async function getWorkspaceTasks(workspaceId?: string, teamId?: string): 
       } : undefined,
     }))
 
-    localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(formatted))
+    safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(formatted)))
     return formatted
   } catch {
     const cached = localStorage.getItem(LOCAL_TASKS_KEY)
@@ -978,7 +979,7 @@ export async function createWorkspaceTask(task: Partial<WorkspaceTask>): Promise
       team: task.team,
     }
     const currentList = JSON.parse(localStorage.getItem(LOCAL_TASKS_KEY) || '[]')
-    localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify([fallback, ...currentList]))
+    safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache([fallback, ...currentList])))
     try {
       window.dispatchEvent(new CustomEvent('workspace_task_created', { detail: fallback }))
     } catch {}
@@ -1014,7 +1015,7 @@ export async function updateTaskStatus(taskId: string, status: WorkspaceTask['st
     if (idx !== -1) {
       const currentTask = list[idx]
       list[idx] = { ...currentTask, ...updates }
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
 
       // If task is completed and is recurring, auto-schedule next occurrence
       if (status === 'done' && currentTask.is_recurring && currentTask.recurrence_interval && currentTask.recurrence_interval !== 'none') {
@@ -1077,7 +1078,7 @@ export async function updateWorkspaceTask(
     if (idx !== -1) {
       list[idx] = { ...list[idx], ...updates, updated_at: new Date().toISOString() }
       updated = list[idx]
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
     }
   } catch {}
 
@@ -1098,7 +1099,7 @@ export async function deleteWorkspaceTask(taskId: string): Promise<void> {
   try {
     const list: WorkspaceTask[] = JSON.parse(localStorage.getItem(LOCAL_TASKS_KEY) || '[]')
     const filtered = list.filter(t => t.id !== taskId)
-    localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(filtered))
+    safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(filtered)))
   } catch {}
 
   try {
@@ -1140,7 +1141,7 @@ export async function addTaskComment(
       const comments = task.comments || []
       const updatedComments = [...comments, newComment]
       list[idx] = { ...task, comments: updatedComments, updated_at: new Date().toISOString() }
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
 
       // Also try saving to Supabase
       try {
@@ -1167,7 +1168,7 @@ export async function deleteTaskComment(taskId: string, commentId: string): Prom
       const task = list[idx]
       const comments = (task.comments || []).filter(c => c.id !== commentId)
       list[idx] = { ...task, comments, updated_at: new Date().toISOString() }
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
 
       try {
         await supabase.from('tasks').update({
@@ -1210,7 +1211,7 @@ export function startTaskTimer(timerData: {
     startTime: Date.now(),
     isRunning: true,
   }
-  localStorage.setItem(LOCAL_ACTIVE_TIMER_KEY, JSON.stringify(timer))
+  safeSetItem(LOCAL_ACTIVE_TIMER_KEY, JSON.stringify(timer))
   try {
     window.dispatchEvent(new CustomEvent('task_timer_updated', { detail: timer }))
   } catch {}
@@ -1271,7 +1272,7 @@ export async function stopTaskTimer(notes?: string): Promise<{ timeLog: TaskTime
         updated_at: new Date().toISOString(),
       }
       updatedTask = list[idx]
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
 
       try {
         await supabase.from('tasks').update({
@@ -1348,7 +1349,7 @@ export async function logTaskTimeManually(
         updated_at: new Date().toISOString(),
       }
       updatedTask = list[idx]
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
 
       try {
         await supabase.from('tasks').update({
@@ -1387,7 +1388,7 @@ export async function deleteTaskTimeLog(taskId: string, logId: string): Promise<
         time_logs: logs,
         updated_at: new Date().toISOString(),
       }
-      localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(list))
+      safeSetItem(LOCAL_TASKS_KEY, JSON.stringify(sanitizeForCache(list)))
 
       try {
         await supabase.from('tasks').update({
@@ -1916,7 +1917,7 @@ export async function getTeamMembers(teamId: string): Promise<TeamMember[]> {
       staff: staffMap[m.staff_id] || undefined,
     }))
 
-    localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(members))
+    safeSetItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(members))
     return members
   } catch {
     const cached = localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`)
@@ -1971,7 +1972,7 @@ export async function addTeamMember(
     const cached: TeamMember[] = JSON.parse(localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`) || '[]')
     const filtered = cached.filter(m => m.staff_id !== staffId && m.staff_id !== effectiveStaffId && m.staff?.id !== staffId && m.staff?.id !== effectiveStaffId)
     const updated = [...filtered, newMember]
-    localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
+    safeSetItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
   } catch {}
 
   return newMember
@@ -2006,7 +2007,7 @@ export async function updateTeamMemberRole(
   try {
     const cached: TeamMember[] = JSON.parse(localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`) || '[]')
     const updated = cached.map(m => (m.staff_id === staffId || m.staff_id === effectiveStaffId || m.staff?.id === staffId || m.staff?.id === effectiveStaffId) ? { ...m, role } : m)
-    localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
+    safeSetItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
   } catch {}
 }
 
@@ -2026,7 +2027,7 @@ export async function removeTeamMember(teamId: string, staffId: string): Promise
   try {
     const cached: TeamMember[] = JSON.parse(localStorage.getItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`) || '[]')
     const updated = cached.filter(m => m.staff_id !== staffId && m.staff_id !== effectiveStaffId && m.staff?.id !== staffId && m.staff?.id !== effectiveStaffId)
-    localStorage.setItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
+    safeSetItem(`${LOCAL_TEAM_MEMBERS_KEY}_${teamId}`, JSON.stringify(updated))
   } catch {}
 }
 
