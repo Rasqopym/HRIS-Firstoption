@@ -3,6 +3,7 @@ import type { Role, Page } from './types'
 import { supabase } from './lib/supabase'
 import { dbRoleToApp, appRoleToDb } from './lib/roleMap'
 import { isPasswordRecoveryUrl, establishRecoverySession } from './lib/authRecovery'
+import { autoPruneStorage } from './lib/storageHelper'
 
 import Login from './pages/Login'
 import Layout from './components/Layout'
@@ -131,6 +132,7 @@ export default function App() {
   }
 
   useEffect(() => {
+    autoPruneStorage()
     const restoreSession = async () => {
       try {
         if (isPasswordRecoveryUrl()) {

@@ -38,6 +38,7 @@ import {
   sortWorkspacesByLatestActivity,
 } from '../../lib/workspaceManager'
 import { uploadCompressedImage, formatFileSize, extractClipboardImage } from '../../lib/imageCompressor'
+import { safeSetItem, safeGetItem } from '../../lib/storageHelper'
 import { extractTaskFromMessage, ExtractedTaskDraft } from '../../lib/taskExtractor'
 import { staff as mockStaff } from '../../data/mock'
 import { supabase } from '../../lib/supabase'
@@ -268,20 +269,20 @@ export default function WorkspaceHub({
   // Persist active workspace to localStorage so refreshes always return to the same workspace
   useEffect(() => {
     if (selectedWorkspace?.id) {
-      localStorage.setItem('hris_last_active_workspace_id', selectedWorkspace.id)
+      safeSetItem('hris_last_active_workspace_id', selectedWorkspace.id)
     }
   }, [selectedWorkspace?.id])
 
   // Persist active squad and channel per workspace
   useEffect(() => {
     if (selectedTeam?.id && selectedWorkspace?.id) {
-      localStorage.setItem(`hris_last_active_team_id_${selectedWorkspace.id}`, selectedTeam.id)
+      safeSetItem(`hris_last_active_team_id_${selectedWorkspace.id}`, selectedTeam.id)
     }
   }, [selectedTeam?.id, selectedWorkspace?.id])
 
   useEffect(() => {
     if (selectedChannel?.id && selectedTeam?.id) {
-      localStorage.setItem(`hris_last_active_channel_id_${selectedTeam.id}`, selectedChannel.id)
+      safeSetItem(`hris_last_active_channel_id_${selectedTeam.id}`, selectedChannel.id)
     }
   }, [selectedChannel?.id, selectedTeam?.id])
 
